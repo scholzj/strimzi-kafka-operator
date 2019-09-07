@@ -15,5 +15,9 @@ jobs:
         java-version: 1.8
     - name: Build with Maven
       run: mvn -DskipTests package
-    - name: Check docs
+    - name: Ls
+      run: ls -l
+    - name: Check docs I
+      run: .travis/check_docs.sh
+    - name: Check docs II
       run: make docu_check
