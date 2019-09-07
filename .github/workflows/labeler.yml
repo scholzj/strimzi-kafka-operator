@@ -13,3 +13,5 @@ jobs:
         repo-token: "${{ secrets.GITHUB_TOKEN }}"
     - name: Assign labels based on size
       uses: pascalgn/size-label-action@v0.0.6
+      with:
+        repo-token: "${{ secrets.GITHUB_TOKEN }}"
