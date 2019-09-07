@@ -26,7 +26,7 @@ import java.util.function.Consumer;
 /**
  * An "operator" for managing assemblies of various types <em>in a particular namespace</em>.
  * The Cluster Operator's multiple namespace support is achieved by deploying multiple
- * {@link ClusterOperator}'s in Vertx.
+ * {@link ClusterOperator}'s in Vertx. wfbsdfsdfh
  */
 public class ClusterOperator extends AbstractVerticle {
 
