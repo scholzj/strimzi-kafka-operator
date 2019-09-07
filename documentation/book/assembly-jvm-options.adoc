@@ -25,8 +25,6 @@ The following components of {ProductName} run inside a Virtual Machine (VM):
 JVM configuration options optimize the performance for different platforms and architectures.
 {ProductName} allows you to configure some of these options.
 
-e.g.: Don't do this!
-
 include::ref-jvm-options.adoc[leveloffset=+1]
 
 include::proc-configuring-jvm-options.adoc[leveloffset=+1]
