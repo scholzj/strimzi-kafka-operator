@@ -4,12 +4,12 @@
  */
 package io.strimzi.api.kafka.model.template;
 
-import com.fasterxml.jackson.annotation.JsonAnyGetter;
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.strimzi.api.kafka.model.UnknownPropertyPreserving;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.sundr.builder.annotations.Buildable;
+import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -26,13 +26,15 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
         "deployment", "pod", "apiService"})
-public class KafkaConnectTemplate implements Serializable {
+@EqualsAndHashCode
+public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
 
     private ResourceTemplate deployment;
     private PodTemplate pod;
     private ResourceTemplate apiService;
     private PodDisruptionBudgetTemplate podDisruptionBudget;
+    private ContainerTemplate connectContainer;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for Kafka Connect `Deployment`.")
@@ -75,12 +77,22 @@ public class KafkaConnectTemplate implements Serializable {
         this.podDisruptionBudget = podDisruptionBudget;
     }
 
-    @JsonAnyGetter
+    @Description("Template for the Kafka Connect container")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ContainerTemplate getConnectContainer() {
+        return connectContainer;
+    }
+
+    public void setConnectContainer(ContainerTemplate connectContainer) {
+        this.connectContainer = connectContainer;
+    }
+
+    @Override
     public Map<String, Object> getAdditionalProperties() {
         return this.additionalProperties;
     }
 
-    @JsonAnySetter
+    @Override
     public void setAdditionalProperty(String name, Object value) {
         this.additionalProperties.put(name, value);
     }

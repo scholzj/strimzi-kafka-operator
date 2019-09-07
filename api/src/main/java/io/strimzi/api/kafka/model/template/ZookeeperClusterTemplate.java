@@ -4,12 +4,12 @@
  */
 package io.strimzi.api.kafka.model.template;
 
-import com.fasterxml.jackson.annotation.JsonAnyGetter;
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.strimzi.api.kafka.model.UnknownPropertyPreserving;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.sundr.builder.annotations.Buildable;
+import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -25,15 +25,20 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
-        "statefulset", "pod", "clientService", "nodesService"})
-public class ZookeeperClusterTemplate implements Serializable {
+        "statefulset", "pod", "clientService", "nodesService", "persistentVolumeClaim",
+        "podDisruptionBudget", "zookeeperContainer", "tlsSidecarContainer"})
+@EqualsAndHashCode
+public class ZookeeperClusterTemplate implements Serializable, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
 
     private ResourceTemplate statefulset;
     private PodTemplate pod;
     private ResourceTemplate clientService;
     private ResourceTemplate nodesService;
+    private ResourceTemplate persistentVolumeClaim;
     private PodDisruptionBudgetTemplate podDisruptionBudget;
+    private ContainerTemplate zookeeperContainer;
+    private ContainerTemplate tlsSidecarContainer;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for Zookeeper `StatefulSet`.")
@@ -76,6 +81,16 @@ public class ZookeeperClusterTemplate implements Serializable {
         this.nodesService = nodesService;
     }
 
+    @Description("Template for all Zookeeper `PersistentVolumeClaims`.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ResourceTemplate getPersistentVolumeClaim() {
+        return persistentVolumeClaim;
+    }
+
+    public void setPersistentVolumeClaim(ResourceTemplate persistentVolumeClaim) {
+        this.persistentVolumeClaim = persistentVolumeClaim;
+    }
+
     @Description("Template for Zookeeper `PodDisruptionBudget`.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     public PodDisruptionBudgetTemplate getPodDisruptionBudget() {
@@ -86,12 +101,32 @@ public class ZookeeperClusterTemplate implements Serializable {
         this.podDisruptionBudget = podDisruptionBudget;
     }
 
-    @JsonAnyGetter
+    @Description("Template for the Zookeeper container")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ContainerTemplate getZookeeperContainer() {
+        return zookeeperContainer;
+    }
+
+    public void setZookeeperContainer(ContainerTemplate zookeeperContainer) {
+        this.zookeeperContainer = zookeeperContainer;
+    }
+
+    @Description("Template for the Kafka broker TLS sidecar container")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ContainerTemplate getTlsSidecarContainer() {
+        return tlsSidecarContainer;
+    }
+
+    public void setTlsSidecarContainer(ContainerTemplate tlsSidecarContainer) {
+        this.tlsSidecarContainer = tlsSidecarContainer;
+    }
+
+    @Override
     public Map<String, Object> getAdditionalProperties() {
         return this.additionalProperties;
     }
 
-    @JsonAnySetter
+    @Override
     public void setAdditionalProperty(String name, Object value) {
         this.additionalProperties.put(name, value);
     }

@@ -30,11 +30,10 @@ class MockZk implements Zk {
         }
     }
 
-    public void triggerData(AsyncResult<byte[]> dataResult) {
-        if (!dataHandlers.isEmpty()) {
-            for (Handler<AsyncResult<byte[]>> handler: dataHandlers.values()) {
-                handler.handle(dataResult);
-            }
+    public void triggerData(String path, AsyncResult<byte[]> dataResult) {
+        Handler<AsyncResult<byte[]>> asyncResultHandler = dataHandlers.get(path);
+        if (asyncResultHandler != null) {
+            asyncResultHandler .handle(dataResult);
         }
     }
 
@@ -63,9 +62,9 @@ class MockZk implements Zk {
     }
 
     @Override
-    public Zk watchChildren(String path, Handler<AsyncResult<List<String>>> watcher) {
+    public Future<Zk> watchChildren(String path, Handler<AsyncResult<List<String>>> watcher) {
         childrenHandler = watcher;
-        return this;
+        return Future.succeededFuture(this);
     }
 
     @Override
@@ -81,9 +80,9 @@ class MockZk implements Zk {
     }
 
     @Override
-    public Zk watchData(String path, Handler<AsyncResult<byte[]>> watcher) {
+    public Future<Zk> watchData(String path, Handler<AsyncResult<byte[]>> watcher) {
         dataHandlers.put(path, watcher);
-        return this;
+        return Future.succeededFuture(this);
     }
 
     @Override

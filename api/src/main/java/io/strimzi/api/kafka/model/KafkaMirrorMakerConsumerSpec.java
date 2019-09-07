@@ -11,6 +11,8 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.Minimum;
 import io.sundr.builder.annotations.Buildable;
+import lombok.EqualsAndHashCode;
+
 import java.util.Map;
 
 @Buildable(
@@ -19,18 +21,22 @@ import java.util.Map;
         builderPackage = "io.fabric8.kubernetes.api.builder"
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonPropertyOrder({"numStreams", "groupId", "bootstrapServers", "logging"})
+@JsonPropertyOrder({"numStreams", "offsetCommitInterval", "groupId", "bootstrapServers", "logging"})
+@EqualsAndHashCode(callSuper = true)
 public class KafkaMirrorMakerConsumerSpec extends KafkaMirrorMakerClientSpec {
     private static final long serialVersionUID = 1L;
 
-    public static final String FORBIDDEN_PREFIXES = "ssl., bootstrap.servers, group.id, sasl., security.";
+    public static final String FORBIDDEN_PREFIXES = "ssl., bootstrap.servers, group.id, sasl., security., interceptor.classes";
+    public static final String FORBIDDEN_PREFIX_EXCEPTIONS = "ssl.endpoint.identification.algorithm";
 
     private Integer numStreams;
 
     private String groupId;
 
+    private Integer offsetCommitInterval;
+
     @Override
-    @Description("The mirror maker consumer config. Properties with the following prefixes cannot be set: " + FORBIDDEN_PREFIXES)
+    @Description("The Mirror Maker consumer config. Properties with the following prefixes cannot be set: " + FORBIDDEN_PREFIXES)
     public Map<String, Object> getConfig() {
         return config;
     }
@@ -54,5 +60,15 @@ public class KafkaMirrorMakerConsumerSpec extends KafkaMirrorMakerClientSpec {
 
     public void setGroupId(String groupId) {
         this.groupId = groupId;
+    }
+
+    @Description("Specifies the offset auto-commit interval in ms. Default value is 60000.")
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    public Integer getOffsetCommitInterval() {
+        return offsetCommitInterval;
+    }
+
+    public void setOffsetCommitInterval(Integer offsetCommitInterval) {
+        this.offsetCommitInterval = offsetCommitInterval;
     }
 }

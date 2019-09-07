@@ -5,10 +5,12 @@
 package io.strimzi.operator.cluster.model;
 
 import io.fabric8.kubernetes.api.model.Container;
+import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.EntityOperatorSpec;
 import io.strimzi.api.kafka.model.EntityOperatorSpecBuilder;
 import io.strimzi.api.kafka.model.EntityTopicOperatorSpec;
@@ -21,6 +23,7 @@ import io.strimzi.api.kafka.model.ProbeBuilder;
 import io.strimzi.api.kafka.model.TlsSidecar;
 import io.strimzi.api.kafka.model.TlsSidecarBuilder;
 import io.strimzi.api.kafka.model.TlsSidecarLogLevel;
+import io.strimzi.api.kafka.model.template.ContainerTemplate;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.test.TestUtils;
 import org.junit.AfterClass;
@@ -28,18 +31,29 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.io.StringReader;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import static io.strimzi.test.TestUtils.map;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonList;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class EntityOperatorTest {
+
+    private static final KafkaVersion.Lookup VERSIONS = new KafkaVersion.Lookup(new StringReader(
+            "2.0.0 default 2.0 2.0 1234567890abcdef 2.0.x\n" +
+            "2.1.0         2.1 2.0 1234567890abcdef 2.1.x"),
+            map("2.0.0", "strimzi/kafka:latest-kafka-2.0.0",
+                    "2.1.0", "strimzi/kafka:latest-kafka-2.1.0"), emptyMap(), emptyMap(), emptyMap()) { };
 
     static Map<String, String> volumeMounts(List<VolumeMount> mounts) {
         return mounts.stream().collect(Collectors.toMap(vm -> vm.getName(), vm -> vm.getMountPath()));
@@ -76,12 +90,12 @@ public class EntityOperatorTest {
                     .endSpec()
                     .build();
 
-    private final EntityOperator entityOperator = EntityOperator.fromCrd(resource);
+    private final EntityOperator entityOperator = EntityOperator.fromCrd(resource, VERSIONS);
 
     @Test
     public void testGenerateDeployment() {
 
-        Deployment dep = entityOperator.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = entityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null);
 
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
 
@@ -97,7 +111,7 @@ public class EntityOperatorTest {
         assertEquals(EntityUserOperator.USER_OPERATOR_CONTAINER_NAME, containers.get(1).getName());
         // checks on the TLS sidecar container
         Container tlsSidecarContainer = containers.get(2);
-        assertEquals(EntityOperatorSpec.DEFAULT_TLS_SIDECAR_IMAGE, tlsSidecarContainer.getImage());
+        assertEquals(image, tlsSidecarContainer.getImage());
         assertEquals(EntityOperator.defaultZookeeperConnect(cluster), AbstractModel.containerEnvVars(tlsSidecarContainer).get(EntityOperator.ENV_VAR_ZOOKEEPER_CONNECT));
         assertEquals(TlsSidecarLogLevel.NOTICE.toValue(), AbstractModel.containerEnvVars(tlsSidecarContainer).get(ModelUtils.TLS_SIDECAR_LOG_LEVEL));
         assertEquals(map(
@@ -126,18 +140,23 @@ public class EntityOperatorTest {
                         .withEntityOperator(entityOperatorSpec)
                         .endSpec()
                         .build();
-        EntityOperator entityOperator = EntityOperator.fromCrd(resource);
+        EntityOperator entityOperator = EntityOperator.fromCrd(resource, VERSIONS);
 
         assertNull(entityOperator.getTopicOperator());
         assertNull(entityOperator.getUserOperator());
     }
 
     @Rule
-    public ResourceTester<Kafka, EntityOperator> helper = new ResourceTester<>(Kafka.class, EntityOperator::fromCrd);
+    public ResourceTester<Kafka, EntityOperator> helper = new ResourceTester<>(Kafka.class, VERSIONS, EntityOperator::fromCrd);
+
+    @Test
+    public void withOldAffinity() throws IOException {
+        helper.assertDesiredResource("-Deployment.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getAffinity());
+    }
 
     @Test
     public void withAffinity() throws IOException {
-        helper.assertDesiredResource("-Deployment.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null).getSpec().getTemplate().getSpec().getAffinity());
+        helper.assertDesiredResource("-Deployment.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getAffinity());
     }
 
     @Test
@@ -166,17 +185,19 @@ public class EntityOperatorTest {
                                             .withLabels(podLabels)
                                             .withAnnotations(podAnots)
                                         .endMetadata()
+                                        .withNewPriorityClassName("top-priority")
                                     .endPod()
                                 .endTemplate()
                             .endEntityOperator()
                         .endSpec()
                         .build();
-        EntityOperator entityOperator = EntityOperator.fromCrd(resource);
+        EntityOperator entityOperator = EntityOperator.fromCrd(resource, VERSIONS);
 
         // Check Deployment
-        Deployment dep = entityOperator.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = entityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null);
         assertTrue(dep.getMetadata().getLabels().entrySet().containsAll(depLabels.entrySet()));
         assertTrue(dep.getMetadata().getAnnotations().entrySet().containsAll(depAnots.entrySet()));
+        assertEquals("top-priority", dep.getSpec().getTemplate().getSpec().getPriorityClassName());
 
         // Check Pods
         assertTrue(dep.getSpec().getTemplate().getMetadata().getLabels().entrySet().containsAll(podLabels.entrySet()));
@@ -198,12 +219,12 @@ public class EntityOperatorTest {
                     .endEntityOperator()
                 .endSpec()
                 .build();
-        EntityOperator eo = EntityOperator.fromCrd(resource);
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
 
-        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, null);
         assertEquals(Long.valueOf(123), dep.getSpec().getTemplate().getSpec().getTerminationGracePeriodSeconds());
         assertNotNull(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle());
-        assertTrue(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle().getPreStop().getExec().getCommand().contains("/opt/stunnel/stunnel_pre_stop.sh"));
+        assertTrue(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle().getPreStop().getExec().getCommand().contains("/opt/stunnel/entity_operator_stunnel_pre_stop.sh"));
         assertTrue(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle().getPreStop().getExec().getCommand().contains("123"));
     }
 
@@ -217,12 +238,12 @@ public class EntityOperatorTest {
                     .endEntityOperator()
                 .endSpec()
                 .build();
-        EntityOperator eo = EntityOperator.fromCrd(resource);
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
 
-        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, null);
         assertEquals(Long.valueOf(30), dep.getSpec().getTemplate().getSpec().getTerminationGracePeriodSeconds());
         assertNotNull(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle());
-        assertTrue(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle().getPreStop().getExec().getCommand().contains("/opt/stunnel/stunnel_pre_stop.sh"));
+        assertTrue(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle().getPreStop().getExec().getCommand().contains("/opt/stunnel/entity_operator_stunnel_pre_stop.sh"));
         assertTrue(dep.getSpec().getTemplate().getSpec().getContainers().get(2).getLifecycle().getPreStop().getExec().getCommand().contains("30"));
     }
 
@@ -244,11 +265,62 @@ public class EntityOperatorTest {
                     .endEntityOperator()
                 .endSpec()
                 .build();
-        EntityOperator eo = EntityOperator.fromCrd(resource);
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
 
-        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, null);
         assertEquals(2, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
         assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret1));
+        assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret2));
+    }
+
+    @Test
+    public void testImagePullSecretsFromCo() {
+        LocalObjectReference secret1 = new LocalObjectReference("some-pull-secret");
+        LocalObjectReference secret2 = new LocalObjectReference("some-other-pull-secret");
+
+        List<LocalObjectReference> secrets = new ArrayList<>(2);
+        secrets.add(secret1);
+        secrets.add(secret2);
+
+        Kafka resource = new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                .editSpec()
+                    .withNewEntityOperator()
+                        .withTopicOperator(entityTopicOperatorSpec)
+                        .withUserOperator(entityUserOperatorSpec)
+                    .endEntityOperator()
+                .endSpec()
+                .build();
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
+
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, secrets);
+        assertEquals(2, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
+        assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret1));
+        assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret2));
+    }
+
+    @Test
+    public void testImagePullSecretsFromBoth() {
+        LocalObjectReference secret1 = new LocalObjectReference("some-pull-secret");
+        LocalObjectReference secret2 = new LocalObjectReference("some-other-pull-secret");
+
+        Kafka resource = new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                .editSpec()
+                .withNewEntityOperator()
+                .withTopicOperator(entityTopicOperatorSpec)
+                .withUserOperator(entityUserOperatorSpec)
+                .withNewTemplate()
+                .withNewPod()
+                .withImagePullSecrets(secret2)
+                .endPod()
+                .endTemplate()
+                .endEntityOperator()
+                .endSpec()
+                .build();
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
+
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, singletonList(secret1));
+        assertEquals(1, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
+        assertFalse(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret1));
         assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret2));
     }
 
@@ -262,9 +334,9 @@ public class EntityOperatorTest {
                     .endEntityOperator()
                 .endSpec()
                 .build();
-        EntityOperator eo = EntityOperator.fromCrd(resource);
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
 
-        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, null);
         assertEquals(0, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
     }
 
@@ -277,15 +349,15 @@ public class EntityOperatorTest {
                         .withUserOperator(entityUserOperatorSpec)
                         .withNewTemplate()
                             .withNewPod()
-                                .withSecurityContext(new PodSecurityContextBuilder().withFsGroup(123L).withRunAsGroup(456L).withNewRunAsUser(789L).build())
+                                .withSecurityContext(new PodSecurityContextBuilder().withFsGroup(123L).withRunAsGroup(456L).withRunAsUser(789L).build())
                             .endPod()
                         .endTemplate()
                     .endEntityOperator()
                 .endSpec()
                 .build();
-        EntityOperator eo = EntityOperator.fromCrd(resource);
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
 
-        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, null);
         assertNotNull(dep.getSpec().getTemplate().getSpec().getSecurityContext());
         assertEquals(Long.valueOf(123), dep.getSpec().getTemplate().getSpec().getSecurityContext().getFsGroup());
         assertEquals(Long.valueOf(456), dep.getSpec().getTemplate().getSpec().getSecurityContext().getRunAsGroup());
@@ -302,10 +374,77 @@ public class EntityOperatorTest {
                     .endEntityOperator()
                 .endSpec()
                 .build();
-        EntityOperator eo = EntityOperator.fromCrd(resource);
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
 
-        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null);
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, null, null);
         assertNull(dep.getSpec().getTemplate().getSpec().getSecurityContext());
+    }
+
+    /**
+     * Verify the lookup order is:<ul>
+     * <li>Kafka.spec.entityOperator.tlsSidecar.image</li>
+     * <li>Kafka.spec.kafka.image</li>
+     * <li>image for default version of Kafka</li></ul>
+     */
+    @Test
+    public void testStunnelImage() {
+        Kafka kafka = new KafkaBuilder(resource)
+                .editSpec()
+                    .editEntityOperator()
+                        .editOrNewTlsSidecar()
+                            .withImage("foo1")
+                        .endTlsSidecar()
+                    .endEntityOperator()
+                    .editKafka()
+                        .withImage("foo2")
+                    .endKafka()
+                .endSpec()
+                .build();
+        assertEquals("foo1", EntityOperator.fromCrd(kafka, VERSIONS).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage());
+
+        kafka = new KafkaBuilder(resource)
+                .editSpec()
+                    .editEntityOperator()
+                        .editOrNewTlsSidecar()
+                            .withImage(null)
+                        .endTlsSidecar()
+                    .endEntityOperator()
+                    .editKafka()
+                        .withImage("foo2")
+                    .endKafka()
+                .endSpec()
+                .build();
+        assertEquals("foo2", EntityOperator.fromCrd(kafka, VERSIONS).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage());
+
+        kafka = new KafkaBuilder(resource)
+                .editSpec()
+                    .editEntityOperator()
+                        .editOrNewTlsSidecar()
+                            .withImage(null)
+                        .endTlsSidecar()
+                    .endEntityOperator()
+                    .editKafka()
+                        .withVersion("2.0.0")
+                        .withImage(null)
+                    .endKafka()
+                .endSpec()
+            .build();
+        assertEquals("strimzi/kafka:latest-kafka-2.0.0", EntityOperator.fromCrd(kafka, VERSIONS).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage());
+
+        kafka = new KafkaBuilder(resource)
+                .editSpec()
+                    .editEntityOperator()
+                        .editOrNewTlsSidecar()
+                            .withImage(null)
+                        .endTlsSidecar()
+                    .endEntityOperator()
+                    .editKafka()
+                        .withVersion("2.1.0")
+                        .withImage(null)
+                    .endKafka()
+                .endSpec()
+            .build();
+        assertEquals("strimzi/kafka:latest-kafka-2.0.0", EntityOperator.fromCrd(kafka, VERSIONS).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage());
     }
 
     @Test
@@ -318,14 +457,14 @@ public class EntityOperatorTest {
                     .endEntityOperator()
                 .endSpec()
                 .build();
-        EntityOperator eo = EntityOperator.fromCrd(resource);
+        EntityOperator eo = EntityOperator.fromCrd(resource, VERSIONS);
 
-        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, ImagePullPolicy.ALWAYS);
+        Deployment dep = eo.generateDeployment(true, Collections.EMPTY_MAP, ImagePullPolicy.ALWAYS, null);
         assertEquals(ImagePullPolicy.ALWAYS.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImagePullPolicy());
         assertEquals(ImagePullPolicy.ALWAYS.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(1).getImagePullPolicy());
         assertEquals(ImagePullPolicy.ALWAYS.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(2).getImagePullPolicy());
 
-        dep = eo.generateDeployment(true, Collections.EMPTY_MAP, ImagePullPolicy.IFNOTPRESENT);
+        dep = eo.generateDeployment(true, Collections.EMPTY_MAP, ImagePullPolicy.IFNOTPRESENT, null);
         assertEquals(ImagePullPolicy.IFNOTPRESENT.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImagePullPolicy());
         assertEquals(ImagePullPolicy.IFNOTPRESENT.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(1).getImagePullPolicy());
         assertEquals(ImagePullPolicy.IFNOTPRESENT.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(2).getImagePullPolicy());
@@ -334,5 +473,266 @@ public class EntityOperatorTest {
     @AfterClass
     public static void cleanUp() {
         ResourceUtils.cleanUpTemporaryTLSFiles();
+    }
+
+    @Test
+    public void testTopicOperatorContainerEnvVars() {
+
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = "TEST_ENV_1";
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        ContainerEnvVar envVar2 = new ContainerEnvVar();
+        String testEnvTwoKey = "TEST_ENV_2";
+        String testEnvTwoValue = "test.env.two";
+        envVar2.setName(testEnvTwoKey);
+        envVar2.setValue(testEnvTwoValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        testEnvs.add(envVar2);
+
+        ContainerTemplate topicOperatorContainer = new ContainerTemplate();
+        topicOperatorContainer.setEnv(testEnvs);
+
+        Kafka resource =
+                new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                        .editSpec()
+                        .withNewEntityOperator()
+                        .withTopicOperator(entityTopicOperatorSpec)
+                        .withUserOperator(entityUserOperatorSpec)
+                        .withNewTemplate()
+                        .withTopicOperatorContainer(topicOperatorContainer)
+                        .endTemplate()
+                        .endEntityOperator()
+                        .endSpec()
+                        .build();
+
+        List<EnvVar> containerEnvVars = EntityOperator.fromCrd(resource, VERSIONS).getTopicOperator().getEnvVars();
+
+        assertTrue("Failed to correctly set container environment variable: " + testEnvOneKey,
+                containerEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
+        assertTrue("Failed to correctly set container environment variable: " + testEnvTwoKey,
+                containerEnvVars.stream().filter(env -> testEnvTwoKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvTwoValue));
+
+
+    }
+
+    @Test
+    public void testTopicOperatorContainerEnvVarsConflict() {
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = EntityTopicOperator.ENV_VAR_RESOURCE_LABELS;
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        ContainerEnvVar envVar2 = new ContainerEnvVar();
+        String testEnvTwoKey = EntityTopicOperator.ENV_VAR_KAFKA_BOOTSTRAP_SERVERS;
+        String testEnvTwoValue = "test.env.two";
+        envVar2.setName(testEnvTwoKey);
+        envVar2.setValue(testEnvTwoValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        testEnvs.add(envVar2);
+        ContainerTemplate topicOperatorContainer = new ContainerTemplate();
+        topicOperatorContainer.setEnv(testEnvs);
+
+        Kafka resource =
+                new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                        .editSpec()
+                        .withNewEntityOperator()
+                        .withTopicOperator(entityTopicOperatorSpec)
+                        .withUserOperator(entityUserOperatorSpec)
+                        .withNewTemplate()
+                        .withTopicOperatorContainer(topicOperatorContainer)
+                        .endTemplate()
+                        .endEntityOperator()
+                        .endSpec()
+                        .build();
+
+        List<EnvVar> containerEnvVars = EntityOperator.fromCrd(resource, VERSIONS).getTopicOperator().getEnvVars();
+
+        assertFalse("Failed to prevent over writing existing container environment variable: " + testEnvOneKey,
+                containerEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
+        assertFalse("Failed to prevent over writing existing container environment variable: " + testEnvTwoKey,
+                containerEnvVars.stream().filter(env -> testEnvTwoKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvTwoValue));
+
+    }
+
+    @Test
+    public void testUserOperatorContainerEnvVars() {
+
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = "TEST_ENV_1";
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        ContainerEnvVar envVar2 = new ContainerEnvVar();
+        String testEnvTwoKey = "TEST_ENV_2";
+        String testEnvTwoValue = "test.env.two";
+        envVar2.setName(testEnvTwoKey);
+        envVar2.setValue(testEnvTwoValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        testEnvs.add(envVar2);
+
+        ContainerTemplate userOperatorContainer = new ContainerTemplate();
+        userOperatorContainer.setEnv(testEnvs);
+
+        Kafka resource =
+                new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                        .editSpec()
+                        .withNewEntityOperator()
+                        .withTopicOperator(entityTopicOperatorSpec)
+                        .withUserOperator(entityUserOperatorSpec)
+                        .withNewTemplate()
+                        .withUserOperatorContainer(userOperatorContainer)
+                        .endTemplate()
+                        .endEntityOperator()
+                        .endSpec()
+                        .build();
+
+        List<EnvVar> containerEnvVars = EntityOperator.fromCrd(resource, VERSIONS).getUserOperator().getEnvVars();
+
+        assertTrue("Failed to correctly set container environment variable: " + testEnvOneKey,
+                containerEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
+        assertTrue("Failed to correctly set container environment variable: " + testEnvTwoKey,
+                containerEnvVars.stream().filter(env -> testEnvTwoKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvTwoValue));
+
+    }
+
+    @Test
+    public void testUserOperatorContainerEnvVarsConflict() {
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = EntityUserOperator.ENV_VAR_ZOOKEEPER_CONNECT;
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        ContainerEnvVar envVar2 = new ContainerEnvVar();
+        String testEnvTwoKey = EntityUserOperator.ENV_VAR_ZOOKEEPER_SESSION_TIMEOUT_MS;
+        String testEnvTwoValue = "test.env.two";
+        envVar2.setName(testEnvTwoKey);
+        envVar2.setValue(testEnvTwoValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        testEnvs.add(envVar2);
+        ContainerTemplate userOperatorContainer = new ContainerTemplate();
+        userOperatorContainer.setEnv(testEnvs);
+
+        Kafka resource =
+                new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                        .editSpec()
+                        .withNewEntityOperator()
+                        .withTopicOperator(entityTopicOperatorSpec)
+                        .withUserOperator(entityUserOperatorSpec)
+                        .withNewTemplate()
+                        .withUserOperatorContainer(userOperatorContainer)
+                        .endTemplate()
+                        .endEntityOperator()
+                        .endSpec()
+                        .build();
+
+        List<EnvVar> containerEnvVars = EntityOperator.fromCrd(resource, VERSIONS).getUserOperator().getEnvVars();
+
+        assertFalse("Failed to prevent over writing existing container environment variable: " + testEnvOneKey,
+                containerEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
+        assertFalse("Failed to prevent over writing existing container environment variable: " + testEnvTwoKey,
+                containerEnvVars.stream().filter(env -> testEnvTwoKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvTwoValue));
+    }
+
+    @Test
+    public void testTlsSideCarContainerEnvVars() {
+
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = "TEST_ENV_1";
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        ContainerEnvVar envVar2 = new ContainerEnvVar();
+        String testEnvTwoKey = "TEST_ENV_2";
+        String testEnvTwoValue = "test.env.two";
+        envVar2.setName(testEnvTwoKey);
+        envVar2.setValue(testEnvTwoValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        testEnvs.add(envVar2);
+        ContainerTemplate tlsContainer = new ContainerTemplate();
+        tlsContainer.setEnv(testEnvs);
+
+        Kafka resource =
+                new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                        .editSpec()
+                        .withNewEntityOperator()
+                        .withTopicOperator(entityTopicOperatorSpec)
+                        .withUserOperator(entityUserOperatorSpec)
+                        .withNewTemplate()
+                        .withTlsSidecarContainer(tlsContainer)
+                        .endTemplate()
+                        .endEntityOperator()
+                        .endSpec()
+                        .build();
+
+
+        List<EnvVar> containerEnvVars = EntityOperator.fromCrd(resource, VERSIONS).getTlsSidecarEnvVars();
+
+        assertTrue("Failed to correctly set container environment variable: " + testEnvOneKey,
+                containerEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
+        assertTrue("Failed to correctly set container environment variable: " + testEnvTwoKey,
+                containerEnvVars.stream().filter(env -> testEnvTwoKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvTwoValue));
+
+    }
+
+    @Test
+    public void testTlsSidecarContainerEnvVarsConflict() {
+
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = EntityOperator.ENV_VAR_ZOOKEEPER_CONNECT;
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        ContainerTemplate tlsContainer = new ContainerTemplate();
+        tlsContainer.setEnv(testEnvs);
+
+        Kafka resource =
+                new KafkaBuilder(ResourceUtils.createKafkaCluster(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                        .editSpec()
+                        .withNewEntityOperator()
+                        .withTopicOperator(entityTopicOperatorSpec)
+                        .withUserOperator(entityUserOperatorSpec)
+                        .withNewTemplate()
+                        .withTlsSidecarContainer(tlsContainer)
+                        .endTemplate()
+                        .endEntityOperator()
+                        .endSpec()
+                        .build();
+
+
+        List<EnvVar> containerEnvVars = EntityOperator.fromCrd(resource, VERSIONS).getTlsSidecarEnvVars();
+
+        assertFalse("Failed to prevent over writing existing container environment variable: " + testEnvOneKey,
+                containerEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
     }
 }

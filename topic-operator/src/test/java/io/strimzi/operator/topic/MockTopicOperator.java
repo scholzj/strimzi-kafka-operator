@@ -4,10 +4,9 @@
  */
 package io.strimzi.operator.topic;
 
+import io.fabric8.kubernetes.client.Watcher;
 import io.strimzi.api.kafka.model.KafkaTopic;
-import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
-import io.vertx.core.Handler;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -74,12 +73,12 @@ class MockTopicOperator extends TopicOperator {
         }
     }
 
-    public AsyncResult<Void> topicCreatedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".topicCreatedResult");
-    public AsyncResult<Void> topicDeletedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".topicDeletedResult");
-    public AsyncResult<Void> topicModifiedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".topicModifiedResult");
-    public AsyncResult<Void> resourceAddedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".resourceAddedResult");
-    public AsyncResult<Void> resourceDeletedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".resourceDeletedResult");
-    public AsyncResult<Void> resourceModifiedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".resourceModifiedResult");
+    public Future<Void> topicCreatedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".topicCreatedResult");
+    public Future<Void> topicDeletedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".topicDeletedResult");
+    public Future<Void> topicModifiedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".topicModifiedResult");
+    public Future<Void> resourceAddedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".resourceAddedResult");
+    public Future<Void> resourceDeletedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".resourceDeletedResult");
+    public Future<Void> resourceModifiedResult = Future.failedFuture("Unexpected mock interaction. Configure " + getClass().getSimpleName() + ".resourceModifiedResult");
     private List<MockOperatorEvent> mockOperatorEvents = new ArrayList<>();
 
     public List<MockOperatorEvent> getMockOperatorEvents() {
@@ -91,44 +90,34 @@ class MockTopicOperator extends TopicOperator {
     }
 
     @Override
-    public void onTopicCreated(TopicName topicName, Handler<AsyncResult<Void>> handler) {
+    public Future<Void> onTopicCreated(LogContext logContext, TopicName topicName) {
         mockOperatorEvents.add(new MockOperatorEvent(MockOperatorEvent.Type.CREATE, topicName));
-        handler.handle(topicCreatedResult);
+        return topicCreatedResult;
     }
 
     @Override
-    public void onTopicDeleted(TopicName topicName, Handler<AsyncResult<Void>> resultHandler) {
+    public Future<Void> onTopicDeleted(LogContext logContext, TopicName topicName) {
         mockOperatorEvents.add(new MockOperatorEvent(MockOperatorEvent.Type.DELETE, topicName));
-        resultHandler.handle(topicDeletedResult);
+        return topicDeletedResult;
     }
 
     @Override
-    public void onTopicConfigChanged(TopicName topicName, Handler<AsyncResult<Void>> handler) {
+    public Future<Void> onTopicConfigChanged(LogContext logContext, TopicName topicName) {
         mockOperatorEvents.add(new MockOperatorEvent(MockOperatorEvent.Type.MODIFY_CONFIG, topicName));
-        handler.handle(topicModifiedResult);
+        return topicModifiedResult;
     }
 
     @Override
-    public void onTopicPartitionsChanged(TopicName topicName, Handler<AsyncResult<Void>> handler) {
+    public Future<Void> onTopicPartitionsChanged(LogContext logContext, TopicName topicName) {
         mockOperatorEvents.add(new MockOperatorEvent(MockOperatorEvent.Type.MODIFY_PARTITIONS, topicName));
-        handler.handle(topicModifiedResult);
+        return topicModifiedResult;
     }
 
     @Override
-    public void onResourceAdded(KafkaTopic resource, Handler<AsyncResult<Void>> resultHandler) {
-        mockOperatorEvents.add(new MockOperatorEvent(MockOperatorEvent.Type.CREATE, resource));
-        resultHandler.handle(resourceAddedResult);
-    }
-
-    @Override
-    public void onResourceModified(KafkaTopic resource, Handler<AsyncResult<Void>> resultHandler) {
-        mockOperatorEvents.add(new MockOperatorEvent(MockOperatorEvent.Type.MODIFY, resource));
-        resultHandler.handle(resourceModifiedResult);
-    }
-
-    @Override
-    public void onResourceDeleted(KafkaTopic resource, Handler<AsyncResult<Void>> resultHandler) {
-        mockOperatorEvents.add(new MockOperatorEvent(MockOperatorEvent.Type.DELETE, resource));
-        resultHandler.handle(resourceDeletedResult);
+    public Future<Void> onResourceEvent(LogContext logContext, KafkaTopic resource, Watcher.Action action) {
+        mockOperatorEvents.add(new MockOperatorEvent(action == Watcher.Action.MODIFIED ? MockOperatorEvent.Type.MODIFY :
+                action == Watcher.Action.ADDED ? MockOperatorEvent.Type.CREATE :
+                MockOperatorEvent.Type.DELETE, resource));
+        return resourceAddedResult;
     }
 }

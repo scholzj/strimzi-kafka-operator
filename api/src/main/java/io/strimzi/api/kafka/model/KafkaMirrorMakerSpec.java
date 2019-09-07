@@ -4,18 +4,20 @@
  */
 package io.strimzi.api.kafka.model;
 
-import com.fasterxml.jackson.annotation.JsonAnyGetter;
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.fabric8.kubernetes.api.model.Affinity;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.Toleration;
+import io.strimzi.api.annotations.DeprecatedProperty;
 import io.strimzi.api.kafka.model.template.KafkaMirrorMakerTemplate;
+import io.strimzi.api.kafka.model.tracing.Tracing;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.KubeLink;
 import io.strimzi.crdgenerator.annotations.Minimum;
 import io.sundr.builder.annotations.Buildable;
+import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -32,8 +34,9 @@ import java.util.Map;
         "replicas", "image", "whitelist",
         "consumer", "producer", "resources",
         "affinity", "tolerations", "jvmOptions",
-        "logging", "metrics", "template"})
-public class KafkaMirrorMakerSpec implements Serializable {
+        "logging", "metrics", "tracing", "template"})
+@EqualsAndHashCode
+public class KafkaMirrorMakerSpec implements UnknownPropertyPreserving, Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -43,12 +46,15 @@ public class KafkaMirrorMakerSpec implements Serializable {
     private String whitelist;
     private KafkaMirrorMakerConsumerSpec consumer;
     private KafkaMirrorMakerProducerSpec producer;
-    private Resources resources;
+    private ResourceRequirements resources;
+    private Probe livenessProbe;
+    private Probe readinessProbe;
     private Affinity affinity;
     private List<Toleration> tolerations;
     private JvmOptions jvmOptions;
     private Logging logging;
     private Map<String, Object> metrics;
+    private Tracing tracing;
     private KafkaMirrorMakerTemplate template;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
@@ -64,7 +70,7 @@ public class KafkaMirrorMakerSpec implements Serializable {
     }
 
     @Description("The Kafka Mirror Maker version. Defaults to {DefaultKafkaVersion}. " +
-            "Consult the user documentation to understand the process required to upgrade or downgrade the version.")
+            "Consult the documentation to understand the process required to upgrade or downgrade the version.")
     public String getVersion() {
         return version;
     }
@@ -84,8 +90,8 @@ public class KafkaMirrorMakerSpec implements Serializable {
     }
 
     @Description("List of topics which are included for mirroring. This option allows any regular expression using Java-style regular expressions. " +
-            "Mirroring two topics named A and B can be achieved by using the whitelist `'A|B'`. Or, as a special case, you can mirror all topics using the whitelist '*'. " +
-            "Multiple regular expressions separated by commas can be specified as well.")
+            "Mirroring two topics named A and B is achieved by using the whitelist `'A|B'`. Or, as a special case, you can mirror all topics using the whitelist '*'. " +
+            "You can also specify multiple regular expressions separated by commas.")
     @JsonProperty(required = true)
     public String getWhitelist() {
         return whitelist;
@@ -126,6 +132,16 @@ public class KafkaMirrorMakerSpec implements Serializable {
         this.metrics = metrics;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Description("The configuration of tracing in Kafka Mirror Maker.")
+    public Tracing getTracing() {
+        return tracing;
+    }
+
+    public void setTracing(Tracing tracing) {
+        this.tracing = tracing;
+    }
+
     @Description("Logging configuration for Mirror Maker.")
     @JsonInclude(value = JsonInclude.Include.NON_NULL)
     public Logging getLogging() {
@@ -146,40 +162,65 @@ public class KafkaMirrorMakerSpec implements Serializable {
         this.jvmOptions = jvmOptions;
     }
 
-    @Description("Pod affinity rules.")
+    @Description("The pod's affinity rules.")
     @KubeLink(group = "core", version = "v1", kind = "affinity")
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    @DeprecatedProperty(movedToPath = "spec.template.pod.affinity")
+    @Deprecated
     public Affinity getAffinity() {
         return affinity;
     }
 
+    @Deprecated
     public void setAffinity(Affinity affinity) {
         this.affinity = affinity;
     }
 
-    @Description("Pod's tolerations.")
-    @KubeLink(group = "core", version = "v1", kind = "tolerations")
+    @Description("The pod's tolerations.")
+    @KubeLink(group = "core", version = "v1", kind = "toleration")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @DeprecatedProperty(movedToPath = "spec.template.pod.tolerations")
+    @Deprecated
     public List<Toleration> getTolerations() {
         return tolerations;
     }
 
+    @Deprecated
     public void setTolerations(List<Toleration> tolerations) {
         this.tolerations = tolerations;
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Description("Resource constraints (limits and requests).")
-    public Resources getResources() {
+    public ResourceRequirements getResources() {
         return resources;
     }
 
-    public void setResources(Resources resources) {
+    public void setResources(ResourceRequirements resources) {
         this.resources = resources;
     }
 
-    @Description("Template for Kafka Mirror Maker resources. " +
-            "The template allows users to specify how is the `Deployment` and `Pods` generated.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @Description("Pod liveness checking.")
+    public Probe getLivenessProbe() {
+        return livenessProbe;
+    }
+
+    public void setLivenessProbe(Probe livenessProbe) {
+        this.livenessProbe = livenessProbe;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    @Description("Pod readiness checking.")
+    public Probe getReadinessProbe() {
+        return readinessProbe;
+    }
+
+    public void setReadinessProbe(Probe readinessProbe) {
+        this.readinessProbe = readinessProbe;
+    }
+
+    @Description("Template to specify how Kafka Mirror Maker resources, `Deployments` and `Pods`, are generated.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     public KafkaMirrorMakerTemplate getTemplate() {
         return template;
@@ -189,12 +230,12 @@ public class KafkaMirrorMakerSpec implements Serializable {
         this.template = template;
     }
 
-    @JsonAnyGetter
+    @Override
     public Map<String, Object> getAdditionalProperties() {
         return this.additionalProperties;
     }
 
-    @JsonAnySetter
+    @Override
     public void setAdditionalProperty(String name, Object value) {
         this.additionalProperties.put(name, value);
     }

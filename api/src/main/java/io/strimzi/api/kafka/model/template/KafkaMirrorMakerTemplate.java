@@ -4,12 +4,12 @@
  */
 package io.strimzi.api.kafka.model.template;
 
-import com.fasterxml.jackson.annotation.JsonAnyGetter;
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.strimzi.api.kafka.model.UnknownPropertyPreserving;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.sundr.builder.annotations.Buildable;
+import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -26,12 +26,14 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
         "deployment", "pod"})
-public class KafkaMirrorMakerTemplate implements Serializable {
+@EqualsAndHashCode
+public class KafkaMirrorMakerTemplate implements Serializable, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
 
     private ResourceTemplate deployment;
     private PodTemplate pod;
     private PodDisruptionBudgetTemplate podDisruptionBudget;
+    private ContainerTemplate mirrorMakerContainer;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for Kafka Mirror Maker `Deployment`.")
@@ -64,12 +66,22 @@ public class KafkaMirrorMakerTemplate implements Serializable {
         this.podDisruptionBudget = podDisruptionBudget;
     }
 
-    @JsonAnyGetter
+    @Description("Template for Kafka Mirror Maker container")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ContainerTemplate getMirrorMakerContainer() {
+        return mirrorMakerContainer;
+    }
+
+    public void setMirrorMakerContainer(ContainerTemplate mirrorMakerContainer) {
+        this.mirrorMakerContainer = mirrorMakerContainer;
+    }
+
+    @Override
     public Map<String, Object> getAdditionalProperties() {
         return this.additionalProperties;
     }
 
-    @JsonAnySetter
+    @Override
     public void setAdditionalProperty(String name, Object value) {
         this.additionalProperties.put(name, value);
     }

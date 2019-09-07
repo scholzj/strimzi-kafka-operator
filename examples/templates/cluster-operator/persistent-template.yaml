@@ -6,10 +6,10 @@ metadata:
     openshift.io/display-name: "Apache Kafka (Persistent storage)"
     description: >-
       This template installs Apache Zookeeper and Apache Kafka clusters. For more information
-      about using this template see http://strimzi.io
+      about using this template see https://strimzi.io
     tags: "messaging,datastore"
     iconClass: "fa fa-share-alt fa-flip-horizontal"
-    template.openshift.io/documentation-url: "http://strimzi.io"
+    template.openshift.io/documentation-url: "https://strimzi.io"
 message: "Kafka cluster ${CLUSTER_NAME} is being deployed. Use '${CLUSTER_NAME}-kafka-bootstrap:9092' as bootstrap server in your application."
 parameters:
 - description: All Kubernetes resources will be named after the cluster name
@@ -30,7 +30,7 @@ parameters:
   displayName: The Kafka version to use
   name: KAFKA_VERSION
   required: true
-  value: "2.1.0"
+  value: "2.3.0"
 - description: Volume space available for Zookeeper data, e.g. 512Mi, 2Gi.
   displayName: Zookeeper Volume Capacity
   name: ZOOKEEPER_VOLUME_CAPACITY
@@ -70,7 +70,7 @@ parameters:
   name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
   value: "3"
 objects:
-- apiVersion: kafka.strimzi.io/v1alpha1
+- apiVersion: kafka.strimzi.io/v1beta1
   kind: Kafka
   metadata:
     name: ${CLUSTER_NAME}
@@ -88,9 +88,12 @@ objects:
         initialDelaySeconds: ${{KAFKA_HEALTHCHECK_DELAY}}
         timeoutSeconds: ${{KAFKA_HEALTHCHECK_TIMEOUT}}
       storage:
-        type: "persistent-claim"
-        size: "${KAFKA_VOLUME_CAPACITY}"
-        deleteClaim: false
+        type: jbod
+        volumes:
+        - id: 0
+          type: "persistent-claim"
+          size: "${KAFKA_VOLUME_CAPACITY}"
+          deleteClaim: false
       config:
         default.replication.factor: ${KAFKA_DEFAULT_REPLICATION_FACTOR}
         offsets.topic.replication.factor: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}

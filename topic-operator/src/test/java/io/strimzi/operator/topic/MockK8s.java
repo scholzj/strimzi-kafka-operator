@@ -6,12 +6,15 @@ package io.strimzi.operator.topic;
 
 import io.fabric8.kubernetes.api.model.Event;
 import io.strimzi.api.kafka.model.KafkaTopic;
+import io.strimzi.api.kafka.model.KafkaTopicBuilder;
+import io.strimzi.api.kafka.model.status.KafkaTopicStatus;
+import io.strimzi.api.kafka.model.status.KafkaTopicStatusBuilder;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
-import io.vertx.core.Handler;
 import io.vertx.ext.unit.TestContext;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,46 +78,84 @@ public class MockK8s implements K8s {
     }
 
     @Override
-    public void createResource(KafkaTopic topicResource, Handler<AsyncResult<Void>> handler) {
+    public Future<KafkaTopic> createResource(KafkaTopic topicResource) {
+        Future<KafkaTopic> handler = Future.future();
         AsyncResult<Void> response = createResponse.apply(new ResourceName(topicResource));
         if (response.succeeded()) {
             AsyncResult<KafkaTopic> old = byName.put(new ResourceName(topicResource), Future.succeededFuture(topicResource));
             if (old != null) {
                 handler.handle(Future.failedFuture("resource already existed: " + topicResource.getMetadata().getName()));
-                return;
+                return handler;
             }
         }
-        handler.handle(response);
+        if (response.succeeded()) {
+            handler.complete(new KafkaTopicBuilder(topicResource).editMetadata().withGeneration(1L).endMetadata().build());
+        } else {
+            handler.fail(response.cause());
+        }
+        return handler;
     }
 
     @Override
-    public void updateResource(KafkaTopic topicResource, Handler<AsyncResult<Void>> handler) {
+    public Future<KafkaTopic> updateResource(KafkaTopic topicResource) {
+        Future<KafkaTopic> handler = Future.future();
         AsyncResult<Void> response = modifyResponse.apply(new ResourceName(topicResource));
         if (response.succeeded()) {
             AsyncResult<KafkaTopic> old = byName.put(new ResourceName(topicResource), Future.succeededFuture(topicResource));
             if (old == null) {
                 handler.handle(Future.failedFuture("resource does not exist, cannot be updated: " + topicResource.getMetadata().getName()));
-                return;
+                return handler;
             }
         }
-        handler.handle(response);
+        if (response.succeeded()) {
+            Long generation = topicResource.getMetadata().getGeneration();
+            handler.complete(new KafkaTopicBuilder(topicResource)
+                    .editMetadata()
+                        .withGeneration(generation != null ? generation + 1 : 1)
+                    .endMetadata()
+                .build());
+        } else {
+            handler.fail(response.cause());
+        }
+        return handler;
+    }
+
+    private List<KafkaTopicStatus> statuses = new ArrayList<>();
+
+    public List<KafkaTopicStatus> getStatuses() {
+        return Collections.unmodifiableList(statuses);
     }
 
     @Override
-    public void deleteResource(ResourceName resourceName, Handler<AsyncResult<Void>> handler) {
+    public Future<KafkaTopic> updateResourceStatus(KafkaTopic topicResource) {
+        statuses.add(new KafkaTopicStatusBuilder(topicResource.getStatus()).build());
+        Long generation = topicResource.getMetadata().getGeneration();
+        return Future.succeededFuture(new KafkaTopicBuilder(topicResource)
+                .editMetadata()
+                    .withGeneration(generation == null ? 1 : generation + 1)
+                .endMetadata()
+            .build());
+    }
+
+    @Override
+    public Future<Void> deleteResource(ResourceName resourceName) {
+        Future<Void> handler = Future.future();
         AsyncResult<Void> response = deleteResponse.apply(resourceName);
         if (response.succeeded()) {
             if (byName.remove(resourceName) == null) {
                 handler.handle(Future.failedFuture("resource does not exist, cannot be deleted: " + resourceName));
-                return;
+                return handler;
             }
         }
         handler.handle(response);
+        return handler;
     }
 
     @Override
-    public void listMaps(Handler<AsyncResult<List<KafkaTopic>>> handler) {
+    public Future<List<KafkaTopic>> listResources() {
+        Future<List<KafkaTopic>> handler = Future.future();
         handler.handle(listResponse.get());
+        return handler;
     }
 
     public void setListMapsResult(Supplier<AsyncResult<List<KafkaTopic>>> response) {
@@ -122,15 +163,19 @@ public class MockK8s implements K8s {
     }
 
     @Override
-    public void getFromName(ResourceName resourceName, Handler<AsyncResult<KafkaTopic>> handler) {
+    public Future<KafkaTopic> getFromName(ResourceName resourceName) {
+        Future<KafkaTopic> handler = Future.future();
         AsyncResult<KafkaTopic> resourceFuture = byName.get(resourceName);
         handler.handle(resourceFuture != null ? resourceFuture : Future.succeededFuture());
+        return handler;
     }
 
     @Override
-    public void createEvent(Event event, Handler<AsyncResult<Void>> handler) {
+    public Future<Void> createEvent(Event event) {
+        Future<Void> handler = Future.future();
         events.add(event);
         handler.handle(Future.succeededFuture());
+        return handler;
     }
 
     public void assertExists(TestContext context, ResourceName resourceName) {

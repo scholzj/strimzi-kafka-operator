@@ -12,10 +12,14 @@ import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.IntOrString;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.Probe;
+import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.CertSecretSourceBuilder;
+import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.KafkaMirrorMaker;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerAuthenticationTlsBuilder;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerBuilder;
@@ -23,6 +27,8 @@ import io.strimzi.api.kafka.model.KafkaMirrorMakerConsumerSpec;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerConsumerSpecBuilder;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerProducerSpec;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerProducerSpecBuilder;
+import io.strimzi.api.kafka.model.KafkaMirrorMakerResources;
+import io.strimzi.api.kafka.model.template.ContainerTemplate;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.test.TestUtils;
@@ -38,15 +44,17 @@ import java.util.Map;
 
 import static io.strimzi.test.TestUtils.LINE_SEPARATOR;
 import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class KafkaMirrorMakerClusterTest {
     private static final KafkaVersion.Lookup VERSIONS = new KafkaVersion.Lookup(new StringReader(
-            "2.0.0 default 2.0 2.0 1234567890abcdef"),
+            "2.0.0 default 2.0 2.0 1234567890abcdef 2.0.x"),
             emptyMap(), emptyMap(), emptyMap(),
             singletonMap("2.0.0", "strimzi/kafka-mirror-maker:latest-kafka-2.0.0")) { };
     private final String namespace = "test";
@@ -65,16 +73,20 @@ public class KafkaMirrorMakerClusterTest {
     private final String groupId = "my-group-id";
     private final int numStreams = 2;
     private final String whitelist = ".*";
+    private final int offsetCommitInterval = 42000;
+    private final boolean abortOnSendFailure = false;
     private final String kafkaHeapOpts = "-Xms" + AbstractModel.DEFAULT_JVM_XMS;
 
     private KafkaMirrorMakerProducerSpec producer = new KafkaMirrorMakerProducerSpecBuilder()
             .withBootstrapServers(producerBootstrapServers)
+            .withAbortOnSendFailure(abortOnSendFailure)
             .withConfig((Map<String, Object>) TestUtils.fromJson(producerConfigurationJson, Map.class))
             .build();
     private KafkaMirrorMakerConsumerSpec consumer = new KafkaMirrorMakerConsumerSpecBuilder()
             .withBootstrapServers(consumerBootstrapServers)
             .withGroupId(groupId)
             .withNumStreams(numStreams)
+            .withOffsetCommitInterval(offsetCommitInterval)
             .withConfig((Map<String, Object>) TestUtils.fromJson(consumerConfigurationJson, Map.class))
             .build();
     private final KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(ResourceUtils.createEmptyKafkaMirrorMakerCluster(namespace, cluster))
@@ -116,7 +128,7 @@ public class KafkaMirrorMakerClusterTest {
     }
 
     private Map<String, String> expectedLabels()    {
-        return expectedLabels(mm.kafkaMirrorMakerClusterName(cluster));
+        return expectedLabels(KafkaMirrorMakerResources.deploymentName(cluster));
     }
 
     protected List<EnvVar> getExpectedEnvVars() {
@@ -131,8 +143,13 @@ public class KafkaMirrorMakerClusterTest {
         expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_WHITELIST).withValue(whitelist).build());
         expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_GROUPID_CONSUMER).withValue(groupId).build());
         expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_NUMSTREAMS).withValue(Integer.toString(numStreams)).build());
+        expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_OFFSET_COMMIT_INTERVAL).withValue(Integer.toString(offsetCommitInterval)).build());
+        expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_ABORT_ON_SEND_FAILURE).withValue(Boolean.toString(abortOnSendFailure)).build());
         expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED).withValue(KafkaMirrorMakerCluster.DEFAULT_KAFKA_GC_LOG_ENABLED).build());
         expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_HEAP_OPTS).withValue(kafkaHeapOpts).build());
+        expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_STRIMZI_LIVENESS_PERIOD).withValue("10").build());
+        expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_STRIMZI_READINESS_PERIOD).withValue("10").build());
+
         return expected;
     }
 
@@ -179,9 +196,9 @@ public class KafkaMirrorMakerClusterTest {
 
     @Test
     public void testGenerateDeployment()   {
-        Deployment dep = mm.generateDeployment(new HashMap<String, String>(), true, null);
+        Deployment dep = mm.generateDeployment(new HashMap<String, String>(), true, null, null);
 
-        assertEquals(mm.kafkaMirrorMakerClusterName(cluster), dep.getMetadata().getName());
+        assertEquals(KafkaMirrorMakerResources.deploymentName(cluster), dep.getMetadata().getName());
         assertEquals(namespace, dep.getMetadata().getNamespace());
         Map<String, String> expectedLabels = expectedLabels();
         assertEquals(expectedLabels, dep.getMetadata().getLabels());
@@ -189,7 +206,7 @@ public class KafkaMirrorMakerClusterTest {
         assertEquals(new Integer(replicas), dep.getSpec().getReplicas());
         assertEquals(expectedLabels, dep.getSpec().getTemplate().getMetadata().getLabels());
         assertEquals(1, dep.getSpec().getTemplate().getSpec().getContainers().size());
-        assertEquals(mm.kafkaMirrorMakerClusterName(this.cluster), dep.getSpec().getTemplate().getSpec().getContainers().get(0).getName());
+        assertEquals(KafkaMirrorMakerResources.deploymentName(this.cluster), dep.getSpec().getTemplate().getSpec().getContainers().get(0).getName());
         assertEquals(mm.image, dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage());
         assertEquals(getExpectedEnvVars(), dep.getSpec().getTemplate().getSpec().getContainers().get(0).getEnv());
         assertEquals(1, dep.getSpec().getTemplate().getSpec().getContainers().get(0).getPorts().size());
@@ -217,7 +234,7 @@ public class KafkaMirrorMakerClusterTest {
                 .endSpec()
                 .build();
         KafkaMirrorMakerCluster kc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
-        Deployment dep = kc.generateDeployment(emptyMap(), true, null);
+        Deployment dep = kc.generateDeployment(emptyMap(), true, null, null);
 
         assertEquals("my-secret-p", dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName());
         assertEquals("my-another-secret-p", dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName());
@@ -229,6 +246,8 @@ public class KafkaMirrorMakerClusterTest {
         assertEquals(KafkaMirrorMakerCluster.TLS_CERTS_VOLUME_MOUNT_PRODUCER + "my-another-secret-p",
                 containers.get(0).getVolumeMounts().get(2).getMountPath());
 
+        assertEquals("true",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_TLS_PRODUCER));
         assertEquals("my-secret-p/cert.crt;my-secret-p/new-cert.crt;my-another-secret-p/another-cert.crt",
                 AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_TRUSTED_CERTS_PRODUCER));
 
@@ -240,6 +259,8 @@ public class KafkaMirrorMakerClusterTest {
         assertEquals(KafkaMirrorMakerCluster.TLS_CERTS_VOLUME_MOUNT_CONSUMER + "my-another-secret-c",
                 containers.get(0).getVolumeMounts().get(4).getMountPath());
 
+        assertEquals("true",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_TLS_CONSUMER));
         assertEquals("my-secret-c/cert.crt;my-secret-c/new-cert.crt;my-another-secret-c/another-cert.crt",
                 AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_TRUSTED_CERTS_CONSUMER));
     }
@@ -277,7 +298,7 @@ public class KafkaMirrorMakerClusterTest {
                 .endSpec()
                 .build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
-        Deployment dep = mmc.generateDeployment(emptyMap(), true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
 
         assertEquals("user-secret-c", dep.getSpec().getTemplate().getSpec().getVolumes().get(4).getName());
 
@@ -335,7 +356,7 @@ public class KafkaMirrorMakerClusterTest {
                 .endSpec()
                 .build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
-        Deployment dep = mmc.generateDeployment(emptyMap(), true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
 
         assertEquals(3, dep.getSpec().getTemplate().getSpec().getVolumes().size());
         assertEquals("my-secret-p", dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName());
@@ -367,7 +388,7 @@ public class KafkaMirrorMakerClusterTest {
                 .endSpec()
                 .build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
-        Deployment dep = mmc.generateDeployment(emptyMap(), true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
 
         assertEquals("producer-secret", dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName());
 
@@ -376,6 +397,8 @@ public class KafkaMirrorMakerClusterTest {
         assertEquals(KafkaMirrorMakerCluster.PASSWORD_VOLUME_MOUNT_PRODUCER + "producer-secret",
                 containers.get(0).getVolumeMounts().get(1).getMountPath());
 
+        assertEquals("scram-sha-512",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_MECHANISM_PRODUCER));
         assertEquals("producer-secret/password",
                 AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_PASSWORD_FILE_PRODUCER));
         assertEquals("producer",
@@ -387,6 +410,63 @@ public class KafkaMirrorMakerClusterTest {
         assertEquals(KafkaMirrorMakerCluster.PASSWORD_VOLUME_MOUNT_CONSUMER + "consumer-secret",
                 containers.get(0).getVolumeMounts().get(2).getMountPath());
 
+        assertEquals("scram-sha-512",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_MECHANISM_CONSUMER));
+        assertEquals("consumer-secret/password",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_PASSWORD_FILE_CONSUMER));
+        assertEquals("consumer",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_USERNAME_CONSUMER));
+    }
+
+    @Test
+    public void testGenerateDeploymentWithPlain() {
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                    .editOrNewProducer()
+                        .withNewKafkaMirrorMakerAuthenticationPlain()
+                            .withUsername("producer")
+                            .withNewPasswordSecret()
+                                .withSecretName("producer-secret")
+                                .withPassword("password")
+                            .endPasswordSecret()
+                        .endKafkaMirrorMakerAuthenticationPlain()
+                    .endProducer()
+                    .editOrNewConsumer()
+                        .withNewKafkaMirrorMakerAuthenticationPlain()
+                            .withUsername("consumer")
+                            .withNewPasswordSecret()
+                                .withSecretName("consumer-secret")
+                                .withPassword("password")
+                            .endPasswordSecret()
+                        .endKafkaMirrorMakerAuthenticationPlain()
+                    .endConsumer()
+                .endSpec()
+                .build();
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
+
+        assertEquals("producer-secret", dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName());
+
+        List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
+
+        assertEquals(KafkaMirrorMakerCluster.PASSWORD_VOLUME_MOUNT_PRODUCER + "producer-secret",
+                containers.get(0).getVolumeMounts().get(1).getMountPath());
+
+        assertEquals("plain",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_MECHANISM_PRODUCER));
+        assertEquals("producer-secret/password",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_PASSWORD_FILE_PRODUCER));
+        assertEquals("producer",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_USERNAME_PRODUCER));
+
+        assertEquals("consumer-secret", dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName());
+
+
+        assertEquals(KafkaMirrorMakerCluster.PASSWORD_VOLUME_MOUNT_CONSUMER + "consumer-secret",
+                containers.get(0).getVolumeMounts().get(2).getMountPath());
+
+        assertEquals("plain",
+                AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_MECHANISM_CONSUMER));
         assertEquals("consumer-secret/password",
                 AbstractModel.containerEnvVars(containers.get(0)).get(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_SASL_PASSWORD_FILE_CONSUMER));
         assertEquals("consumer",
@@ -423,6 +503,7 @@ public class KafkaMirrorMakerClusterTest {
                                 .withLabels(podLabels)
                                 .withAnnotations(podAnots)
                             .endMetadata()
+                            .withNewPriorityClassName("top-priority")
                         .endPod()
                         .withNewPodDisruptionBudget()
                             .withNewMetadata()
@@ -436,9 +517,10 @@ public class KafkaMirrorMakerClusterTest {
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
         // Check Deployment
-        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
         assertTrue(dep.getMetadata().getLabels().entrySet().containsAll(depLabels.entrySet()));
         assertTrue(dep.getMetadata().getAnnotations().entrySet().containsAll(depAnots.entrySet()));
+        assertEquals("top-priority", dep.getSpec().getTemplate().getSpec().getPriorityClassName());
 
         // Check Pods
         assertTrue(dep.getSpec().getTemplate().getMetadata().getLabels().entrySet().containsAll(podLabels.entrySet()));
@@ -463,7 +545,7 @@ public class KafkaMirrorMakerClusterTest {
                 .build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
-        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
         assertEquals(Long.valueOf(123), dep.getSpec().getTemplate().getSpec().getTerminationGracePeriodSeconds());
     }
 
@@ -472,7 +554,7 @@ public class KafkaMirrorMakerClusterTest {
         KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource).build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
-        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
         assertEquals(Long.valueOf(30), dep.getSpec().getTemplate().getSpec().getTerminationGracePeriodSeconds());
     }
 
@@ -492,9 +574,48 @@ public class KafkaMirrorMakerClusterTest {
                 .build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
-        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
         assertEquals(2, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
         assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret1));
+        assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret2));
+    }
+
+    @Test
+    public void testImagePullSecretsFromCo() {
+        LocalObjectReference secret1 = new LocalObjectReference("some-pull-secret");
+        LocalObjectReference secret2 = new LocalObjectReference("some-other-pull-secret");
+
+        List<LocalObjectReference> secrets = new ArrayList<>(2);
+        secrets.add(secret1);
+        secrets.add(secret2);
+
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(this.resource, VERSIONS);
+
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, secrets);
+        assertEquals(2, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
+        assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret1));
+        assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret2));
+    }
+
+    @Test
+    public void testImagePullSecretsFromBoth() {
+        LocalObjectReference secret1 = new LocalObjectReference("some-pull-secret");
+        LocalObjectReference secret2 = new LocalObjectReference("some-other-pull-secret");
+
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                    .withNewTemplate()
+                        .withNewPod()
+                            .withImagePullSecrets(secret2)
+                        .endPod()
+                    .endTemplate()
+                .endSpec()
+                .build();
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
+
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, singletonList(secret1));
+        assertEquals(1, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
+        assertFalse(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret1));
         assertTrue(dep.getSpec().getTemplate().getSpec().getImagePullSecrets().contains(secret2));
     }
 
@@ -503,7 +624,7 @@ public class KafkaMirrorMakerClusterTest {
         KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource).build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
-        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
         assertEquals(0, dep.getSpec().getTemplate().getSpec().getImagePullSecrets().size());
     }
 
@@ -513,14 +634,14 @@ public class KafkaMirrorMakerClusterTest {
                 .editSpec()
                     .withNewTemplate()
                         .withNewPod()
-                            .withSecurityContext(new PodSecurityContextBuilder().withFsGroup(123L).withRunAsGroup(456L).withNewRunAsUser(789L).build())
+                            .withSecurityContext(new PodSecurityContextBuilder().withFsGroup(123L).withRunAsGroup(456L).withRunAsUser(789L).build())
                         .endPod()
                     .endTemplate()
                 .endSpec()
                 .build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
-        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
         assertNotNull(dep.getSpec().getTemplate().getSpec().getSecurityContext());
         assertEquals(Long.valueOf(123), dep.getSpec().getTemplate().getSpec().getSecurityContext().getFsGroup());
         assertEquals(Long.valueOf(456), dep.getSpec().getTemplate().getSpec().getSecurityContext().getRunAsGroup());
@@ -532,7 +653,7 @@ public class KafkaMirrorMakerClusterTest {
         KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource).build();
         KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
-        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null);
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
         assertNull(dep.getSpec().getTemplate().getSpec().getSecurityContext());
     }
 
@@ -566,10 +687,217 @@ public class KafkaMirrorMakerClusterTest {
     public void testImagePullPolicy() {
         KafkaMirrorMakerCluster kc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
 
-        Deployment dep = kc.generateDeployment(Collections.EMPTY_MAP, true, ImagePullPolicy.ALWAYS);
+        Deployment dep = kc.generateDeployment(Collections.EMPTY_MAP, true, ImagePullPolicy.ALWAYS, null);
         assertEquals(ImagePullPolicy.ALWAYS.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImagePullPolicy());
 
-        dep = kc.generateDeployment(Collections.EMPTY_MAP, true, ImagePullPolicy.IFNOTPRESENT);
+        dep = kc.generateDeployment(Collections.EMPTY_MAP, true, ImagePullPolicy.IFNOTPRESENT, null);
         assertEquals(ImagePullPolicy.IFNOTPRESENT.toString(), dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImagePullPolicy());
+    }
+
+    @Test
+    public void testResources() {
+        Map<String, Quantity> requests = new HashMap<>(2);
+        requests.put("cpu", new Quantity("250m"));
+        requests.put("memory", new Quantity("512Mi"));
+
+        Map<String, Quantity> limits = new HashMap<>(2);
+        limits.put("cpu", new Quantity("500m"));
+        limits.put("memory", new Quantity("1024Mi"));
+
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                    .withResources(new ResourceRequirementsBuilder().withLimits(limits).withRequests(requests).build())
+                .endSpec()
+                .build();
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
+
+        Deployment dep = mmc.generateDeployment(emptyMap(), true, null, null);
+        Container cont = dep.getSpec().getTemplate().getSpec().getContainers().get(0);
+        assertEquals(limits, cont.getResources().getLimits());
+        assertEquals(requests, cont.getResources().getRequests());
+    }
+
+    @Test
+    public void testJvmOptions() {
+        Map<String, String> xx = new HashMap<>(2);
+        xx.put("UseG1GC", "true");
+        xx.put("MaxGCPauseMillis", "20");
+
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                    .withNewJvmOptions()
+                        .withNewXms("512m")
+                        .withNewXmx("1024m")
+                        .withNewServer(true)
+                        .withXx(xx)
+                    .endJvmOptions()
+                .endSpec()
+                .build();
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
+
+        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null, null);
+        Container cont = dep.getSpec().getTemplate().getSpec().getContainers().get(0);
+        assertTrue(cont.getEnv().stream().filter(env -> "KAFKA_JVM_PERFORMANCE_OPTS".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").contains("-server"));
+        assertTrue(cont.getEnv().stream().filter(env -> "KAFKA_JVM_PERFORMANCE_OPTS".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").contains("-XX:+UseG1GC"));
+        assertTrue(cont.getEnv().stream().filter(env -> "KAFKA_JVM_PERFORMANCE_OPTS".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").contains("-XX:MaxGCPauseMillis=20"));
+        assertTrue(cont.getEnv().stream().filter(env -> "KAFKA_HEAP_OPTS".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").contains("-Xmx1024m"));
+        assertTrue(cont.getEnv().stream().filter(env -> "KAFKA_HEAP_OPTS".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").contains("-Xms512m"));
+    }
+
+    @Test
+    public void testDefaultProbes() {
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(this.resource, VERSIONS);
+
+        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null, null);
+        Container cont = dep.getSpec().getTemplate().getSpec().getContainers().get(0);
+        Probe livenessProbe = cont.getLivenessProbe();
+        Probe readinessProbe = cont.getReadinessProbe();
+
+        assertEquals("/opt/kafka/kafka_mirror_maker_liveness.sh", livenessProbe.getExec().getCommand().get(0));
+        assertEquals(new Integer(60), livenessProbe.getInitialDelaySeconds());
+        assertEquals(new Integer(5), livenessProbe.getTimeoutSeconds());
+
+        assertEquals(3, readinessProbe.getExec().getCommand().size());
+        assertEquals("test", readinessProbe.getExec().getCommand().get(0));
+        assertEquals("-f", readinessProbe.getExec().getCommand().get(1));
+        assertEquals("/tmp/mirror-maker-ready", readinessProbe.getExec().getCommand().get(2));
+        assertEquals(new Integer(60), readinessProbe.getInitialDelaySeconds());
+        assertEquals(new Integer(5), readinessProbe.getTimeoutSeconds());
+
+        assertTrue(cont.getEnv().stream().filter(env -> "STRIMZI_READINESS_PERIOD".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").equals("10"));
+        assertTrue(cont.getEnv().stream().filter(env -> "STRIMZI_LIVENESS_PERIOD".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").equals("10"));
+    }
+
+    @Test
+    public void testConfiguredProbes() {
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                    .withNewLivenessProbe()
+                        .withInitialDelaySeconds(120)
+                        .withTimeoutSeconds(10)
+                        .withPeriodSeconds(60)
+                    .endLivenessProbe()
+                    .withNewReadinessProbe()
+                        .withInitialDelaySeconds(121)
+                        .withTimeoutSeconds(11)
+                        .withPeriodSeconds(61)
+                    .endReadinessProbe()
+                .endSpec()
+                .build();
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
+
+        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null, null);
+        Container cont = dep.getSpec().getTemplate().getSpec().getContainers().get(0);
+        Probe livenessProbe = cont.getLivenessProbe();
+        Probe readinessProbe = cont.getReadinessProbe();
+
+        assertEquals("/opt/kafka/kafka_mirror_maker_liveness.sh", livenessProbe.getExec().getCommand().get(0));
+        assertEquals(new Integer(120), livenessProbe.getInitialDelaySeconds());
+        assertEquals(new Integer(10), livenessProbe.getTimeoutSeconds());
+        assertEquals(new Integer(60), livenessProbe.getPeriodSeconds());
+
+        assertEquals(3, readinessProbe.getExec().getCommand().size());
+        assertEquals("test", readinessProbe.getExec().getCommand().get(0));
+        assertEquals("-f", readinessProbe.getExec().getCommand().get(1));
+        assertEquals("/tmp/mirror-maker-ready", readinessProbe.getExec().getCommand().get(2));
+        assertEquals(new Integer(121), readinessProbe.getInitialDelaySeconds());
+        assertEquals(new Integer(11), readinessProbe.getTimeoutSeconds());
+        assertEquals(new Integer(61), readinessProbe.getPeriodSeconds());
+
+        assertTrue(cont.getEnv().stream().filter(env -> "STRIMZI_READINESS_PERIOD".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").equals("61"));
+        assertTrue(cont.getEnv().stream().filter(env -> "STRIMZI_LIVENESS_PERIOD".equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").equals("60"));
+    }
+
+    @Test
+    public void testKafkaMMContainerEnvVars() {
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = "TEST_ENV_1";
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        ContainerEnvVar envVar2 = new ContainerEnvVar();
+        String testEnvTwoKey = "TEST_ENV_2";
+        String testEnvTwoValue = "test.env.two";
+        envVar2.setName(testEnvTwoKey);
+        envVar2.setValue(testEnvTwoValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        testEnvs.add(envVar2);
+        ContainerTemplate kafkaMMContainer = new ContainerTemplate();
+        kafkaMMContainer.setEnv(testEnvs);
+
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                    .withNewTemplate()
+                        .withMirrorMakerContainer(kafkaMMContainer)
+                    .endTemplate()
+                .endSpec()
+                .build();
+
+        List<EnvVar> kafkaEnvVars = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS).getEnvVars();
+
+        assertTrue("Failed to correctly set container environment variable: " + testEnvOneKey,
+                kafkaEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
+        assertTrue("Failed to correctly set container environment variable: " + testEnvTwoKey,
+                kafkaEnvVars.stream().filter(env -> testEnvTwoKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvTwoValue));
+    }
+
+    @Test
+    public void testKafkaMMContainerEnvVarsConflict() {
+        ContainerEnvVar envVar1 = new ContainerEnvVar();
+        String testEnvOneKey = KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_BOOTSTRAP_SERVERS_CONSUMER;
+        String testEnvOneValue = "test.env.one";
+        envVar1.setName(testEnvOneKey);
+        envVar1.setValue(testEnvOneValue);
+
+        ContainerEnvVar envVar2 = new ContainerEnvVar();
+        String testEnvTwoKey = KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_WHITELIST;
+        String testEnvTwoValue = "test.env.two";
+        envVar2.setName(testEnvTwoKey);
+        envVar2.setValue(testEnvTwoValue);
+
+        List<ContainerEnvVar> testEnvs = new ArrayList<>();
+        testEnvs.add(envVar1);
+        testEnvs.add(envVar2);
+        ContainerTemplate kafkaMMContainer = new ContainerTemplate();
+        kafkaMMContainer.setEnv(testEnvs);
+
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                .withNewTemplate()
+                .withMirrorMakerContainer(kafkaMMContainer)
+                .endTemplate()
+                .endSpec()
+                .build();
+
+        List<EnvVar> kafkaEnvVars = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS).getEnvVars();
+
+        assertFalse("Failed to prevent over writing existing container environment variable: " + testEnvOneKey,
+                kafkaEnvVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvOneValue));
+        assertFalse("Failed to prevent over writing existing container environment variable: " + testEnvTwoKey,
+                kafkaEnvVars.stream().filter(env -> testEnvTwoKey.equals(env.getName()))
+                        .map(EnvVar::getValue).findFirst().orElse("").equals(testEnvTwoValue));
+    }
+
+    @Test
+    public void testTracing() {
+        KafkaMirrorMaker resource = new KafkaMirrorMakerBuilder(this.resource)
+                .editSpec()
+                    .withNewJaegerTracing()
+                    .endJaegerTracing()
+                .endSpec()
+                .build();
+        KafkaMirrorMakerCluster mmc = KafkaMirrorMakerCluster.fromCrd(resource, VERSIONS);
+
+        Deployment dep = mmc.generateDeployment(Collections.EMPTY_MAP, true, null, null);
+        Container cont = dep.getSpec().getTemplate().getSpec().getContainers().get(0);
+        assertTrue(cont.getEnv().stream().filter(env -> KafkaMirrorMakerCluster.ENV_VAR_STRIMZI_TRACING.equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").equals("jaeger"));
+        assertTrue(cont.getEnv().stream().filter(env -> KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_CONFIGURATION_CONSUMER.equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").contains("interceptor.classes=io.opentracing.contrib.kafka.TracingConsumerInterceptor"));
+        assertTrue(cont.getEnv().stream().filter(env -> KafkaMirrorMakerCluster.ENV_VAR_KAFKA_MIRRORMAKER_CONFIGURATION_PRODUCER.equals(env.getName())).map(EnvVar::getValue).findFirst().orElse("").contains("interceptor.classes=io.opentracing.contrib.kafka.TracingProducerInterceptor"));
     }
 }

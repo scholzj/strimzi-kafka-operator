@@ -20,19 +20,22 @@ public class KafkaVersionTest {
     @Test
     public void load() {
         KafkaVersion.Lookup loaded = new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap());
-        assertTrue(loaded.supportedVersions().contains("2.0.0"));
-        assertTrue(loaded.supportedVersions().contains("2.0.1"));
-        assertEquals("2.0.0", loaded.version("2.0.0").version());
-        assertEquals("2.0", loaded.version("2.0.0").protocolVersion());
-        assertEquals("2.0", loaded.version("2.0.0").messageVersion());
+        assertTrue(loaded.supportedVersions().contains("2.1.0"));
+        assertTrue(loaded.supportedVersions().contains("2.1.1"));
+        assertTrue(loaded.supportedVersions().contains("2.2.0"));
+        assertTrue(loaded.supportedVersions().contains("2.2.1"));
+        assertTrue(loaded.supportedVersions().contains("2.3.0"));
+        assertEquals("2.1.1", loaded.version("2.1.1").version());
+        assertEquals("2.1", loaded.version("2.1.1").protocolVersion());
+        assertEquals("2.1", loaded.version("2.1.1").messageVersion());
     }
 
     @Test
     public void parse() throws Exception {
         Map<String, KafkaVersion> map = new HashMap<>();
         KafkaVersion defaultVersion = KafkaVersion.parseKafkaVersions(new LineNumberReader(new StringReader(
-                "2.0.0 default 2.0 2.0 1234567890abcdef\n" +
-                        "2.0.1  2.0 2.0 1234567890abcdef")), map);
+                "2.0.0 default 2.0 2.0 1234567890abcdef 2.0.x\n" +
+                        "2.0.1  2.0 2.0 1234567890abcdef 2.0.x")), map);
         assertEquals("2.0.0", defaultVersion.version());
         assertEquals(2, map.size());
         assertTrue(map.containsKey("2.0.0"));

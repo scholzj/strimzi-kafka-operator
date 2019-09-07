@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 set -e
 
-java_images="java-base"
-# Note dependency order of the following images
-stunnel_images="stunnel-base zookeeper-stunnel kafka-stunnel entity-operator-stunnel"
-kafka_images="kafka-base kafka kafka-connect kafka-mirror-maker zookeeper test-client kafka-connect kafka-connect/s2i"
+java_images="operator"
+kafka_images="kafka test-client"
 
 # Kafka versions
 function load_checksums {
     declare -Ag checksums
     while read line; do
         checksums[$(echo "$line" | cut -d ' ' -f 1)]=$(echo "${line,,}" | cut -d ' ' -f 2)
-    done < <(sed -E -e '/^(#.*|[[:space:]]*)$/d' -e 's/^([0-9.]+)[[:space:]]+.*[[:space:]]+([[:alnum:]]+)$/\1 \2/g' ../kafka-versions)
+    done < <(sed -E -e '/^(#.*|[[:space:]]*)$/d' -e 's/^([0-9.]+)[[:space:]]+.*[[:space:]]+([[:alnum:]]+)[[:space:]]+.*$/\1 \2/g' ../kafka-versions)
+}
+
+function load_thirdptylibs {
+    declare -Ag thirdptylibs
+    while read line; do
+        thirdptylibs[$(echo "$line" | cut -d ' ' -f 1)]=$(echo "${line}" | cut -d ' ' -f 2)
+    done < <(sed -E -e '/^(#.*|[[:space:]]*)$/d' -e 's/^([0-9.]+)[[:space:]]+.*[[:space:]]+[[:alnum:]]+[[:space:]]+(.*)$$/\1 \2/g' ../kafka-versions)
 }
 
 #
@@ -31,9 +36,6 @@ function build {
     local java_version=${JAVA_VERSION:-1.8.0}
 
     # Images not depending on Kafka version
-    for image in $stunnel_images; do
-        DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS $(alternate_base $image)" make -C "$image" "$targets"
-    done
     for image in $java_images; do
         DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS --build-arg JAVA_VERSION=${java_version} $(alternate_base $image)" make -C "$image" "$targets"
     done
@@ -41,15 +43,22 @@ function build {
     # Images depending on Kafka version (possibly indirectly thru FROM)
     for kafka_version in ${!checksums[@]}; do
         sha=${checksums[$kafka_version]}
+        lib_directory=${thirdptylibs[$kafka_version]}
         for image in $kafka_images; do
-            DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS --build-arg JAVA_VERSION=${java_version} --build-arg KAFKA_VERSION=${kafka_version} --build-arg KAFKA_SHA512=${sha} $(alternate_base $image)" \
+            DOCKER_BUILD_ARGS="$DOCKER_BUILD_ARGS --build-arg JAVA_VERSION=${java_version} --build-arg KAFKA_VERSION=${kafka_version} --build-arg KAFKA_SHA512=${sha} --build-arg THIRD_PARTY_LIBS=${lib_directory} $(alternate_base $image)" \
             DOCKER_TAG="${tag}-kafka-${kafka_version}" \
             BUILD_TAG="build-kafka-${kafka_version}" \
+            KAFKA_VERSION="${kafka_version}" \
+            THIRD_PARTY_LIBS="${lib_directory}" \
             make -C "$image" "$targets"
         done
     done
 }
 
+# Check for bash >= 4
+if [[ $(echo "${BASH_VERSION}" | cut -c 1) -lt 4 ]]; then echo -e "You need bash version >= 4 to build Strimzi.\nRefer to HACKING.md for more information"; fi
+
 load_checksums
+load_thirdptylibs
 build $@
 
