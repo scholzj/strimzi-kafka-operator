@@ -14,6 +14,6 @@ jobs:
       with:
         java-version: 1.8
     - name: Build project
-      run: mvn -e -V -B -DskipTests install
+      run: mvn -e -V -B -DskipTests package
     - name: Run Spotbugs
       run: mvn spotbugs:check
