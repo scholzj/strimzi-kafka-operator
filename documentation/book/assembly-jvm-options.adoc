@@ -17,7 +17,7 @@ Apache Kafka and Apache Zookeeper are running inside of a Java Virtual Machine (
 JVM has many configuration options to optimize the performance for different platforms and architectures.
 {ProductName} allows configuring some of these options.
 
-Don't do this!
+e.g.: Don't do this!
 
 include::ref-jvm-options.adoc[leveloffset=+1]
 
