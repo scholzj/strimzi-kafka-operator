@@ -13,8 +13,8 @@
 :toclevels: 3
 
 // Name and version placeholders
-:ProductLongName: Strimzi
-:ProductName: Strimzi
+:ProductLongName: StrimziX
+:ProductName: StrimziX
 :ContextProduct: strimzi
 :OpenShiftVersion: 3.11 and later
 :KubernetesVersion: 1.11 and later
