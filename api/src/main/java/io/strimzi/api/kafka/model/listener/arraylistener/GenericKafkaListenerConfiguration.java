@@ -47,6 +47,7 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
     private Boolean useServiceDnsDomain;
     private GenericKafkaListenerConfigurationBootstrap bootstrap;
     private List<GenericKafkaListenerConfigurationBroker> brokers;
+    private Integer maxConnections;
 
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
@@ -153,6 +154,17 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
 
     public void setBrokers(List<GenericKafkaListenerConfigurationBroker> brokers) {
         this.brokers = brokers;
+    }
+
+    @Description("The maximum number of connections we allow for this listener in the broker at any time. " +
+            "New connections are blocked if the limit is reached.")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Integer getMaxConnections() {
+        return maxConnections;
+    }
+
+    public void setMaxConnections(Integer maxConnections) {
+        this.maxConnections = maxConnections;
     }
 
     @Override

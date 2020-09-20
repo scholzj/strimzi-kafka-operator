@@ -1,6 +1,10 @@
 
 # CHANGELOG
 
+## 0.23.0
+
+* Make it possible to configure maximum number of connections per listener
+
 ## 0.22.0
 
 * Add `v1beta2` version for all resources. `v1beta2` removes all deprecated fields.

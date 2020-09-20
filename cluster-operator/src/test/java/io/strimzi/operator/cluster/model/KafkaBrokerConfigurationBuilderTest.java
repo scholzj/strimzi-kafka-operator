@@ -412,6 +412,52 @@ public class KafkaBrokerConfigurationBuilderTest {
     }
 
     @Test
+    public void testMaxConnections()  {
+        GenericKafkaListener listener1 = new GenericKafkaListenerBuilder()
+                .withName("listener1")
+                .withPort(9100)
+                .withType(KafkaListenerType.INTERNAL)
+                .withTls(false)
+                .withNewConfiguration()
+                    .withMaxConnections(100)
+                .endConfiguration()
+                .build();
+
+        GenericKafkaListener listener2 = new GenericKafkaListenerBuilder()
+                .withName("listener2")
+                .withPort(9101)
+                .withType(KafkaListenerType.INTERNAL)
+                .withTls(false)
+                .withNewConfiguration()
+                    .withMaxConnections(1000)
+                .endConfiguration()
+                .build();
+
+        String configuration = new KafkaBrokerConfigurationBuilder()
+                .withListeners("my-cluster", "my-namespace", asList(listener1, listener2))
+                .build();
+
+        assertThat(configuration, isEquivalent("listener.name.replication-9091.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12",
+                "listener.name.replication-9091.ssl.keystore.password=${CERTS_STORE_PASSWORD}",
+                "listener.name.replication-9091.ssl.keystore.type=PKCS12",
+                "listener.name.replication-9091.ssl.truststore.location=/tmp/kafka/cluster.truststore.p12",
+                "listener.name.replication-9091.ssl.truststore.password=${CERTS_STORE_PASSWORD}",
+                "listener.name.replication-9091.ssl.truststore.type=PKCS12",
+                "listener.name.replication-9091.ssl.client.auth=required",
+                "listener.name.listener1-9100.max.connections=100",
+                "listener.name.listener1-9100.max.connections.per.ip=1",
+                "listener.name.listener2-9101.max.connections=1000",
+                "listener.name.listener2-9101.max.connections.per.ip=1",
+                "listeners=REPLICATION-9091://0.0.0.0:9091,LISTENER1-9100://0.0.0.0:9100,LISTENER2-9101://0.0.0.0:9101",
+                "advertised.listeners=REPLICATION-9091://my-cluster-kafka-${STRIMZI_BROKER_ID}.my-cluster-kafka-brokers.my-namespace.svc:9091,LISTENER1-9100://${STRIMZI_LISTENER1_9100_ADVERTISED_HOSTNAME}:${STRIMZI_LISTENER1_9100_ADVERTISED_PORT},LISTENER2-9101://${STRIMZI_LISTENER2_9101_ADVERTISED_HOSTNAME}:${STRIMZI_LISTENER2_9101_ADVERTISED_PORT}",
+                "listener.security.protocol.map=REPLICATION-9091:SSL,LISTENER1-9100:PLAINTEXT,LISTENER2-9101:PLAINTEXT",
+                "inter.broker.listener.name=REPLICATION-9091",
+                "sasl.enabled.mechanisms=",
+                "ssl.secure.random.implementation=SHA1PRNG",
+                "ssl.endpoint.identification.algorithm=HTTPS"));
+    }
+
+    @Test
     public void testWithPlainListenersWithoutAuth()  {
         GenericKafkaListener listener = new GenericKafkaListenerBuilder()
                 .withName("plain")
