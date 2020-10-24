@@ -477,7 +477,10 @@ spec:
                               description: The maximum number of connections we allow
                                 for this listener in the broker at any time. New connections
                                 are blocked if the limit is reached.
+<<<<<<< HEAD:install/cluster-operator/040-Crd-kafka.yaml
 >>>>>>> Add maxConnections configuration to listeners
+=======
+>>>>>>> Update CRDs:api/src/test/resources/io/strimzi/api/kafka/model/040-Crd-kafka-crdApi-v1beta1.yaml
                             preferredNodePortAddressType:
                               type: string
                               enum:
@@ -6313,10 +6316,21 @@ spec:
                               class:
                                 type: string
                                 description: Configures the `Ingress` class that defines
+<<<<<<< HEAD:install/cluster-operator/040-Crd-kafka.yaml
                                   which `Ingress` controller will be used. This field
                                   can be used only with `ingress` type listener. If
                                   not specified, the default Ingress controller will
                                   be used.
+=======
+                                  which `Ingress` controller will be used. If not
+                                  set, the `Ingress` class is set to `nginx`. This
+                                  field can be used only with `ingress` type listener.
+                              maxConnections:
+                                type: integer
+                                description: The maximum number of connections we
+                                  allow for this listener in the broker at any time.
+                                  New connections are blocked if the limit is reached.
+>>>>>>> Update CRDs:api/src/test/resources/io/strimzi/api/kafka/model/040-Crd-kafka-crdApi-v1beta1.yaml
                               preferredNodePortAddressType:
                                 type: string
                                 enum:
@@ -14688,10 +14702,21 @@ spec:
                               class:
                                 type: string
                                 description: Configures the `Ingress` class that defines
+<<<<<<< HEAD:install/cluster-operator/040-Crd-kafka.yaml
                                   which `Ingress` controller will be used. This field
                                   can be used only with `ingress` type listener. If
                                   not specified, the default Ingress controller will
                                   be used.
+=======
+                                  which `Ingress` controller will be used. If not
+                                  set, the `Ingress` class is set to `nginx`. This
+                                  field can be used only with `ingress` type listener.
+                              maxConnections:
+                                type: integer
+                                description: The maximum number of connections we
+                                  allow for this listener in the broker at any time.
+                                  New connections are blocked if the limit is reached.
+>>>>>>> Update CRDs:api/src/test/resources/io/strimzi/api/kafka/model/040-Crd-kafka-crdApi-v1beta1.yaml
                               preferredNodePortAddressType:
                                 type: string
                                 enum:
