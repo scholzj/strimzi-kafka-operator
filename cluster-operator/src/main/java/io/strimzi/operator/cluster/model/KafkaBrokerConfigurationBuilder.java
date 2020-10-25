@@ -249,7 +249,6 @@ public class KafkaBrokerConfigurationBuilder {
 
             if (configuration.getMaxConnections() != null)  {
                 writer.println(String.format("listener.name.%s.max.connections=%d", listenerNameInProperty, configuration.getMaxConnections()));
-                writer.println(String.format("listener.name.%s.max.connections.per.ip=%d", listenerNameInProperty, 1));
             }
         }
     }
