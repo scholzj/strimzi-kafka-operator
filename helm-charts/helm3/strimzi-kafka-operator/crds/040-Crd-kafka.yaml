@@ -292,6 +292,9 @@ spec:
                               class:
                                 type: string
                                 description: Configures the `Ingress` class that defines which `Ingress` controller will be used. This field can be used only with `ingress` type listener. If not specified, the default Ingress controller will be used.
+                              maxConnections:
+                                type: integer
+                                description: The maximum number of connections we allow for this listener in the broker at any time. New connections are blocked if the limit is reached.
                               preferredNodePortAddressType:
                                 type: string
                                 enum:
@@ -5285,6 +5288,9 @@ spec:
                                   class:
                                     type: string
                                     description: Configures the `Ingress` class that defines which `Ingress` controller will be used. This field can be used only with `ingress` type listener. If not specified, the default Ingress controller will be used.
+                                  maxConnections:
+                                    type: integer
+                                    description: The maximum number of connections we allow for this listener in the broker at any time. New connections are blocked if the limit is reached.
                                   preferredNodePortAddressType:
                                     type: string
                                     enum:
@@ -12381,6 +12387,9 @@ spec:
                                   class:
                                     type: string
                                     description: Configures the `Ingress` class that defines which `Ingress` controller will be used. This field can be used only with `ingress` type listener. If not specified, the default Ingress controller will be used.
+                                  maxConnections:
+                                    type: integer
+                                    description: The maximum number of connections we allow for this listener in the broker at any time. New connections are blocked if the limit is reached.
                                   preferredNodePortAddressType:
                                     type: string
                                     enum:
