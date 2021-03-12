@@ -4,6 +4,7 @@
 ## 0.23.0
 
 * Remove support for Kafka 2.5.x
+* Migrate to CRD v1 (required by Kubernetes 1.22+)
 
 ## 0.22.0
 
