@@ -28,7 +28,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
  */
 @ExtendWith(VertxExtension.class)
 public class KafkaCrdOperatorIT extends AbstractCustomResourceOperatorIT<KubernetesClient, Kafka, KafkaList> {
-    protected static final Logger log = LogManager.getLogger(KafkaCrdOperatorIT.class);
+    protected static final Logger LOGGER = LogManager.getLogger(KafkaCrdOperatorIT.class);
 
     @Override
     protected CrdOperator operator() {
@@ -60,9 +60,12 @@ public class KafkaCrdOperatorIT extends AbstractCustomResourceOperatorIT<Kuberne
                 .withNewSpec()
                     .withNewKafka()
                         .withReplicas(1)
-                        .withNewListeners()
-                            .addToGenericKafkaListeners(new GenericKafkaListenerBuilder().withName("listener").withPort(9092).withType(KafkaListenerType.INTERNAL).withTls(false).build())
-                        .endListeners()
+                        .withListeners(new GenericKafkaListenerBuilder()
+                                .withName("listener")
+                                .withPort(9092)
+                                .withType(KafkaListenerType.INTERNAL)
+                                .withTls(false)
+                                .build())
                         .withNewEphemeralStorage()
                         .endEphemeralStorage()
                     .endKafka()

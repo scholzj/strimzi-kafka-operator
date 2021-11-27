@@ -27,7 +27,7 @@ import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRuleBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPort;
-import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
+import io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.InlineLogging;
 import io.strimzi.api.kafka.model.Kafka;
@@ -44,16 +44,21 @@ import io.strimzi.api.kafka.model.storage.Storage;
 import io.strimzi.api.kafka.model.template.ZookeeperClusterTemplate;
 import io.strimzi.certs.CertAndKey;
 import io.strimzi.operator.common.MetricsAndLogging;
+import io.strimzi.operator.common.PasswordGenerator;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.resource.StatusUtils;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
+
 
 public class ZookeeperCluster extends AbstractModel {
     protected static final String APPLICATION_NAME = "zookeeper";
@@ -76,9 +81,19 @@ public class ZookeeperCluster extends AbstractModel {
     private static final String HEADLESS_SERVICE_NAME_SUFFIX = NAME_SUFFIX + "-nodes";
     private static final String NODES_CERTS_SUFFIX = NAME_SUFFIX + "-nodes";
 
+    // Env vars for JMX service
+    protected static final String ENV_VAR_ZOOKEEPER_JMX_ENABLED = "ZOOKEEPER_JMX_ENABLED";
+    private static final String ZOOKEEPER_JMX_SECRET_SUFFIX = NAME_SUFFIX + "-jmx";
+    private static final String SECRET_JMX_USERNAME_KEY = "jmx-username";
+    private static final String SECRET_JMX_PASSWORD_KEY = "jmx-password";
+    private static final String ENV_VAR_ZOOKEEPER_JMX_USERNAME = "ZOOKEEPER_JMX_USERNAME";
+    private static final String ENV_VAR_ZOOKEEPER_JMX_PASSWORD = "ZOOKEEPER_JMX_PASSWORD";
+
     // Zookeeper configuration
-    private boolean isSnapshotCheckEnabled;
+    private final boolean isSnapshotCheckEnabled;
     private String version;
+    private boolean isJmxEnabled;
+    private boolean isJmxAuthenticated;
 
     public static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder()
             .withTimeoutSeconds(5)
@@ -91,6 +106,8 @@ public class ZookeeperCluster extends AbstractModel {
     public static final String ENV_VAR_ZOOKEEPER_METRICS_ENABLED = "ZOOKEEPER_METRICS_ENABLED";
     public static final String ENV_VAR_ZOOKEEPER_CONFIGURATION = "ZOOKEEPER_CONFIGURATION";
     public static final String ENV_VAR_ZOOKEEPER_SNAPSHOT_CHECK_ENABLED = "ZOOKEEPER_SNAPSHOT_CHECK_ENABLED";
+
+    protected static final String CO_ENV_VAR_CUSTOM_ZOOKEEPER_POD_LABELS = "STRIMZI_CUSTOM_ZOOKEEPER_LABELS";
 
     // Config map keys
     public static final String CONFIG_MAP_KEY_ZOOKEEPER_NODE_COUNT = "zookeeper.node-count";
@@ -121,6 +138,14 @@ public class ZookeeperCluster extends AbstractModel {
         return cluster + ZookeeperCluster.HEADLESS_SERVICE_NAME_SUFFIX;
     }
 
+    private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
+    static {
+        String value = System.getenv(CO_ENV_VAR_CUSTOM_ZOOKEEPER_POD_LABELS);
+        if (value != null) {
+            DEFAULT_POD_LABELS.putAll(Util.parseMap(value));
+        }
+    }
+
     /**
      * Generates the DNS name of the pod including the cluster suffix
      * (i.e. usually with the cluster.local - but can be different on different clusters)
@@ -137,6 +162,24 @@ public class ZookeeperCluster extends AbstractModel {
                 namespace,
                 ZookeeperCluster.headlessServiceName(cluster),
                 ZookeeperCluster.zookeeperPodName(cluster, podId));
+    }
+
+    /**
+     * Generates the DNS name of the pod including the cluster suffix
+     * (i.e. usually with the cluster.local - but can be different on different clusters)
+     * Example: my-cluster-zookeeper-1.my-cluster-zookeeper-nodes.svc.cluster.local
+     *
+     * @param namespace     Namespace of the pod
+     * @param cluster       Name of the cluster
+     * @param podName       Name of the pod
+     *
+     * @return              DNS name of the pod
+     */
+    public static String podDnsName(String namespace, String cluster, String podName) {
+        return DnsNameGenerator.podDnsName(
+                namespace,
+                ZookeeperCluster.headlessServiceName(cluster),
+                podName);
     }
 
     /**
@@ -168,10 +211,11 @@ public class ZookeeperCluster extends AbstractModel {
     /**
      * Constructor
      *
+     * @param reconciliation The reconciliation
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
-    private ZookeeperCluster(HasMetadata resource) {
-        super(resource, APPLICATION_NAME);
+    private ZookeeperCluster(Reconciliation reconciliation, HasMetadata resource) {
+        super(reconciliation, resource, APPLICATION_NAME);
         this.name = zookeeperClusterName(cluster);
         this.serviceName = serviceName(cluster);
         this.headlessServiceName = headlessServiceName(cluster);
@@ -191,13 +235,13 @@ public class ZookeeperCluster extends AbstractModel {
         this.logAndMetricsConfigMountPath = "/opt/kafka/custom-config/";
     }
 
-    public static ZookeeperCluster fromCrd(Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
-        return fromCrd(kafkaAssembly, versions, null, 0);
+    public static ZookeeperCluster fromCrd(Reconciliation reconciliation, Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
+        return fromCrd(reconciliation, kafkaAssembly, versions, null, 0);
     }
 
-    @SuppressWarnings({"checkstyle:MethodLength", "checkstyle:CyclomaticComplexity", "deprecation"})
-    public static ZookeeperCluster fromCrd(Kafka kafkaAssembly, KafkaVersion.Lookup versions, Storage oldStorage, int oldReplicas) {
-        ZookeeperCluster zk = new ZookeeperCluster(kafkaAssembly);
+    @SuppressWarnings({"checkstyle:MethodLength", "checkstyle:CyclomaticComplexity"})
+    public static ZookeeperCluster fromCrd(Reconciliation reconciliation, Kafka kafkaAssembly, KafkaVersion.Lookup versions, Storage oldStorage, int oldReplicas) {
+        ZookeeperCluster zk = new ZookeeperCluster(reconciliation, kafkaAssembly);
         zk.setOwnerReference(kafkaAssembly);
         ZookeeperClusterSpec zookeeperClusterSpec = kafkaAssembly.getSpec().getZookeeper();
 
@@ -206,7 +250,7 @@ public class ZookeeperCluster extends AbstractModel {
             replicas = ZookeeperClusterSpec.DEFAULT_REPLICAS;
         }
         if (replicas == 1 && zookeeperClusterSpec.getStorage() != null && "ephemeral".equals(zookeeperClusterSpec.getStorage().getType())) {
-            log.warn("A ZooKeeper cluster with a single replica and ephemeral storage will be in a defective state after any restart or rolling update. It is recommended that a minimum of three replicas are used.");
+            LOGGER.warnCr(reconciliation, "A ZooKeeper cluster with a single replica and ephemeral storage will be in a defective state after any restart or rolling update. It is recommended that a minimum of three replicas are used.");
         }
         zk.setReplicas(replicas);
 
@@ -243,14 +287,14 @@ public class ZookeeperCluster extends AbstractModel {
             Storage newStorage = zookeeperClusterSpec.getStorage();
             AbstractModel.validatePersistentStorage(newStorage);
 
-            StorageDiff diff = new StorageDiff(oldStorage, newStorage, oldReplicas, zookeeperClusterSpec.getReplicas());
+            StorageDiff diff = new StorageDiff(reconciliation, oldStorage, newStorage, oldReplicas, zookeeperClusterSpec.getReplicas());
 
             if (!diff.isEmpty()) {
-                log.warn("Only the following changes to Zookeeper storage are allowed: " +
+                LOGGER.warnCr(reconciliation, "Only the following changes to Zookeeper storage are allowed: " +
                         "changing the deleteClaim flag, " +
                         "changing overrides to nodes which do not exist yet " +
                         "and increasing size of persistent claim volumes (depending on the volume type and used storage class).");
-                log.warn("The desired ZooKeeper storage configuration in the custom resource {}/{} contains changes which are not allowed. As " +
+                LOGGER.warnCr(reconciliation, "The desired ZooKeeper storage configuration in the custom resource {}/{} contains changes which are not allowed. As " +
                         "a result, all storage changes will be ignored. Use DEBUG level logging for more information " +
                         "about the detected changes.", kafkaAssembly.getMetadata().getNamespace(), kafkaAssembly.getMetadata().getName());
 
@@ -268,11 +312,16 @@ public class ZookeeperCluster extends AbstractModel {
             zk.setStorage(zookeeperClusterSpec.getStorage());
         }
 
-        zk.setConfiguration(new ZookeeperConfiguration(zookeeperClusterSpec.getConfig().entrySet()));
+        zk.setConfiguration(new ZookeeperConfiguration(reconciliation, zookeeperClusterSpec.getConfig().entrySet()));
 
         zk.setResources(zookeeperClusterSpec.getResources());
 
         zk.setJvmOptions(zookeeperClusterSpec.getJvmOptions());
+
+        if (zookeeperClusterSpec.getJmxOptions() != null) {
+            zk.setJmxEnabled(Boolean.TRUE);
+            AuthenticationUtils.configureZookeeperJmxOptions(zookeeperClusterSpec.getJmxOptions().getAuthentication(), zk);
+        }
 
         if (zookeeperClusterSpec.getTemplate() != null) {
             ZookeeperClusterTemplate template = zookeeperClusterSpec.getTemplate();
@@ -306,8 +355,20 @@ public class ZookeeperCluster extends AbstractModel {
                 zk.templateZookeeperContainerSecurityContext = template.getZookeeperContainer().getSecurityContext();
             }
 
+            if (template.getServiceAccount() != null && template.getServiceAccount().getMetadata() != null) {
+                zk.templateServiceAccountLabels = template.getServiceAccount().getMetadata().getLabels();
+                zk.templateServiceAccountAnnotations = template.getServiceAccount().getMetadata().getAnnotations();
+            }
+
+            if (template.getJmxSecret() != null && template.getJmxSecret().getMetadata() != null) {
+                zk.templateJmxSecretLabels = template.getJmxSecret().getMetadata().getLabels();
+                zk.templateJmxSecretAnnotations = template.getJmxSecret().getMetadata().getAnnotations();
+            }
+
             ModelUtils.parsePodDisruptionBudgetTemplate(zk, template.getPodDisruptionBudget());
         }
+
+        zk.templatePodLabels = Util.mergeLabelsOrAnnotations(zk.templatePodLabels, DEFAULT_POD_LABELS);
 
         return zk;
     }
@@ -395,7 +456,7 @@ public class ZookeeperCluster extends AbstractModel {
         expressions5.put(Labels.STRIMZI_NAME_LABEL, CruiseControl.cruiseControlName(cluster));
         labelSelector5.setMatchLabels(expressions5);
         cruiseControlPeer.setPodSelector(labelSelector5);
-            
+
         // This is a hack because we have no guarantee that the CO namespace has some particular labels
         List<NetworkPolicyPeer> clientsPortPeers = new ArrayList<>(4);
         clientsPortPeers.add(kafkaClusterPeer);
@@ -411,12 +472,24 @@ public class ZookeeperCluster extends AbstractModel {
             NetworkPolicyIngressRule metricsRule = new NetworkPolicyIngressRuleBuilder()
                     .addNewPort()
                         .withNewPort(METRICS_PORT)
-                        .withNewProtocol("TCP")
+                        .withProtocol("TCP")
                     .endPort()
                     .withFrom()
                     .build();
 
             rules.add(metricsRule);
+        }
+
+        if (isJmxEnabled) {
+            NetworkPolicyPort jmxPort = new NetworkPolicyPort();
+            jmxPort.setPort(new IntOrString(JMX_PORT));
+
+            NetworkPolicyIngressRule jmxRule = new NetworkPolicyIngressRuleBuilder()
+                    .withPorts(jmxPort)
+                    .withFrom()
+                    .build();
+
+            rules.add(jmxRule);
         }
 
         NetworkPolicy networkPolicy = new NetworkPolicyBuilder()
@@ -432,7 +505,7 @@ public class ZookeeperCluster extends AbstractModel {
                 .endSpec()
                 .build();
 
-        log.trace("Created network policy {}", networkPolicy);
+        LOGGER.traceCr(reconciliation, "Created network policy {}", networkPolicy);
         return networkPolicy;
     }
 
@@ -460,16 +533,15 @@ public class ZookeeperCluster extends AbstractModel {
      * @param kafka The Kafka custom resource
      * @param clusterCa The CA for cluster certificates
      * @param isMaintenanceTimeWindowsSatisfied Indicates whether we are in the maintenance window or not.
-     *                                          This is used for certificate renewals
      */
     public void generateCertificates(Kafka kafka, ClusterCa clusterCa, boolean isMaintenanceTimeWindowsSatisfied) {
-        log.debug("Generating certificates");
+        LOGGER.debugCr(reconciliation, "Generating certificates");
         try {
             nodeCerts = clusterCa.generateZkCerts(kafka, isMaintenanceTimeWindowsSatisfied);
         } catch (IOException e) {
-            log.warn("Error while generating certificates", e);
+            LOGGER.warnCr(reconciliation, "Error while generating certificates", e);
         }
-        log.debug("End generating certificates");
+        LOGGER.debugCr(reconciliation, "End generating certificates");
     }
 
     /**
@@ -526,6 +598,14 @@ public class ZookeeperCluster extends AbstractModel {
             varList.add(buildEnvVar(ENV_VAR_STRIMZI_JAVA_SYSTEM_PROPERTIES, ModelUtils.getJavaSystemPropertiesToString(javaSystemProperties)));
         }
 
+        if (isJmxEnabled) {
+            varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_JMX_ENABLED, "true"));
+            if (isJmxAuthenticated) {
+                varList.add(buildEnvVarFromSecret(ENV_VAR_ZOOKEEPER_JMX_USERNAME, jmxSecretName(cluster), SECRET_JMX_USERNAME_KEY));
+                varList.add(buildEnvVarFromSecret(ENV_VAR_ZOOKEEPER_JMX_PASSWORD, jmxSecretName(cluster), SECRET_JMX_PASSWORD_KEY));
+            }
+        }
+
         heapOptions(varList, 0.75, 2L * 1024L * 1024L * 1024L);
         jvmPerformanceOptions(varList);
         varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_CONFIGURATION, configuration.getConfiguration()));
@@ -539,10 +619,14 @@ public class ZookeeperCluster extends AbstractModel {
     }
 
     private List<ServicePort> getServicePortList() {
-        List<ServicePort> portList = new ArrayList<>(3);
+        List<ServicePort> portList = new ArrayList<>(4);
         portList.add(createServicePort(CLIENT_TLS_PORT_NAME, CLIENT_TLS_PORT, CLIENT_TLS_PORT, "TCP"));
         portList.add(createServicePort(CLUSTERING_PORT_NAME, CLUSTERING_PORT, CLUSTERING_PORT, "TCP"));
         portList.add(createServicePort(LEADER_ELECTION_PORT_NAME, LEADER_ELECTION_PORT, LEADER_ELECTION_PORT, "TCP"));
+
+        if (isJmxEnabled) {
+            portList.add(createServicePort(JMX_PORT_NAME, JMX_PORT, JMX_PORT, "TCP"));
+        }
 
         return portList;
     }
@@ -566,7 +650,7 @@ public class ZookeeperCluster extends AbstractModel {
 
         if (storage instanceof EphemeralStorage) {
             String sizeLimit = ((EphemeralStorage) storage).getSizeLimit();
-            volumeList.add(VolumeUtils.createEmptyDirVolume(VOLUME_NAME, sizeLimit));
+            volumeList.add(VolumeUtils.createEmptyDirVolume(VOLUME_NAME, sizeLimit, null));
         }
 
         volumeList.add(createTempDirVolume());
@@ -659,5 +743,41 @@ public class ZookeeperCluster extends AbstractModel {
         ConfigMap zkConfigMap = super.generateMetricsAndLogConfigMap(metricsAndLogging);
         zkConfigMap.getData().put(CONFIG_MAP_KEY_ZOOKEEPER_NODE_COUNT, Integer.toString(getReplicas()));
         return zkConfigMap;
+    }
+
+    public void setJmxEnabled(boolean jmxEnabled) {
+        isJmxEnabled = jmxEnabled;
+    }
+
+    public boolean isJmxAuthenticated() {
+        return isJmxAuthenticated;
+    }
+
+    public void setJmxAuthenticated(boolean jmxAuthenticated) {
+        isJmxAuthenticated = jmxAuthenticated;
+    }
+
+    /**
+     * @param cluster The name of the cluster.
+     * @return The name of the jmx Secret.
+     */
+    public static String jmxSecretName(String cluster) {
+        return cluster + ZookeeperCluster.ZOOKEEPER_JMX_SECRET_SUFFIX;
+    }
+
+    /**
+     * Generate the Secret containing the username and password to secure the jmx port on the zookeeper nodes
+     *
+     * @return The generated Secret
+     */
+    public Secret generateJmxSecret() {
+        Map<String, String> data = new HashMap<>(2);
+        String[] keys = {SECRET_JMX_USERNAME_KEY, SECRET_JMX_PASSWORD_KEY};
+        PasswordGenerator passwordGenerator = new PasswordGenerator(16);
+        for (String key : keys) {
+            data.put(key, Base64.getEncoder().encodeToString(passwordGenerator.generate().getBytes(StandardCharsets.US_ASCII)));
+        }
+
+        return createJmxSecret(ZookeeperCluster.jmxSecretName(cluster), data);
     }
 }

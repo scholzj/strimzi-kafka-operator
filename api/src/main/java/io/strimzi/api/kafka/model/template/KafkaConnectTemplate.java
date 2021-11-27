@@ -17,15 +17,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Representation of a template for Kafka Connect and Kafka Connect S2I resources.
+ * Representation of a template for Kafka Connect resources.
  */
 @Buildable(
         editableEnabled = false,
         builderPackage = Constants.FABRIC8_KUBERNETES_API
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonPropertyOrder({
-        "deployment", "pod", "apiService"})
+@JsonPropertyOrder({"deployment", "pod", "apiService", "connectContainer", "initContainer", "podDisruptionBudget",
+    "serviceAccount", "clusterRoleBinding", "buildPod", "buildContainer", "buildConfig", "buildServiceAccount", "jmxSecret"})
 @EqualsAndHashCode
 public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
@@ -38,8 +38,11 @@ public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreser
     private ContainerTemplate connectContainer;
     private ContainerTemplate initContainer;
     private ContainerTemplate buildContainer;
-    private ResourceTemplate buildConfig;
+    private BuildConfigTemplate buildConfig;
     private ResourceTemplate clusterRoleBinding;
+    private ResourceTemplate serviceAccount;
+    private ResourceTemplate buildServiceAccount;
+    private ResourceTemplate jmxSecret;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for Kafka Connect `Deployment`.")
@@ -127,11 +130,11 @@ public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreser
     @Description("Template for the Kafka Connect BuildConfig used to build new container images. " +
             "The BuildConfig is used only on OpenShift.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    public ResourceTemplate getBuildConfig() {
+    public BuildConfigTemplate getBuildConfig() {
         return buildConfig;
     }
 
-    public void setBuildConfig(ResourceTemplate buildConfig) {
+    public void setBuildConfig(BuildConfigTemplate buildConfig) {
         this.buildConfig = buildConfig;
     }
 
@@ -143,6 +146,35 @@ public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreser
 
     public void setClusterRoleBinding(ResourceTemplate clusterRoleBinding) {
         this.clusterRoleBinding = clusterRoleBinding;
+    }
+
+    @Description("Template for the Kafka Connect service account.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ResourceTemplate getServiceAccount() {
+        return serviceAccount;
+    }
+
+    public void setServiceAccount(ResourceTemplate serviceAccount) {
+        this.serviceAccount = serviceAccount;
+    }
+
+    @Description("Template for the Kafka Connect Build service account.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ResourceTemplate getBuildServiceAccount() {
+        return buildServiceAccount;
+    }
+
+    public void setBuildServiceAccount(ResourceTemplate buildServiceAccount) {
+        this.buildServiceAccount = buildServiceAccount;
+    }
+
+    @Description("Template for Secret of the Kafka Connect Cluster JMX authentication.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ResourceTemplate getJmxSecret() {
+        return jmxSecret;
+    }
+    public void setJmxSecret(ResourceTemplate jmxSecret) {
+        this.jmxSecret = jmxSecret;
     }
 
     @Override

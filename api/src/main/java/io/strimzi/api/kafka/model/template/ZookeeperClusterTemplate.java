@@ -6,11 +6,9 @@ package io.strimzi.api.kafka.model.template;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import io.strimzi.api.annotations.DeprecatedProperty;
 import io.strimzi.api.kafka.model.Constants;
 import io.strimzi.api.kafka.model.UnknownPropertyPreserving;
 import io.strimzi.crdgenerator.annotations.Description;
-import io.strimzi.crdgenerator.annotations.PresentInVersions;
 import io.sundr.builder.annotations.Buildable;
 import lombok.EqualsAndHashCode;
 
@@ -27,8 +25,8 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
-        "statefulset", "pod", "clientService", "nodesService", "persistentVolumeClaim",
-        "podDisruptionBudget", "zookeeperContainer", "tlsSidecarContainer"})
+    "statefulset", "pod", "clientService", "nodesService", "persistentVolumeClaim",
+    "podDisruptionBudget", "zookeeperContainer", "serviceAccount", "jmxSecret"})
 @EqualsAndHashCode
 public class ZookeeperClusterTemplate implements Serializable, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
@@ -40,7 +38,8 @@ public class ZookeeperClusterTemplate implements Serializable, UnknownPropertyPr
     private ResourceTemplate persistentVolumeClaim;
     private PodDisruptionBudgetTemplate podDisruptionBudget;
     private ContainerTemplate zookeeperContainer;
-    private ContainerTemplate tlsSidecarContainer;
+    private ResourceTemplate serviceAccount;
+    private ResourceTemplate jmxSecret;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for ZooKeeper `StatefulSet`.")
@@ -113,18 +112,23 @@ public class ZookeeperClusterTemplate implements Serializable, UnknownPropertyPr
         this.zookeeperContainer = zookeeperContainer;
     }
 
-    @PresentInVersions("v1alpha1-v1beta1")
-    @DeprecatedProperty(removalVersion = "v1beta2")
-    @Deprecated
-    @Description("Template for the Zookeeper server TLS sidecar container. " +
-            "The TLS sidecar is not used anymore and this option will be ignored.")
+    @Description("Template for the ZooKeeper service account.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    public ContainerTemplate getTlsSidecarContainer() {
-        return tlsSidecarContainer;
+    public ResourceTemplate getServiceAccount() {
+        return serviceAccount;
     }
 
-    public void setTlsSidecarContainer(ContainerTemplate tlsSidecarContainer) {
-        this.tlsSidecarContainer = tlsSidecarContainer;
+    public void setServiceAccount(ResourceTemplate serviceAccount) {
+        this.serviceAccount = serviceAccount;
+    }
+
+    @Description("Template for Secret of the Zookeeper Cluster JMX authentication")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ResourceTemplate getJmxSecret() {
+        return jmxSecret;
+    }
+    public void setJmxSecret(ResourceTemplate jmxSecret) {
+        this.jmxSecret = jmxSecret;
     }
 
     @Override

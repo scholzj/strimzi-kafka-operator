@@ -9,6 +9,7 @@ import io.strimzi.kafka.config.model.ConfigModel;
 import io.strimzi.kafka.config.model.Type;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.annotations.IsolatedSuite;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.utils.TestKafkaVersion;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaUtils;
@@ -40,10 +41,10 @@ import static org.hamcrest.CoreMatchers.is;
  */
 @Tag(REGRESSION)
 @Tag(DYNAMIC_CONFIGURATION)
+@IsolatedSuite
 public class DynamicConfigurationSharedST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(DynamicConfigurationSharedST.class);
-    private static final String NAMESPACE = "kafka-configuration-shared-cluster-test";
     private final String dynamicConfigurationSharedClusterName = "dynamic-configuration-shared-cluster-name";
 
     @TestFactory
@@ -52,15 +53,21 @@ public class DynamicConfigurationSharedST extends AbstractST {
         List<DynamicTest> dynamicTests = new ArrayList<>(40);
 
         Map<String, Object> testCases = generateTestCases(TestKafkaVersion.getKafkaVersionsInMap().get(Environment.ST_KAFKA_VERSION).version());
+        List<String> chosenTestCases = stochasticSelection(testCases);
 
-        testCases.forEach((key, value) -> dynamicTests.add(DynamicTest.dynamicTest("Test " + key + "->" + value, () -> {
-            // exercise phase
-            KafkaUtils.updateConfigurationWithStabilityWait(dynamicConfigurationSharedClusterName, key, value);
+        for (String key : chosenTestCases) {
+            final Object value = testCases.get(key);
 
-            // verify phase
-            assertThat(KafkaUtils.verifyCrDynamicConfiguration(dynamicConfigurationSharedClusterName, key, value), is(true));
-            assertThat(KafkaUtils.verifyPodDynamicConfiguration(KafkaResources.kafkaStatefulSetName(dynamicConfigurationSharedClusterName), key, value), is(true));
-        })));
+            dynamicTests.add(DynamicTest.dynamicTest("Test " + key + "->" + value, () -> {
+                // exercise phase
+                KafkaUtils.updateConfigurationWithStabilityWait(dynamicConfigurationSharedClusterName, key, value);
+
+                // verify phase
+                assertThat(KafkaUtils.verifyCrDynamicConfiguration(dynamicConfigurationSharedClusterName, key, value), is(true));
+                assertThat(KafkaUtils.verifyPodDynamicConfiguration(KafkaResources.kafkaStatefulSetName(dynamicConfigurationSharedClusterName), key, value), is(true));
+            }));
+        }
+
         return dynamicTests.iterator();
     }
 
@@ -178,10 +185,34 @@ public class DynamicConfigurationSharedST extends AbstractST {
         return testCases;
     }
 
+    /**
+     * Method, which randomly choose 3 dynamic properties for verification from @see{testCases}. In this case we are ok
+     * with stochastic selection, because we don't care, which configuration is used. Furthermore, it's the same path
+     * of code (i.e., same CFG (control flow graph), which does not triggers RollingUpdate).
+     * @param testCases test cases, where each consist of one dynamic property
+     * @return List 3 chosen dynamic properties
+     */
+    private static List<String> stochasticSelection(final Map<String, Object> testCases) {
+        final List<String> testCaseKeys = new ArrayList<>(testCases.keySet());
+        final List<String> chosenDynConfigurations = new ArrayList<>(3);
+
+        for (int i = 0; i < 3; i++) {
+            final int stochasticNumber = rng.nextInt(testCaseKeys.size());
+            final String chosenDynConfiguration = testCaseKeys.get(stochasticNumber);
+
+            LOGGER.debug("New configuration in List of dynamic configuration:\n{}", chosenDynConfigurations.toString());
+            chosenDynConfigurations.add(chosenDynConfiguration);
+            // remove it from `testCaseKeys` list to not include it twice
+            testCaseKeys.remove(chosenDynConfiguration);
+        }
+
+        LOGGER.debug("Chosen dynamic configuration are:\n{}", chosenDynConfigurations.toString());
+
+        return chosenDynConfigurations;
+    }
+
     @BeforeAll
     void setup(ExtensionContext extensionContext) {
-        installClusterOperator(extensionContext, NAMESPACE);
-
         LOGGER.info("Deploying shared Kafka across all test cases!");
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaPersistent(dynamicConfigurationSharedClusterName, 3).build());
     }

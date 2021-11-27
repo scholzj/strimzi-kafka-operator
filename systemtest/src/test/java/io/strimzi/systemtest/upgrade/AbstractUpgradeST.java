@@ -4,6 +4,7 @@
  */
 package io.strimzi.systemtest.upgrade;
 
+import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.strimzi.api.kafka.model.Constants;
 import io.strimzi.api.kafka.model.Kafka;
@@ -12,20 +13,24 @@ import io.strimzi.api.kafka.model.KafkaTopic;
 import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.resources.ResourceManager;
+import io.strimzi.systemtest.resources.crd.KafkaResource;
 import io.strimzi.systemtest.resources.crd.kafkaclients.KafkaBasicExampleClients;
 import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaUserTemplates;
 import io.strimzi.systemtest.utils.ClientUtils;
 import io.strimzi.systemtest.utils.FileUtils;
+import io.strimzi.systemtest.utils.RollingUpdateUtils;
 import io.strimzi.systemtest.utils.StUtils;
 import io.strimzi.systemtest.utils.TestKafkaVersion;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaUserUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaUtils;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.utils.kubeUtils.controllers.DeploymentUtils;
-import io.strimzi.systemtest.utils.kubeUtils.controllers.StatefulSetUtils;
+import io.strimzi.systemtest.utils.kubeUtils.objects.PodUtils;
 import io.strimzi.test.TestUtils;
+import io.strimzi.test.annotations.IsolatedSuite;
 import io.strimzi.test.executor.Exec;
+import io.strimzi.test.executor.ExecResult;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.LogManager;
@@ -46,6 +51,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+import static io.strimzi.systemtest.Constants.GLOBAL_POLL_INTERVAL;
+import static io.strimzi.systemtest.Constants.GLOBAL_TIMEOUT;
+import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
+import static io.strimzi.systemtest.Constants.PATH_TO_KAFKA_TOPIC_CONFIG;
+import static io.strimzi.systemtest.Constants.PATH_TO_PACKAGING_EXAMPLES;
 import static io.strimzi.test.k8s.KubeClusterResource.cmdKubeClient;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -53,21 +63,25 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
 
+@IsolatedSuite
 public class AbstractUpgradeST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(AbstractUpgradeST.class);
-    private io.strimzi.systemtest.Constants systemtestConstants;
 
     protected File coDir = null;
     protected File kafkaTopicYaml = null;
     protected File kafkaUserYaml = null;
+
+    protected final String clusterName = "my-cluster";
 
     protected Map<String, String> zkPods;
     protected Map<String, String> kafkaPods;
     protected Map<String, String> eoPods;
     protected Map<String, String> coPods;
 
-    protected final String clusterName = "my-cluster";
+    protected LabelSelector kafkaSelector = KafkaResource.getLabelSelector(clusterName, KafkaResources.kafkaStatefulSetName(clusterName));
+    protected LabelSelector zkSelector = KafkaResource.getLabelSelector(clusterName, KafkaResources.zookeeperStatefulSetName(clusterName));
+
 
     protected final String topicName = "my-topic";
     protected final String userName = "my-user";
@@ -91,6 +105,55 @@ public class AbstractUpgradeST extends AbstractST {
         }
     }
 
+    protected static Map<String, JsonObject> buildMidStepUpgradeData(JsonObject jsonData) {
+        List<TestKafkaVersion> testKafkaVersions = TestKafkaVersion.getSupportedKafkaVersions();
+        TestKafkaVersion testKafkaVersion = testKafkaVersions.get(testKafkaVersions.size() - 1);
+
+        Map<String, JsonObject> steps = new HashMap<>();
+
+        String midStepUrl = jsonData.getString("urlFrom");
+        String midStepVersion = jsonData.getString("fromVersion");
+        String midStepExamples = jsonData.getString("fromExamples");
+
+        JsonObject conversionTool = jsonData.getJsonObject("conversionTool");
+
+        // X -> 0.22.0 data
+        JsonObject midStep = JsonObject.mapFrom(jsonData);
+        JsonObject afterMidStep = JsonObject.mapFrom(jsonData);
+        if (jsonData.getString("prevVersion").isEmpty()) {
+            midStep.put("urlFrom", jsonData.getString("urlFrom"));
+            midStep.put("fromVersion", jsonData.getString("fromVersion"));
+            midStep.put("fromExamples", jsonData.getString("fromExamples"));
+            afterMidStep.put("urlFrom", "HEAD");
+            afterMidStep.put("fromVersion", "HEAD");
+            afterMidStep.put("fromExamples", "HEAD");
+        } else {
+            midStep.put("urlFrom", jsonData.getString("urlPrevVersion"));
+            midStep.put("fromVersion", jsonData.getString("prevVersion"));
+            midStep.put("fromExamples", jsonData.getString("prevVersionExamples"));
+            afterMidStep.put("urlFrom", midStepUrl);
+            afterMidStep.put("fromVersion", midStepVersion);
+            afterMidStep.put("fromExamples", midStepExamples);
+        }
+
+        midStep.put("urlTo", midStepUrl);
+        midStep.put("toVersion", midStepVersion);
+        midStep.put("toExamples", midStepExamples);
+        midStep.put("urlToConversionTool", conversionTool.getString("urlToConversionTool"));
+        midStep.put("toConversionTool", conversionTool.getString("toConversionTool"));
+
+        JsonObject midStepProcedures = new JsonObject();
+        midStepProcedures.put("kafkaVersion", testKafkaVersion.version());
+        midStepProcedures.put("logMessageVersion", testKafkaVersion.messageVersion());
+        midStepProcedures.put("interBrokerProtocolVersion", testKafkaVersion.protocolVersion());
+        midStep.put("proceduresAfterOperatorUpgrade", midStepProcedures);
+
+        steps.put("midStep", midStep);
+        steps.put("toHEAD", afterMidStep);
+
+        return steps;
+    }
+
     protected static Stream<Arguments> loadJsonUpgradeData() {
         JsonArray upgradeData = readUpgradeJson(UPGRADE_JSON_FILE);
         List<Arguments> parameters = new LinkedList<>();
@@ -112,77 +175,21 @@ public class AbstractUpgradeST extends AbstractST {
             procedures.put("interBrokerProtocolVersion", testKafkaVersion.protocolVersion());
             data.put("proceduresAfterOperatorUpgrade", procedures);
 
-            // fromVersion is the mid step here, for CO upgrade we'll use this: 'prevVersion' -> 'fromVersion' -> HEAD
-            parameters.add(Arguments.of(data.getString("prevVersion"), data.getString("fromVersion"), "HEAD", data));
+            parameters.add(Arguments.of(data.getString("fromVersion"), "HEAD", data));
         });
 
         return parameters.stream();
     }
 
-    protected static Map<String, JsonObject> buildMidStepUpgradeData(JsonObject jsonData) {
-        List<TestKafkaVersion> testKafkaVersions = TestKafkaVersion.getSupportedKafkaVersions();
-        TestKafkaVersion testKafkaVersion = testKafkaVersions.get(testKafkaVersions.size() - 1);
-
-        Map<String, JsonObject> steps = new HashMap<>();
-
-        String midStepUrl = jsonData.getString("urlFrom");
-        String midStepVersion = jsonData.getString("fromVersion");
-        String midStepExamples = jsonData.getString("fromExamples");
-
-        JsonObject conversionTool = jsonData.getJsonObject("conversionTool");
-
-        // X -> 0.22.0 data
-        JsonObject midStep = JsonObject.mapFrom(jsonData);
-        midStep.put("urlFrom", jsonData.getString("urlPrevVersion"));
-        midStep.put("fromVersion", jsonData.getString("prevVersion"));
-        midStep.put("fromExamples", jsonData.getString("prevVersionExamples"));
-
-        midStep.put("urlTo", midStepUrl);
-        midStep.put("toVersion", midStepVersion);
-        midStep.put("toExamples", midStepExamples);
-        midStep.put("urlToConversionTool", conversionTool.getString("urlToConversionTool"));
-        midStep.put("toConversionTool", conversionTool.getString("toConversionTool"));
-
-        JsonObject midStepProcedures = new JsonObject();
-        midStepProcedures.put("kafkaVersion", testKafkaVersion.version());
-        midStepProcedures.put("logMessageVersion", testKafkaVersion.messageVersion());
-        midStepProcedures.put("interBrokerProtocolVersion", testKafkaVersion.protocolVersion());
-        midStep.put("proceduresAfterOperatorUpgrade", midStepProcedures);
-
-        steps.put("midStep", midStep);
-
-        // 0.22.0 -> HEAD
-        JsonObject afterMidStep = JsonObject.mapFrom(jsonData);
-        afterMidStep.put("urlFrom", midStepUrl);
-        afterMidStep.put("fromVersion", midStepVersion);
-        afterMidStep.put("fromExamples", midStepExamples);
-
-        steps.put("toHEAD", afterMidStep);
-
-        return steps;
-    }
-
-    protected static Stream<Arguments> loadJsonDowngradeData() {
-        JsonArray upgradeData = readUpgradeJson(DOWNGRADE_JSON_FILE);
-        List<Arguments> parameters = new LinkedList<>();
-
-        upgradeData.forEach(jsonData -> {
-            JsonObject data = (JsonObject) jsonData;
-            parameters.add(Arguments.of(data.getString("fromVersion"), data.getString("toVersion"), data));
-        });
-
-        return parameters.stream();
-    }
-
-    protected void makeSnapshots(String clusterName) {
+    protected void makeSnapshots() {
         coPods = DeploymentUtils.depSnapshot(ResourceManager.getCoDeploymentName());
-        zkPods = StatefulSetUtils.ssSnapshot(KafkaResources.zookeeperStatefulSetName(clusterName));
-        kafkaPods = StatefulSetUtils.ssSnapshot(KafkaResources.kafkaStatefulSetName(clusterName));
+        zkPods = PodUtils.podSnapshot(INFRA_NAMESPACE, zkSelector);
+        kafkaPods = PodUtils.podSnapshot(INFRA_NAMESPACE, kafkaSelector);
         eoPods = DeploymentUtils.depSnapshot(KafkaResources.entityOperatorDeploymentName(clusterName));
     }
 
     @SuppressWarnings("CyclomaticComplexity")
-    protected void changeKafkaAndLogFormatVersion(JsonObject procedures, JsonObject testParameters, String clusterName, ExtensionContext extensionContext) throws IOException {
+    protected void changeKafkaAndLogFormatVersion(JsonObject procedures, JsonObject testParameters, ExtensionContext extensionContext) throws IOException {
         // Get Kafka configurations
         String operatorVersion = testParameters.getString("toVersion");
         String currentLogMessageFormat = cmdKubeClient().getResourceJsonPath(getResourceApiVersion(Kafka.RESOURCE_PLURAL, operatorVersion), clusterName, ".spec.kafka.config.log\\.message\\.format\\.version");
@@ -198,7 +205,7 @@ public class AbstractUpgradeST extends AbstractST {
         String toUrl = testParameters.getString("urlTo");
         String examplesPath = "";
         if (toUrl.equals("HEAD")) {
-            examplesPath = io.strimzi.systemtest.Constants.PATH_TO_PACKAGING_EXAMPLES + "";
+            examplesPath = PATH_TO_PACKAGING_EXAMPLES + "";
         } else {
             File dir = FileUtils.downloadAndUnzip(toUrl);
             examplesPath = dir.getAbsolutePath() + "/" + testParameters.getString("toExamples") + "/examples";
@@ -225,7 +232,7 @@ public class AbstractUpgradeST extends AbstractST {
                 LOGGER.info("Going to set Kafka version to " + kafkaVersionFromProcedure);
                 cmdKubeClient().patchResource(getResourceApiVersion(Kafka.RESOURCE_PLURAL, operatorVersion), clusterName, "/spec/kafka/version", kafkaVersionFromProcedure);
                 LOGGER.info("Wait until kafka rolling update is finished");
-                kafkaPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.kafkaStatefulSetName(clusterName), 3, kafkaPods);
+                kafkaPods = RollingUpdateUtils.waitTillComponentHasRolled(INFRA_NAMESPACE, kafkaSelector, 3, kafkaPods);
             }
 
             String logMessageVersion = procedures.getString("logMessageVersion");
@@ -245,18 +252,30 @@ public class AbstractUpgradeST extends AbstractST {
                 if ((currentInterBrokerProtocol != null && !currentInterBrokerProtocol.equals(interBrokerProtocolVersion)) ||
                         (currentLogMessageFormat != null) && !currentLogMessageFormat.equals(logMessageVersion)) {
                     LOGGER.info("Wait until kafka rolling update is finished");
-                    kafkaPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.kafkaStatefulSetName(clusterName), 3, kafkaPods);
+                    kafkaPods = RollingUpdateUtils.waitTillComponentHasRolled(INFRA_NAMESPACE, kafkaSelector, 3, kafkaPods);
                 }
-                makeSnapshots(clusterName);
+                makeSnapshots();
             }
 
             if (!kafkaVersionFromProcedure.isEmpty() && !kafkaVersionFromCR.contains(kafkaVersionFromProcedure) && extensionContext.getTestClass().get().getSimpleName().toLowerCase(Locale.ROOT).contains("downgrade")) {
                 LOGGER.info("Going to set Kafka version to " + kafkaVersionFromProcedure);
                 cmdKubeClient().patchResource(getResourceApiVersion(Kafka.RESOURCE_PLURAL, operatorVersion), clusterName, "/spec/kafka/version", kafkaVersionFromProcedure);
                 LOGGER.info("Wait until kafka rolling update is finished");
-                kafkaPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.kafkaStatefulSetName(clusterName), 3, kafkaPods);
+                kafkaPods = RollingUpdateUtils.waitTillComponentHasRolled(INFRA_NAMESPACE, kafkaSelector, kafkaPods);
             }
         }
+    }
+
+    protected static Stream<Arguments> loadJsonDowngradeData() {
+        JsonArray upgradeData = readUpgradeJson(DOWNGRADE_JSON_FILE);
+        List<Arguments> parameters = new LinkedList<>();
+
+        upgradeData.forEach(jsonData -> {
+            JsonObject data = (JsonObject) jsonData;
+            parameters.add(Arguments.of(data.getString("fromVersion"), data.getString("toVersion"), data));
+        });
+
+        return parameters.stream();
     }
 
     protected void logPodImages(String clusterName) {
@@ -277,9 +296,9 @@ public class AbstractUpgradeST extends AbstractST {
 
     protected void waitForKafkaClusterRollingUpdate() {
         LOGGER.info("Waiting for ZK StatefulSet roll");
-        zkPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.zookeeperStatefulSetName(clusterName), 3, zkPods);
+        zkPods = RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(INFRA_NAMESPACE, zkSelector, 3, zkPods);
         LOGGER.info("Waiting for Kafka StatefulSet roll");
-        kafkaPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.kafkaStatefulSetName(clusterName), 3, kafkaPods);
+        kafkaPods = RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(INFRA_NAMESPACE, kafkaSelector, 3, kafkaPods);
         LOGGER.info("Waiting for EO Deployment roll");
         // Check the TO and UO also got upgraded
         eoPods = DeploymentUtils.waitTillDepHasRolled(KafkaResources.entityOperatorDeploymentName(clusterName), 1, eoPods);
@@ -287,14 +306,14 @@ public class AbstractUpgradeST extends AbstractST {
 
     protected void waitForReadinessOfKafkaCluster() {
         LOGGER.info("Waiting for Zookeeper StatefulSet");
-        StatefulSetUtils.waitForAllStatefulSetPodsReady(KafkaResources.zookeeperStatefulSetName(clusterName), 3);
+        RollingUpdateUtils.waitForComponentAndPodsReady(zkSelector, 3);
         LOGGER.info("Waiting for Kafka StatefulSet");
-        StatefulSetUtils.waitForAllStatefulSetPodsReady(KafkaResources.kafkaStatefulSetName(clusterName), 3);
+        RollingUpdateUtils.waitForComponentAndPodsReady(kafkaSelector, 3);
         LOGGER.info("Waiting for EO Deployment");
         DeploymentUtils.waitForDeploymentAndPodsReady(KafkaResources.entityOperatorDeploymentName(clusterName), 1);
     }
 
-    protected void changeClusterOperator(JsonObject testParameters, String namespace) throws IOException {
+    protected void changeClusterOperator(JsonObject testParameters, String namespace, ExtensionContext extensionContext) throws IOException {
         File coDir;
         // Modify + apply installation files
         LOGGER.info("Going to update CO from {} to {}", testParameters.getString("fromVersion"), testParameters.getString("toVersion"));
@@ -306,22 +325,24 @@ public class AbstractUpgradeST extends AbstractST {
             coDir = new File(dir, testParameters.getString("toExamples") + "/install/cluster-operator/");
         }
 
-        copyModifyApply(coDir, namespace);
+        copyModifyApply(coDir, namespace, extensionContext, testParameters.getString("strimziFeatureGatesFlags"));
 
         LOGGER.info("Waiting for CO upgrade");
         DeploymentUtils.waitTillDepHasRolled(ResourceManager.getCoDeploymentName(), 1, coPods);
     }
 
-    protected void copyModifyApply(File root, String namespace) {
+    protected void copyModifyApply(File root, String namespace, ExtensionContext extensionContext, final String strimziFeatureGatesValue) {
         Arrays.stream(Objects.requireNonNull(root.listFiles())).sorted().forEach(f -> {
             if (f.getName().matches(".*RoleBinding.*")) {
                 cmdKubeClient().replaceContent(TestUtils.changeRoleBindingSubject(f, namespace));
             } else if (f.getName().matches(".*Deployment.*")) {
-                cmdKubeClient().replaceContent(StUtils.changeDeploymentNamespace(f, namespace));
+                cmdKubeClient().replaceContent(StUtils.changeDeploymentConfiguration(f, namespace, strimziFeatureGatesValue));
             } else {
                 cmdKubeClient().replaceContent(TestUtils.getContent(f, TestUtils::toYamlString));
             }
         });
+        // Set info that CO is already installed
+        extensionContext.getStore(ExtensionContext.Namespace.GLOBAL).put(io.strimzi.systemtest.Constants.PREPARE_OPERATOR_ENV_KEY + namespace, false);
     }
 
     protected void deleteInstalledYamls(File root, String namespace) {
@@ -403,11 +424,11 @@ public class AbstractUpgradeST extends AbstractST {
         }
 
         // Modify + apply installation files
-        copyModifyApply(coDir, namespace);
+        copyModifyApply(coDir, namespace, extensionContext, testParameters.getString("strimziFeatureGatesFlags"));
 
-        LOGGER.info("Waiting for CO deployment");
+        LOGGER.info("Waiting for {} deployment", ResourceManager.getCoDeploymentName());
         DeploymentUtils.waitForDeploymentAndPodsReady(ResourceManager.getCoDeploymentName(), 1);
-        LOGGER.info("CO ready");
+        LOGGER.info("{} is ready", ResourceManager.getCoDeploymentName());
 
         if (!cmdKubeClient().getResources(getResourceApiVersion(Kafka.RESOURCE_PLURAL, operatorVersion)).contains(clusterName)) {
             // Deploy a Kafka cluster
@@ -472,7 +493,7 @@ public class AbstractUpgradeST extends AbstractST {
             // ##############################
             // Setup topic, which has 3 replicas and 2 min.isr to see if producer will be able to work during rolling update
             if (!cmdKubeClient().getResources(getResourceApiVersion(KafkaTopic.RESOURCE_PLURAL, operatorVersion)).contains(continuousTopicName)) {
-                String pathToTopicExamples = testParameters.getString("fromExamples").equals("HEAD") ? KafkaTopicTemplates.PATH_TO_KAFKA_TOPIC_CONFIG : testParameters.getString("fromExamples") + "/examples/topic/kafka-topic.yaml";
+                String pathToTopicExamples = testParameters.getString("fromExamples").equals("HEAD") ? PATH_TO_KAFKA_TOPIC_CONFIG : testParameters.getString("fromExamples") + "/examples/topic/kafka-topic.yaml";
 
                 kafkaTopicYaml = new File(dir, pathToTopicExamples);
                 cmdKubeClient().applyContent(TestUtils.getContent(kafkaTopicYaml, TestUtils::toYamlString)
@@ -502,7 +523,7 @@ public class AbstractUpgradeST extends AbstractST {
             // ##############################
         }
 
-        makeSnapshots(clusterName);
+        makeSnapshots();
         logPodImages(clusterName);
     }
 
@@ -557,18 +578,35 @@ public class AbstractUpgradeST extends AbstractST {
 
         Exec.exec("chmod", "+x", convertorPath);
 
-        LOGGER.info("Converting CRs");
+        LOGGER.info("Converting CRs ...");
         // run conversion of crs
-        Exec.exec(convertorPath, "cr", "-n=" + namespace);
-        // run crd-upgrade
-        LOGGER.info("Converting CRDs");
-        Exec.exec(convertorPath, "crd");
+        // CRs conversion may fail, because for 0.23 for example it's already done
+        // CRS conversion needs old versions of Strimzi CRDs, which are not available after 0.22
+        if (cmdKubeClient().exec(true, false, "get", "crd", "kafkas.kafka.strimzi.io", "-o", "jsonpath={.spec.versions}").out().trim().contains(Constants.V1ALPHA1)) {
+            ExecResult execResult = Exec.exec(convertorPath, "cr", "-n=" + namespace);
+            LOGGER.debug("CRs conversion STDOUT:");
+            LOGGER.debug(execResult.out());
+            LOGGER.debug("CRs conversion STDERR:");
+            LOGGER.debug(execResult.err());
+            LOGGER.info("CRs conversion done!");
 
-        waitForKafkaCRDChange();
+            // run crd-upgrade
+            LOGGER.info("Converting CRDs");
+            execResult = Exec.exec(convertorPath, "crd");
+            LOGGER.debug("CRDs conversion STDOUT:");
+            LOGGER.debug(execResult.out());
+            LOGGER.debug("CRDs conversion STDERR:");
+            LOGGER.debug(execResult.err());
+            LOGGER.info("CRDs conversion done!");
+
+            waitForKafkaCRDChange();
+        } else {
+            LOGGER.info("CRs and CRDs already have v1beta2 versions");
+        }
     }
 
     protected void waitForKafkaCRDChange() {
-        TestUtils.waitFor("Kafka CRD kafkas.kafka.strimzi.io will change it's api version", systemtestConstants.GLOBAL_POLL_INTERVAL, systemtestConstants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor("Kafka CRD kafkas.kafka.strimzi.io will change it's api version", GLOBAL_POLL_INTERVAL, GLOBAL_TIMEOUT,
             () -> cmdKubeClient().exec(true, false, "get", "crd", "kafkas.kafka.strimzi.io", "-o", "jsonpath={.status.storedVersions}").out().trim().contains(Constants.V1BETA2));
     }
 }

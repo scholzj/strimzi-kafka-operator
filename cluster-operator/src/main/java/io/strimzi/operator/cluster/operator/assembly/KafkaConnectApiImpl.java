@@ -5,11 +5,28 @@
 
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.strimzi.api.kafka.model.connect.ConnectorPlugin;
 import io.strimzi.operator.cluster.operator.resource.HttpClientUtils;
 import io.strimzi.operator.common.BackOff;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.OrderedProperties;
 import io.vertx.core.Future;
@@ -21,25 +38,12 @@ import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Supplier;
 
 import static java.util.Arrays.asList;
 
 @SuppressWarnings({"deprecation"})
 class KafkaConnectApiImpl implements KafkaConnectApi {
-    private static final Logger log = LogManager.getLogger(KafkaConnectApiImpl.class);
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaConnectApiImpl.class);
     public static final TypeReference<Map<String, Object>> TREE_TYPE = new TypeReference<Map<String, Object>>() {
     };
     public static final TypeReference<Map<String, String>> MAP_OF_STRINGS = new TypeReference<Map<String, String>>() {
@@ -58,11 +62,12 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     @Override
     @SuppressWarnings("unchecked")
     public Future<Map<String, Object>> createOrUpdatePutRequest(
+            Reconciliation reconciliation,
             String host, int port,
             String connectorName, JsonObject configJson) {
         Buffer data = configJson.toBuffer();
         String path = "/connectors/" + connectorName + "/config";
-        log.debug("Making PUT request to {} with body {}", path, configJson);
+        LOGGER.debugCr(reconciliation, "Making PUT request to {} with body {}", path, configJson);
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) ->
             httpClient.request(HttpMethod.PUT, port, host, path, request -> {
                 if (request.succeeded()) {
@@ -77,7 +82,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                 response.result().bodyHandler(buffer -> {
                                     try {
                                         Map t = mapper.readValue(buffer.getBytes(), Map.class);
-                                        log.debug("Got {} response to PUT request to {}: {}", response.result().statusCode(), path, t);
+                                        LOGGER.debugCr(reconciliation, "Got {} response to PUT request to {}: {}", response.result().statusCode(), path, t);
                                         result.complete(t);
                                     } catch (IOException e) {
                                         result.fail(new ConnectRestException(response.result(), "Could not deserialize response: " + e));
@@ -85,7 +90,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                 });
                             } else {
                                 // TODO Handle 409 (Conflict) indicating a rebalance in progress
-                                log.debug("Got {} response to PUT request to {}", response.result().statusCode(), path);
+                                LOGGER.debugCr(reconciliation, "Got {} response to PUT request to {}", response.result().statusCode(), path);
                                 response.result().bodyHandler(buffer -> {
                                     JsonObject x = buffer.toJsonObject();
                                     result.fail(new ConnectRestException(response.result(), x.getString("message")));
@@ -103,15 +108,16 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
 
     @Override
     public Future<Map<String, Object>> getConnector(
+            Reconciliation reconciliation,
             String host, int port,
             String connectorName) {
-        return doGet(host, port, String.format("/connectors/%s", connectorName),
+        return doGet(reconciliation, host, port, String.format("/connectors/%s", connectorName),
                 new HashSet<>(asList(200, 201)),
                 TREE_TYPE);
     }
 
-    private <T> Future<T> doGet(String host, int port, String path, Set<Integer> okStatusCodes, TypeReference<T> type) {
-        log.debug("Making GET request to {}", path);
+    private <T> Future<T> doGet(Reconciliation reconciliation, String host, int port, String path, Set<Integer> okStatusCodes, TypeReference<T> type) {
+        LOGGER.debugCr(reconciliation, "Making GET request to {}", path);
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) ->
             httpClient.request(HttpMethod.GET, port, host, path, request -> {
                 if (request.succeeded()) {
@@ -123,7 +129,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                 response.result().bodyHandler(buffer -> {
                                     try {
                                         T t = mapper.readValue(buffer.getBytes(), type);
-                                        log.debug("Got {} response to GET request to {}: {}", response.result().statusCode(), path, t);
+                                        LOGGER.debugCr(reconciliation, "Got {} response to GET request to {}: {}", response.result().statusCode(), path, t);
                                         result.complete(t);
                                     } catch (IOException e) {
                                         result.fail(new ConnectRestException(response.result(), "Could not deserialize response: " + e));
@@ -131,7 +137,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                 });
                             } else {
                                 // TODO Handle 409 (Conflict) indicating a rebalance in progress
-                                log.debug("Got {} response to GET request to {}", response.result().statusCode(), path);
+                                LOGGER.debugCr(reconciliation, "Got {} response to GET request to {}", response.result().statusCode(), path);
                                 response.result().bodyHandler(buffer -> {
                                     JsonObject x = buffer.toJsonObject();
                                     result.fail(new ConnectRestException(response.result(), x.getString("message")));
@@ -149,21 +155,22 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
 
     @Override
     public Future<Map<String, String>> getConnectorConfig(
+            Reconciliation reconciliation,
             String host, int port,
             String connectorName) {
-        return doGet(host, port, String.format("/connectors/%s/config", connectorName),
+        return doGet(reconciliation, host, port, String.format("/connectors/%s/config", connectorName),
                 new HashSet<>(asList(200, 201)),
                 MAP_OF_STRINGS);
     }
 
     @Override
-    public Future<Map<String, String>> getConnectorConfig(BackOff backOff, String host, int port, String connectorName) {
-        return withBackoff(backOff, connectorName, Collections.singleton(409),
-            () -> getConnectorConfig(host, port, connectorName), "config");
+    public Future<Map<String, String>> getConnectorConfig(Reconciliation reconciliation, BackOff backOff, String host, int port, String connectorName) {
+        return withBackoff(reconciliation, backOff, connectorName, Collections.singleton(409),
+            () -> getConnectorConfig(reconciliation, host, port, connectorName), "config");
     }
 
     @Override
-    public Future<Void> delete(String host, int port, String connectorName) {
+    public Future<Void> delete(Reconciliation reconciliation, String host, int port, String connectorName) {
         String path = "/connectors/" + connectorName;
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) ->
             httpClient.request(HttpMethod.DELETE, port, host, path, request -> {
@@ -174,9 +181,9 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                     request.result().send(response -> {
                         if (response.succeeded()) {
                             if (response.result().statusCode() == 204) {
-                                log.debug("Connector was deleted. Waiting for status deletion!");
-                                withBackoff(new BackOff(200L, 2, 10), connectorName, Collections.singleton(200),
-                                    () -> status(host, port, connectorName, Collections.singleton(404)), "status")
+                                LOGGER.debugCr(reconciliation, "Connector was deleted. Waiting for status deletion!");
+                                withBackoff(reconciliation, new BackOff(200L, 2, 10), connectorName, Collections.singleton(200),
+                                    () -> status(reconciliation, host, port, connectorName, Collections.singleton(404)), "status")
                                     .onComplete(res -> {
                                         if (res.succeeded()) {
                                             result.complete();
@@ -202,12 +209,13 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<Map<String, Object>> statusWithBackOff(BackOff backOff, String host, int port, String connectorName) {
-        return withBackoff(backOff, connectorName, Collections.singleton(404),
-            () -> status(host, port, connectorName), "status");
+    public Future<Map<String, Object>> statusWithBackOff(Reconciliation reconciliation, BackOff backOff, String host, int port, String connectorName) {
+        return withBackoff(reconciliation, backOff, connectorName, Collections.singleton(404),
+            () -> status(reconciliation, host, port, connectorName), "status");
     }
 
-    private <T> Future<T> withBackoff(BackOff backOff, String connectorName,
+    private <T> Future<T> withBackoff(Reconciliation reconciliation,
+                                      BackOff backOff, String connectorName,
                                       Set<Integer> retriableStatusCodes,
                                       Supplier<Future<T>> supplier,
                                       String attribute) {
@@ -224,10 +232,10 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                         if (cause instanceof ConnectRestException
                                 && retriableStatusCodes.contains(((ConnectRestException) cause).getStatusCode())) {
                             if (backOff.done()) {
-                                log.debug("Connector {} {} returned HTTP {} and we run out of back off time", connectorName, attribute, ((ConnectRestException) cause).getStatusCode());
+                                LOGGER.debugCr(reconciliation, "Connector {} {} returned HTTP {} and we run out of back off time", connectorName, attribute, ((ConnectRestException) cause).getStatusCode());
                                 result.fail(cause);
                             } else {
-                                log.debug("Connector {} {} returned HTTP {} - backing off", connectorName, attribute, ((ConnectRestException) cause).getStatusCode());
+                                LOGGER.debugCr(reconciliation, "Connector {} {} returned HTTP {} - backing off", connectorName, attribute, ((ConnectRestException) cause).getStatusCode());
                                 rescheduleOrComplete(tid);
                             }
                         } else {
@@ -239,12 +247,12 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
 
             void rescheduleOrComplete(Long tid) {
                 if (backOff.done()) {
-                    log.warn("Giving up waiting for status of connector {} after {} attempts taking {}ms",
+                    LOGGER.warnCr(reconciliation, "Giving up waiting for status of connector {} after {} attempts taking {}ms",
                             connectorName, backOff.maxAttempts(), backOff.totalDelayMs());
                 } else {
                     // Schedule ourselves to run again
                     long delay = backOff.delayMs();
-                    log.debug("Status for connector {} not found; " +
+                    LOGGER.debugCr(reconciliation, "Status for connector {} not found; " +
                                     "backing off for {}ms (cumulative {}ms)",
                             connectorName, delay, backOff.cumulativeDelayMs());
                     if (delay < 1) {
@@ -261,14 +269,14 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<Map<String, Object>> status(String host, int port, String connectorName) {
-        return status(host, port, connectorName, Collections.singleton(200));
+    public Future<Map<String, Object>> status(Reconciliation reconciliation, String host, int port, String connectorName) {
+        return status(reconciliation, host, port, connectorName, Collections.singleton(200));
     }
 
     @Override
-    public Future<Map<String, Object>> status(String host, int port, String connectorName, Set<Integer> okStatusCodes) {
+    public Future<Map<String, Object>> status(Reconciliation reconciliation, String host, int port, String connectorName, Set<Integer> okStatusCodes) {
         String path = "/connectors/" + connectorName + "/status";
-        return doGet(host, port, path, okStatusCodes, TREE_TYPE);
+        return doGet(reconciliation, host, port, path, okStatusCodes, TREE_TYPE);
     }
 
     @Override
@@ -345,7 +353,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<List<ConnectorPlugin>> listConnectorPlugins(String host, int port) {
+    public Future<List<ConnectorPlugin>> listConnectorPlugins(Reconciliation reconciliation, String host, int port) {
         String path = "/connector-plugins";
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) ->
                 httpClient.request(HttpMethod.GET, port, host, path, request -> {
@@ -359,7 +367,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                         try {
                                             result.complete(asList(mapper.readValue(buffer.getBytes(), ConnectorPlugin[].class)));
                                         } catch (IOException e) {
-                                            log.warn("Failed to parse list of connector plugins", e);
+                                            LOGGER.warnCr(reconciliation, "Failed to parse list of connector plugins", e);
                                             result.fail(new ConnectRestException(response.result(), "Failed to parse list of connector plugins", e));
                                         }
                                     });
@@ -376,11 +384,11 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                 }));
     }
 
-    private Future<Void> updateConnectorLogger(String host, int port, String logger, String level) {
+    private Future<Void> updateConnectorLogger(Reconciliation reconciliation, String host, int port, String logger, String level) {
         String path = "/admin/loggers/" + logger;
         JsonObject levelJO = new JsonObject();
         levelJO.put("level", level);
-        log.debug("Making PUT request to {} with body {}", path, levelJO);
+        LOGGER.debugCr(reconciliation, "Making PUT request to {} with body {}", path, levelJO);
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) -> {
             Buffer buffer = levelJO.toBuffer();
             httpClient
@@ -394,11 +402,11 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                 if (response.succeeded()) {
                                     if (response.result().statusCode() == 200) {
                                         response.result().bodyHandler(body -> {
-                                            log.debug("Logger {} updated to level {}", logger, level);
+                                            LOGGER.debugCr(reconciliation, "Logger {} updated to level {}", logger, level);
                                             result.complete();
                                         });
                                     } else {
-                                        log.debug("Logger {} did not update to level {} (http code {})", logger, level, response.result().statusCode());
+                                        LOGGER.debugCr(reconciliation, "Logger {} did not update to level {} (http code {})", logger, level, response.result().statusCode());
                                         result.fail(new ConnectRestException(response.result(), "Unexpected status code"));
                                     }
                                 } else {
@@ -413,7 +421,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<Map<String, Map<String, String>>> listConnectLoggers(String host, int port) {
+    public Future<Map<String, String>> listConnectLoggers(Reconciliation reconciliation, String host, int port) {
         String path = "/admin/loggers/";
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) ->
                 httpClient.request(HttpMethod.GET, port, host, path, request -> {
@@ -426,9 +434,19 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                     response.result().bodyHandler(buffer -> {
                                         try {
                                             Map<String, Map<String, String>> fetchedLoggers = mapper.readValue(buffer.getBytes(), MAP_OF_MAP_OF_STRINGS);
-                                            result.complete(fetchedLoggers);
+                                            Map<String, String> loggerMap = new HashMap<>(fetchedLoggers.size());
+                                            for (var e : fetchedLoggers.entrySet()) {
+                                                String level = e.getValue().get("level");
+                                                if (level != null && e.getValue().size() == 1) {
+                                                    loggerMap.put(e.getKey(), level);
+                                                } else {
+                                                    result.tryFail("Inner map has unexpected keys " + e.getValue().keySet());
+                                                    break;
+                                                }
+                                            }
+                                            result.tryComplete(loggerMap);
                                         } catch (IOException e) {
-                                            log.warn("Failed to get list of connector loggers", e);
+                                            LOGGER.warnCr(reconciliation, "Failed to get list of connector loggers", e);
                                             result.fail(new ConnectRestException(response.result(), "Failed to get connector loggers", e));
                                         }
                                     });
@@ -445,41 +463,75 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                 }));
     }
 
-    private Future<Void> updateLoggers(String host, int port, String desiredLogging, Map<String, Map<String, String>> fetchedLoggers, OrderedProperties defaultLogging) {
-        desiredLogging = Util.expandVars(desiredLogging);
-        Map<String, String> updateLoggers = new LinkedHashMap<>();
-        defaultLogging.asMap().entrySet().forEach(entry -> {
-            // set all logger levels to default
-            if (entry.getKey().equals("log4j.rootLogger")) {
-                updateLoggers.put("root", Util.expandVar(entry.getValue(), defaultLogging.asMap()));
-            } else if (entry.getKey().startsWith("log4j.logger.")) {
-                updateLoggers.put(entry.getKey().substring("log4j.logger.".length()), Util.expandVar(entry.getValue(), defaultLogging.asMap()));
-            }
-        });
+    private Future<Boolean> updateLoggers(Reconciliation reconciliation, String host, int port,
+                                       String desiredLogging,
+                                       Map<String, String> fetchedLoggers,
+                                       OrderedProperties defaultLogging) {
 
-        OrderedProperties ops = new OrderedProperties();
-        ops.addStringPairs(desiredLogging);
-        ops.asMap().entrySet().forEach(entry -> {
-            // set desired loggers to desired levels
-            if (entry.getKey().equals("log4j.rootLogger")) {
-                if (fetchedLoggers.get("root") == null || fetchedLoggers.get("root").get("level") == null ||
-                        !entry.getValue().equals(fetchedLoggers.get("root").get("level"))) {
-                    updateLoggers.put("root", Util.expandVar(entry.getValue(), ops.asMap()));
-                }
-            } else if (entry.getKey().startsWith("log4j.logger.")) {
-                Map<String, String> fetchedLogger = fetchedLoggers.get(entry.getKey().substring("log4j.logger.".length()));
-                if (fetchedLogger == null || fetchedLogger.get("level") == null || !entry.getValue().equals(fetchedLogger.get("level"))) {
-                    updateLoggers.put(entry.getKey().substring("log4j.logger.".length()), Util.expandVar(entry.getValue(), ops.asMap()));
-                }
+        Map<String, String> updateLoggers = new TreeMap<>((k1, k2) -> {
+            if ("root".equals(k1)) {
+                // we need root logger always to be the first logger to be set via REST API
+                return "root".equals(k2) ? 0 : -1;
+            } else if ("root".equals(k2)) {
+                return 1;
             }
+            return k1.compareTo(k2);
         });
+        Map<String, String> desiredMap = new OrderedProperties().addStringPairs(Util.expandVars(desiredLogging)).asMap();
 
-        LinkedHashMap<String, String> updateSortedLoggers = sortLoggers(updateLoggers);
-        Future<Void> result = Future.succeededFuture();
-        for (Map.Entry<String, String> logger : updateSortedLoggers.entrySet()) {
-            result = result.compose(previous -> updateConnectorLogger(host, port, logger.getKey(), getLoggerLevelFromAppenderCouple(logger.getValue())));
+        updateLoggers.putAll(fetchedLoggers.keySet().stream().collect(Collectors.toMap(
+            Function.identity(),
+            key -> getEffectiveLevel(key, desiredMap))));
+        addToLoggers(defaultLogging.asMap(), updateLoggers);
+        addToLoggers(desiredMap, updateLoggers);
+
+        if (updateLoggers.equals(fetchedLoggers)) {
+            return Future.succeededFuture(false);
+        } else {
+            Future<Void> result = Future.succeededFuture();
+            for (Map.Entry<String, String> logger : updateLoggers.entrySet()) {
+                result = result.compose(previous -> updateConnectorLogger(reconciliation, host, port,
+                        logger.getKey(), logger.getValue()));
+            }
+            return result.map(true);
         }
-        return result;
+    }
+
+    /**
+     * Gets the level of the given {@code logger} in the given map of {@code desired} levels,
+     * or the level inherited from the logger hierarchy.
+     * @param logger The logger name
+     * @param desired Map of logger levels
+     * @return The effective level of the given logger.
+     */
+    protected String getEffectiveLevel(String logger, Map<String, String> desired) {
+        // direct hit
+        if (desired.containsKey("log4j.logger." + logger)) {
+            return desired.get("log4j.logger." + logger);
+        }
+
+        Map<String, String> desiredSortedReverse = new TreeMap<>(Comparator.reverseOrder());
+        desiredSortedReverse.putAll(desired);
+        //desired contains substring of logger, search in reversed order to find the most specific match
+        Optional<Map.Entry<String, String>> opt = desiredSortedReverse.entrySet().stream()
+                .filter(entry -> ("log4j.logger." + logger).startsWith(entry.getKey()))
+                .findFirst();
+        if (opt.isPresent()) {
+            return opt.get().getValue();
+        }
+
+        //nothing found, use root level
+        return getLoggerLevelFromAppenderCouple(Util.expandVar(desired.get("log4j.rootLogger"), desired));
+    }
+
+    private void addToLoggers(Map<String, String> entries, Map<String, String> updateLoggers) {
+        for (Map.Entry<String, String> e : entries.entrySet()) { // set desired loggers to desired levels
+            if (e.getKey().equals("log4j.rootLogger")) {
+                updateLoggers.put("root", getLoggerLevelFromAppenderCouple(Util.expandVar(e.getValue(), entries)));
+            } else if (e.getKey().startsWith("log4j.logger.")) {
+                updateLoggers.put(e.getKey().substring("log4j.logger.".length()), getLoggerLevelFromAppenderCouple(Util.expandVar(e.getValue(), entries)));
+            }
+        }
     }
 
     /**
@@ -497,38 +549,9 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<Void> updateConnectLoggers(String host, int port, String desiredLogging, OrderedProperties defaultLogging) {
-        return listConnectLoggers(host, port)
-                .compose(fetchedLoggers -> updateLoggers(host, port, desiredLogging, fetchedLoggers, defaultLogging));
-    }
-
-    /**
-     * To apply loggers correctly, we need to sort them. The sorting is performed on base of logger generality.
-     * Logger "abc.company" is more general than "abc.company.name"
-     * @param loggers map of loggers to be sorted
-     * @return map of sorted loggers
-     */
-    private LinkedHashMap<String, String> sortLoggers(Map<String, String> loggers) {
-        Comparator<Map.Entry<String, String>> loggerComparator = (e1, e2) -> {
-            String k1 = e1.getKey();
-            String k2 = e2.getKey();
-            if (k1.equals("root")) {
-                // we need root logger always to be the first logger to be set via REST API
-                return Integer.MIN_VALUE;
-            }
-            if (k2.equals("root")) {
-                return Integer.MAX_VALUE;
-            }
-            return k1.compareTo(k2);
-        };
-        List<Map.Entry<String, String>> listOfEntries = new ArrayList<>(loggers.entrySet());
-        listOfEntries.sort(loggerComparator);
-
-        LinkedHashMap<String, String> sortedLoggers = new LinkedHashMap<>(listOfEntries.size());
-        for (Map.Entry<String, String> entry : listOfEntries) {
-            sortedLoggers.put(entry.getKey(), entry.getValue());
-        }
-        return sortedLoggers;
+    public Future<Boolean> updateConnectLoggers(Reconciliation reconciliation, String host, int port, String desiredLogging, OrderedProperties defaultLogging) {
+        return listConnectLoggers(reconciliation, host, port)
+                .compose(fetchedLoggers -> updateLoggers(reconciliation, host, port, desiredLogging, fetchedLoggers, defaultLogging));
     }
 
     @Override
@@ -568,7 +591,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<List<String>> getConnectorTopics(String host, int port, String connectorName) {
+    public Future<List<String>> getConnectorTopics(Reconciliation reconciliation, String host, int port, String connectorName) {
         String path = String.format("/connectors/%s/topics", connectorName);
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) ->
             httpClient.request(HttpMethod.GET, port, host, path, request -> {
@@ -587,7 +610,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                                         Map<String, Map<String, List<String>>> t = mapper.readValue(buffer.getBytes(), MAP_OF_MAP_OF_LIST_OF_STRING);
                                         result.complete(t.get(connectorName).get("topics"));
                                     } catch (IOException e) {
-                                        log.warn("Failed to parse list of connector topics", e);
+                                        LOGGER.warnCr(reconciliation, "Failed to parse list of connector topics", e);
                                         result.fail(new ConnectRestException(response.result(), "Failed to parse list of connector topics", e));
                                     }
                                 });

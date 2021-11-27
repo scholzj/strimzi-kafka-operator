@@ -8,12 +8,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListener;
 import io.strimzi.api.kafka.model.status.Condition;
-import io.strimzi.api.kafka.model.status.KafkaStatus;
 import io.strimzi.api.kafka.model.status.ListenerStatus;
 import io.strimzi.kafka.config.model.ConfigModel;
 import io.strimzi.kafka.config.model.ConfigModels;
@@ -24,7 +24,7 @@ import io.strimzi.systemtest.resources.ResourceOperation;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
 import io.strimzi.systemtest.utils.TestKafkaVersion;
 import io.strimzi.systemtest.utils.kubeUtils.controllers.DeploymentUtils;
-import io.strimzi.systemtest.utils.kubeUtils.controllers.StatefulSetUtils;
+import io.strimzi.systemtest.utils.kubeUtils.objects.PodUtils;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.k8s.exceptions.KubeClusterException;
 import org.apache.logging.log4j.LogManager;
@@ -78,10 +78,6 @@ public class KafkaUtils {
         return waitForKafkaStatus(kubeClient().getNamespace(), clusterName, NotReady);
     }
 
-    public static boolean waitForKafkaStatus(String clusterName, Enum<?>  state) {
-        return waitForKafkaStatus(kubeClient().getNamespace(), clusterName, state);
-    }
-
     public static boolean waitForKafkaStatus(String namespaceName, String clusterName, Enum<?>  state) {
         Kafka kafka = KafkaResource.kafkaClient().inNamespace(namespaceName).withName(clusterName).get();
         return ResourceManager.waitForResourceStatus(KafkaResource.kafkaClient(), kafka, state);
@@ -100,10 +96,6 @@ public class KafkaUtils {
             Kafka k = KafkaResource.kafkaClient().inNamespace(namespaceName).withName(clusterName).get();
             return k.getMetadata().getGeneration() == k.getStatus().getObservedGeneration();
         });
-    }
-
-    public static void waitForKafkaStatusUpdate(String clusterName) {
-        waitForKafkaStatusUpdate(kubeClient().getNamespace(), clusterName);
     }
 
     public static void waitUntilKafkaStatusConditionContainsMessage(String clusterName, String namespace, String message, long timeout) {
@@ -152,10 +144,6 @@ public class KafkaUtils {
         }
     }
 
-    public static void waitForZkMntr(String clusterName, Pattern pattern, int... podIndexes) {
-        waitForZkMntr(kubeClient().getNamespace(), clusterName, pattern, podIndexes);
-    }
-
     public static String getKafkaStatusCertificates(String listenerType, String namespace, String clusterName) {
         String certs = "";
         List<ListenerStatus> kafkaListeners = KafkaResource.kafkaClient().inNamespace(namespace).withName(clusterName).get().getStatus().getListeners();
@@ -183,36 +171,45 @@ public class KafkaUtils {
 
     @SuppressWarnings("unchecked")
     public static void waitForClusterStability(String namespaceName, String clusterName) {
-        LOGGER.info("Waiting for cluster stability");
+        LabelSelector kafkaSelector = KafkaResource.getLabelSelector(clusterName, kafkaStatefulSetName(clusterName));
+        LabelSelector zkSelector = KafkaResource.getLabelSelector(clusterName, zookeeperStatefulSetName(clusterName));
+
         Map<String, String>[] zkPods = new Map[1];
         Map<String, String>[] kafkaPods = new Map[1];
         Map<String, String>[] eoPods = new Map[1];
+
+        LOGGER.info("Waiting for cluster stability");
+
         int[] count = {0};
-        zkPods[0] = StatefulSetUtils.ssSnapshot(namespaceName, zookeeperStatefulSetName(clusterName));
-        kafkaPods[0] = StatefulSetUtils.ssSnapshot(namespaceName, kafkaStatefulSetName(clusterName));
+
+        zkPods[0] = PodUtils.podSnapshot(namespaceName, zkSelector);
+        kafkaPods[0] = PodUtils.podSnapshot(namespaceName, kafkaSelector);
         eoPods[0] = DeploymentUtils.depSnapshot(namespaceName, KafkaResources.entityOperatorDeploymentName(clusterName));
+
         TestUtils.waitFor("Cluster stable and ready", Constants.GLOBAL_POLL_INTERVAL, Constants.TIMEOUT_FOR_CLUSTER_STABLE, () -> {
-            Map<String, String> zkSnapshot = StatefulSetUtils.ssSnapshot(namespaceName, zookeeperStatefulSetName(clusterName));
-            Map<String, String> kafkaSnaptop = StatefulSetUtils.ssSnapshot(namespaceName, kafkaStatefulSetName(clusterName));
+            Map<String, String> zkSnapshot = PodUtils.podSnapshot(namespaceName, zkSelector);
+            Map<String, String> kafkaSnaptop = PodUtils.podSnapshot(namespaceName, kafkaSelector);
             Map<String, String> eoSnapshot = DeploymentUtils.depSnapshot(namespaceName, KafkaResources.entityOperatorDeploymentName(clusterName));
             boolean zkSameAsLast = zkSnapshot.equals(zkPods[0]);
             boolean kafkaSameAsLast = kafkaSnaptop.equals(kafkaPods[0]);
             boolean eoSameAsLast = eoSnapshot.equals(eoPods[0]);
             if (!zkSameAsLast) {
-                LOGGER.info("ZK Cluster not stable");
+                LOGGER.warn("ZK Cluster not stable");
             }
             if (!kafkaSameAsLast) {
-                LOGGER.info("Kafka Cluster not stable");
+                LOGGER.warn("Kafka Cluster not stable");
             }
             if (!eoSameAsLast) {
-                LOGGER.info("EO not stable");
+                LOGGER.warn("EO not stable");
             }
-            if (zkSameAsLast
-                    && kafkaSameAsLast
-                    && eoSameAsLast) {
+            if (zkSameAsLast && kafkaSameAsLast && eoSameAsLast) {
                 int c = count[0]++;
-                LOGGER.info("All stable for {} polls", c);
-                return c > 60;
+                LOGGER.debug("All stable after {} polls", c);
+                if (c > 60) {
+                    LOGGER.info("Kafka cluster is stable after {} polls.", c);
+                    return true;
+                }
+                return false;
             }
             zkPods[0] = zkSnapshot;
             kafkaPods[0] = kafkaSnaptop;
@@ -259,7 +256,7 @@ public class KafkaUtils {
      * @param value value of specific property
      */
     public static boolean verifyCrDynamicConfiguration(String clusterName, String brokerConfigName, Object value) {
-        LOGGER.info("Dynamic Configuration in Kafka CR is {}={} and excepted is {}={}",
+        LOGGER.info("Dynamic Configuration in Kafka CR is {}={} and expected is {}={}",
             brokerConfigName,
             KafkaResource.kafkaClient().inNamespace(kubeClient().getNamespace()).withName(clusterName).get().getSpec().getKafka().getConfig().get(brokerConfigName),
             brokerConfigName,
@@ -330,9 +327,9 @@ public class KafkaUtils {
 
         Map<String, ConfigModel> configs = KafkaUtils.readConfigModel(kafkaVersion);
 
-        LOGGER.info("This is configs {}", configs.toString());
+        LOGGER.info("Kafka config {}", configs.toString());
 
-        LOGGER.info("This is all kafka configs with size {}", configs.size());
+        LOGGER.info("Number of all kafka configs {}", configs.size());
 
         Map<String, ConfigModel> dynamicConfigs = configs
             .entrySet()
@@ -352,7 +349,7 @@ public class KafkaUtils {
             })
             .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
-        LOGGER.info("This is dynamic-configs size {}", dynamicConfigs.size());
+        LOGGER.info("Number of dynamic-configs {}", dynamicConfigs.size());
 
         Map<String, ConfigModel> forbiddenExceptionsConfigs = configs
             .entrySet()
@@ -360,16 +357,16 @@ public class KafkaUtils {
             .filter(a -> FORBIDDEN_PREFIX_EXCEPTIONS.contains(a.getKey()))
             .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
-        LOGGER.info("This is size of forbidden-exception-configs size {}", forbiddenExceptionsConfigs.size());
+        LOGGER.info("Number of forbidden-exception-configs {}", forbiddenExceptionsConfigs.size());
 
         Map<String, ConfigModel> dynamicConfigsWithExceptions = new HashMap<>();
 
         dynamicConfigsWithExceptions.putAll(dynamicConfigs);
         dynamicConfigsWithExceptions.putAll(forbiddenExceptionsConfigs);
 
-        LOGGER.info("This is dynamic-configs with forbidden-exception-configs size {}", dynamicConfigsWithExceptions.size());
+        LOGGER.info("Size of dynamic-configs with forbidden-exception-configs {}", dynamicConfigsWithExceptions.size());
 
-        dynamicConfigsWithExceptions.forEach((key, value) -> LOGGER.info(key + " -> "  + value));
+        dynamicConfigsWithExceptions.forEach((key, value) -> LOGGER.info(key + " -> "  + value.getScope() + ":" + value.getType()));
 
         return dynamicConfigsWithExceptions;
     }
@@ -411,12 +408,8 @@ public class KafkaUtils {
             () -> LOGGER.info(KafkaResource.kafkaClient().inNamespace(namespaceName).withName(kafkaClusterName).get()));
     }
 
-    public static void waitForKafkaDeletion(String kafkaClusterName) {
-        waitForKafkaDeletion(kubeClient().getNamespace(), kafkaClusterName);
-    }
-
     public static String getKafkaTlsListenerCaCertName(String namespace, String clusterName, String listenerName) {
-        List<GenericKafkaListener> listeners = KafkaResource.kafkaClient().inNamespace(namespace).withName(clusterName).get().getSpec().getKafka().getListeners().getGenericKafkaListeners();
+        List<GenericKafkaListener> listeners = KafkaResource.kafkaClient().inNamespace(namespace).withName(clusterName).get().getSpec().getKafka().getListeners();
 
         GenericKafkaListener tlsListener = listenerName == null || listenerName.isEmpty() ?
             listeners.stream().filter(listener -> Constants.TLS_LISTENER_DEFAULT_NAME.equals(listener.getName())).findFirst().orElseThrow(RuntimeException::new) :
@@ -426,7 +419,7 @@ public class KafkaUtils {
     }
 
     public static String getKafkaExternalListenerCaCertName(String namespace, String clusterName, String listenerName) {
-        List<GenericKafkaListener> listeners = KafkaResource.kafkaClient().inNamespace(namespace).withName(clusterName).get().getSpec().getKafka().getListeners().getGenericKafkaListeners();
+        List<GenericKafkaListener> listeners = KafkaResource.kafkaClient().inNamespace(namespace).withName(clusterName).get().getSpec().getKafka().getListeners();
 
         GenericKafkaListener external = listenerName == null || listenerName.isEmpty() ?
             listeners.stream().filter(listener -> Constants.EXTERNAL_LISTENER_DEFAULT_NAME.equals(listener.getName())).findFirst().orElseThrow(RuntimeException::new) :
@@ -441,10 +434,6 @@ public class KafkaUtils {
                 return KafkaResources.clusterCaCertificateSecretName(clusterName);
             }
         }
-    }
-
-    public static KafkaStatus getKafkaStatus(String clusterName, String namespace) {
-        return KafkaResource.kafkaClient().inNamespace(namespace).withName(clusterName).get().getStatus();
     }
 
     public static String changeOrRemoveKafkaVersion(File file, String version) {
@@ -475,5 +464,17 @@ public class KafkaUtils {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public static String namespacedPlainBootstrapAddress(String clusterName, String namespace) {
+        return namespacedBootstrapAddress(clusterName, namespace, 9092);
+    }
+
+    public static String namespacedTlsBootstrapAddress(String clusterName, String namespace) {
+        return namespacedBootstrapAddress(clusterName, namespace, 9093);
+    }
+
+    private static String namespacedBootstrapAddress(String clusterName, String namespace, int port) {
+        return KafkaResources.bootstrapServiceName(clusterName) + "." + namespace + ".svc:" + port;
     }
 }

@@ -8,6 +8,7 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
+import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.openshift.api.model.BuildConfig;
 import io.strimzi.api.kafka.model.ContainerEnvVarBuilder;
 import io.strimzi.api.kafka.model.KafkaConnect;
@@ -17,6 +18,7 @@ import io.strimzi.api.kafka.model.connect.build.Artifact;
 import io.strimzi.api.kafka.model.connect.build.JarArtifactBuilder;
 import io.strimzi.api.kafka.model.connect.build.PluginBuilder;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.annotations.ParallelSuite;
@@ -50,7 +52,6 @@ public class KafkaConnectBuildTest {
             .build();
 
     private final List<String> defaultArgs = List.of("--dockerfile=/dockerfile/Dockerfile",
-            "--context=dir://workspace",
             "--image-name-with-digest-file=/dev/termination-log",
             "--destination=my-image:latest");
 
@@ -66,7 +67,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
                                 new PluginBuilder().withName("my-connector2").withArtifacts(jarArtifactNoChecksum).build())
@@ -74,7 +75,7 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
     }
 
     @ParallelTest
@@ -89,14 +90,14 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                     .endBuild()
                 .endSpec()
                 .build();
 
         assertThrows(InvalidResourceException.class, () -> {
-            KafkaConnectBuild.fromCrd(kc, VERSIONS);
+            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
         });
     }
 
@@ -112,7 +113,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").build())
                     .endBuild()
@@ -120,7 +121,7 @@ public class KafkaConnectBuildTest {
                 .build();
 
         assertThrows(InvalidResourceException.class, () -> {
-            KafkaConnectBuild.fromCrd(kc, VERSIONS);
+            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
         });
     }
 
@@ -136,7 +137,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
                                 new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactNoChecksum).build())
@@ -145,7 +146,7 @@ public class KafkaConnectBuildTest {
                 .build();
 
         assertThrows(InvalidResourceException.class, () -> {
-            KafkaConnectBuild.fromCrd(kc, VERSIONS);
+            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
         });
     }
 
@@ -165,11 +166,12 @@ public class KafkaConnectBuildTest {
                     .withNamespace(namespace)
                 .endMetadata()
                 .withNewSpec()
+                    .withImage("my-source-image:latest")
                     .withBootstrapServers("my-kafka:9092")
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
                                 new PluginBuilder().withName("my-connector2").withArtifacts(jarArtifactNoChecksum).build())
@@ -178,7 +180,9 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
+
+        assertThat(build.baseImage, is("my-source-image:latest"));
 
         Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
         assertThat(pod.getMetadata().getName(), is(KafkaConnectResources.buildPodName(cluster)));
@@ -200,20 +204,16 @@ public class KafkaConnectBuildTest {
         assertThat(pod.getSpec().getContainers().get(0).getPorts().size(), is(0));
         assertThat(pod.getSpec().getContainers().get(0).getResources().getLimits(), is(limit));
         assertThat(pod.getSpec().getContainers().get(0).getResources().getRequests(), is(request));
-        assertThat(pod.getSpec().getVolumes().size(), is(3));
-        assertThat(pod.getSpec().getVolumes().get(0).getName(), is("workspace"));
-        assertThat(pod.getSpec().getVolumes().get(0).getEmptyDir(), is(notNullValue()));
-        assertThat(pod.getSpec().getVolumes().get(1).getName(), is("dockerfile"));
-        assertThat(pod.getSpec().getVolumes().get(1).getConfigMap().getName(), is(KafkaConnectResources.dockerFileConfigMapName(cluster)));
-        assertThat(pod.getSpec().getVolumes().get(2).getName(), is("docker-credentials"));
-        assertThat(pod.getSpec().getVolumes().get(2).getSecret().getSecretName(), is("my-docker-credentials"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().size(), is(3));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getName(), is("workspace"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getMountPath(), is("/workspace"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getName(), is("dockerfile"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getMountPath(), is("/dockerfile"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(2).getName(), is("docker-credentials"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(2).getMountPath(), is("/kaniko/.docker"));
+        assertThat(pod.getSpec().getVolumes().size(), is(2));
+        assertThat(pod.getSpec().getVolumes().get(0).getName(), is("dockerfile"));
+        assertThat(pod.getSpec().getVolumes().get(0).getConfigMap().getName(), is(KafkaConnectResources.dockerFileConfigMapName(cluster)));
+        assertThat(pod.getSpec().getVolumes().get(1).getName(), is("docker-credentials"));
+        assertThat(pod.getSpec().getVolumes().get(1).getSecret().getSecretName(), is("my-docker-credentials"));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().size(), is(2));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getName(), is("dockerfile"));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getMountPath(), is("/dockerfile"));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getName(), is("docker-credentials"));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getMountPath(), is("/kaniko/.docker"));
         assertThat(pod.getMetadata().getOwnerReferences().size(), is(1));
         assertThat(pod.getMetadata().getOwnerReferences().get(0), is(build.createOwnerReference()));
     }
@@ -237,20 +237,16 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
         Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
-        assertThat(pod.getSpec().getVolumes().size(), is(2));
+        assertThat(pod.getSpec().getVolumes().size(), is(1));
         assertThat(pod.getSpec().getContainers().get(0).getArgs(), is(defaultArgs));
-        assertThat(pod.getSpec().getVolumes().get(0).getName(), is("workspace"));
-        assertThat(pod.getSpec().getVolumes().get(0).getEmptyDir(), is(notNullValue()));
-        assertThat(pod.getSpec().getVolumes().get(1).getName(), is("dockerfile"));
-        assertThat(pod.getSpec().getVolumes().get(1).getConfigMap().getName(), is(KafkaConnectResources.dockerFileConfigMapName(cluster)));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().size(), is(2));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getName(), is("workspace"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getMountPath(), is("/workspace"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getName(), is("dockerfile"));
-        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getMountPath(), is("/dockerfile"));
+        assertThat(pod.getSpec().getVolumes().get(0).getName(), is("dockerfile"));
+        assertThat(pod.getSpec().getVolumes().get(0).getConfigMap().getName(), is(KafkaConnectResources.dockerFileConfigMapName(cluster)));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().size(), is(1));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getName(), is("dockerfile"));
+        assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getMountPath(), is("/dockerfile"));
     }
 
     @ParallelTest
@@ -265,7 +261,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
                                 new PluginBuilder().withName("my-connector2").withArtifacts(jarArtifactNoChecksum).build())
@@ -273,7 +269,7 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
         KafkaConnectDockerfile dockerfile = new KafkaConnectDockerfile("my-image:latest", kc.getSpec().getBuild());
         ConfigMap cm = build.generateDockerfileConfigMap(dockerfile);
@@ -305,7 +301,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
                                 new PluginBuilder().withName("my-connector2").withArtifacts(jarArtifactNoChecksum).build())
@@ -314,7 +310,7 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
         KafkaConnectDockerfile dockerfile = new KafkaConnectDockerfile("my-image:latest", kc.getSpec().getBuild());
         BuildConfig bc = build.generateBuildConfig(dockerfile);
@@ -359,7 +355,7 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
         KafkaConnectDockerfile dockerfile = new KafkaConnectDockerfile("my-image:latest", kc.getSpec().getBuild());
         BuildConfig bc = build.generateBuildConfig(dockerfile);
@@ -390,6 +386,9 @@ public class KafkaConnectBuildTest {
         Map<String, String> buildConfigLabels = TestUtils.map("l3", "v3", "l4", "v4");
         Map<String, String> buildConfigAnnos = TestUtils.map("a3", "v3", "a4", "v4");
 
+        Map<String, String> saLabels = TestUtils.map("l5", "v5", "l6", "v6");
+        Map<String, String> saAnots = TestUtils.map("a5", "v5", "a6", "v6");
+
         KafkaConnect kc = new KafkaConnectBuilder()
                 .withNewMetadata()
                     .withName(cluster)
@@ -400,7 +399,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
                                 new PluginBuilder().withName("my-connector2").withArtifacts(jarArtifactNoChecksum).build())
@@ -411,8 +410,8 @@ public class KafkaConnectBuildTest {
                                 .withLabels(buildPodLabels)
                                 .withAnnotations(buildPodAnnos)
                             .endMetadata()
-                            .withNewPriorityClassName("top-priority")
-                            .withNewSchedulerName("my-scheduler")
+                            .withPriorityClassName("top-priority")
+                            .withSchedulerName("my-scheduler")
                             .withEnableServiceLinks(false)
                         .endBuildPod()
                         .withNewBuildContainer()
@@ -423,12 +422,19 @@ public class KafkaConnectBuildTest {
                                 .withLabels(buildConfigLabels)
                                 .withAnnotations(buildConfigAnnos)
                             .endMetadata()
+                            .withPullSecret("my-pull-secret")
                         .endBuildConfig()
+                        .withNewBuildServiceAccount()
+                            .withNewMetadata()
+                                .withLabels(saLabels)
+                                .withAnnotations(saAnots)
+                            .endMetadata()
+                        .endBuildServiceAccount()
                     .endTemplate()
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
         Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
         assertThat(pod.getMetadata().getLabels().entrySet().containsAll(buildPodLabels.entrySet()), is(true));
@@ -436,12 +442,18 @@ public class KafkaConnectBuildTest {
         assertThat(pod.getSpec().getPriorityClassName(), is("top-priority"));
         assertThat(pod.getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(pod.getSpec().getEnableServiceLinks(), is(false));
-        assertThat(pod.getSpec().getContainers().get(0).getEnv().stream().filter(env -> "TEST_ENV_VAR".equals(env.getName())).findFirst().get().getValue(), is("testValue"));
+        assertThat(pod.getSpec().getContainers().get(0).getEnv().stream().filter(env -> "TEST_ENV_VAR".equals(env.getName())).findFirst().orElseThrow().getValue(), is("testValue"));
 
         KafkaConnectDockerfile dockerfile = new KafkaConnectDockerfile("my-image:latest", kc.getSpec().getBuild());
         BuildConfig bc = build.generateBuildConfig(dockerfile);
         assertThat(bc.getMetadata().getLabels().entrySet().containsAll(buildConfigLabels.entrySet()), is(true));
         assertThat(bc.getMetadata().getAnnotations().entrySet().containsAll(buildConfigAnnos.entrySet()), is(true));
+        assertThat(bc.getSpec().getStrategy().getDockerStrategy().getPullSecret().getName(), is("my-pull-secret"));
+
+        // Check Service Account
+        ServiceAccount sa = build.generateServiceAccount();
+        assertThat(sa.getMetadata().getLabels().entrySet().containsAll(saLabels.entrySet()), is(true));
+        assertThat(sa.getMetadata().getAnnotations().entrySet().containsAll(saAnots.entrySet()), is(true));
     }
 
     @ParallelTest
@@ -461,7 +473,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                             .withAdditionalKanikoOptions("--reproducible", "--single-snapshot", "--log-format=json")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
@@ -470,7 +482,7 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(kc, VERSIONS);
+        KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
         Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
         assertThat(pod.getSpec().getContainers().get(0).getArgs(), is(expectedArgs));
@@ -488,7 +500,7 @@ public class KafkaConnectBuildTest {
                     .withNewBuild()
                         .withNewDockerOutput()
                             .withImage("my-image:latest")
-                            .withNewPushSecret("my-docker-credentials")
+                            .withPushSecret("my-docker-credentials")
                             .withAdditionalKanikoOptions("--reproducible", "--reproducible-something", "--build-arg", "--single-snapshot", "--digest-file=/dev/null", "--log-format=json")
                         .endDockerOutput()
                         .withPlugins(new PluginBuilder().withName("my-connector").withArtifacts(jarArtifactWithChecksum).build(),
@@ -497,7 +509,7 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        InvalidResourceException e = assertThrows(InvalidResourceException.class, () -> KafkaConnectBuild.fromCrd(kc, VERSIONS));
+        InvalidResourceException e = assertThrows(InvalidResourceException.class, () -> KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS));
 
         assertThat(e.getMessage(), containsString(".spec.build.additionalKanikoOptions contains forbidden options: [--reproducible-something, --build-arg, --digest-file]"));
     }

@@ -41,7 +41,7 @@ mkdir -p /tmp/zookeeper
 
 # Generate and print the config file
 echo "Starting Zookeeper with configuration:"
-./zookeeper_config_generator.sh | tee /tmp/zookeeper.properties
+./zookeeper_config_generator.sh | tee /tmp/zookeeper.properties | sed -e 's/password=.*/password=[hidden]/g'
 echo ""
 
 if [ -z "$KAFKA_LOG4J_OPTS" ]; then
@@ -50,9 +50,11 @@ fi
 
 # enabling Prometheus JMX exporter as Java agent
 if [ "$ZOOKEEPER_METRICS_ENABLED" = "true" ]; then
-  KAFKA_OPTS="$KAFKA_OPTS -javaagent:$(ls "$KAFKA_HOME"/libs/jmx_prometheus_javaagent*.jar)=9404:$KAFKA_HOME/custom-config/metrics-config.yml"
+  KAFKA_OPTS="$KAFKA_OPTS -javaagent:$(ls "$KAFKA_HOME"/libs/jmx_prometheus_javaagent*.jar)=9404:$KAFKA_HOME/custom-config/metrics-config.json"
   export KAFKA_OPTS
 fi
+
+. ./set_kafka_jmx_options.sh "${ZOOKEEPER_JMX_ENABLED}" "${ZOOKEEPER_JMX_USERNAME}" "${ZOOKEEPER_JMX_PASSWORD}"
 
 if [ -z "$KAFKA_HEAP_OPTS" ] && [ -n "${DYNAMIC_HEAP_FRACTION}" ]; then
     . ./dynamic_resources.sh

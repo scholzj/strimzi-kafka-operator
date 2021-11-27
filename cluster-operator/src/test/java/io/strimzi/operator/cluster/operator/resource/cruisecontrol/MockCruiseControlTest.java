@@ -19,6 +19,7 @@ import org.mockserver.integration.ClientAndServer;
 import java.io.IOException;
 import java.net.URISyntaxException;
 
+import static io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApiImpl.HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -31,7 +32,7 @@ public class MockCruiseControlTest {
     private static ClientAndServer ccServer;
 
     @BeforeAll
-    public static void startUp() throws IOException, URISyntaxException {
+    public static void startUp() throws IOException {
         ccServer = MockCruiseControl.server(PORT);
     }
 
@@ -45,15 +46,21 @@ public class MockCruiseControlTest {
         ccServer.stop();
     }
 
+    
+    private CruiseControlApi cruiseControlClientProvider(Vertx vertx) {
+        return new CruiseControlApiImpl(vertx, HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS, MockCruiseControl.CC_SECRET, MockCruiseControl.CC_API_SECRET, true, true);
+    }
+
     private void runTest(Vertx vertx, VertxTestContext context, String userTaskID, int pendingCalls) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, 0, pendingCalls);
 
-        CruiseControlApi client = new CruiseControlApiImpl(vertx);
+        CruiseControlApi client = cruiseControlClientProvider(vertx);
 
         Future<CruiseControlResponse> statusFuture = client.getUserTaskStatus(HOST, PORT, userTaskID);
 
-        Checkpoint checkpoint = context.checkpoint(pendingCalls + 1);
+        // One interaction is always expected at the end of the test, hence the +1
+        Checkpoint expectedInteractions = context.checkpoint(pendingCalls + 1);
 
         for (int i = 1; i <= pendingCalls; i++) {
             statusFuture = statusFuture.compose(response -> {
@@ -61,7 +68,7 @@ public class MockCruiseControlTest {
                         response.getJson().getString("Status"),
                         is(CruiseControlUserTaskStatus.IN_EXECUTION.toString()))
                 );
-                checkpoint.flag();
+                expectedInteractions.flag();
                 return client.getUserTaskStatus(HOST, PORT, userTaskID);
             });
         }
@@ -71,7 +78,7 @@ public class MockCruiseControlTest {
                     response.getJson().getString("Status"),
                     is(CruiseControlUserTaskStatus.COMPLETED.toString()))
             );
-            checkpoint.flag();
+            expectedInteractions.flag();
             return Future.succeededFuture(response);
         });
     }
@@ -99,13 +106,17 @@ public class MockCruiseControlTest {
     @Test
     public void testMockCCServerPendingCallsOverride(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
-        CruiseControlApi client = new CruiseControlApiImpl(vertx);
+        CruiseControlApi client = cruiseControlClientProvider(vertx);
         String userTaskID = MockCruiseControl.REBALANCE_NO_GOALS_RESPONSE_UTID;
 
         int pendingCalls1 = 2;
         Checkpoint firstPending = context.checkpoint(pendingCalls1);
         int pendingCalls2 = 4;
         Checkpoint secondPending = context.checkpoint(pendingCalls2);
+
+        //When last checkpoint is flagged, then test is marked as completed, so create another checkpoint
+        //for test end to prevent premature test success
+        Checkpoint completeTest = context.checkpoint();
 
         MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, 0, pendingCalls1);
 
@@ -134,9 +145,7 @@ public class MockCruiseControlTest {
             try {
                 ccServer.reset();
                 MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, 0, pendingCalls2);
-            } catch (IOException e) {
-                return Future.failedFuture(e);
-            } catch (URISyntaxException e) {
+            } catch (IOException | URISyntaxException e) {
                 return Future.failedFuture(e);
             }
             return Future.succeededFuture();
@@ -157,13 +166,11 @@ public class MockCruiseControlTest {
 
         statusFuture.compose(response -> {
             context.verify(() -> assertThat(
-                    response.getJson().getJsonArray("userTasks").getJsonObject(0).getString("Status"),
+                    response.getJson().getString("Status"),
                     is(CruiseControlUserTaskStatus.COMPLETED.toString()))
             );
             return Future.succeededFuture(response);
-        }).onComplete(context.succeeding(result -> {
-            context.completeNow();
-        }));
+        }).onComplete(context.succeeding(result -> completeTest.flag()));
     }
 
 }

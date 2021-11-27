@@ -19,12 +19,13 @@ import lombok.EqualsAndHashCode;
         builderPackage = Constants.FABRIC8_KUBERNETES_API
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonPropertyOrder({ "url", "sha512sum" })
+@JsonPropertyOrder({ "url", "sha512sum", "insecure" })
 @EqualsAndHashCode
 public class TgzArtifact extends DownloadableArtifact {
     private static final long serialVersionUID = 1L;
 
     @Description("Must be `" + TYPE_TGZ + "`")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @Override
     public String getType() {
         return TYPE_TGZ;

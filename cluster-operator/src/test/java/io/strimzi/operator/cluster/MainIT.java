@@ -59,7 +59,6 @@ public class MainIT {
         envVars.put(ClusterOperatorConfig.STRIMZI_CREATE_CLUSTER_ROLES, "TRUE");
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_S2I_IMAGES, KafkaVersionTestUtils.getKafkaConnectS2iImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         envVars.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
 
@@ -74,7 +73,6 @@ public class MainIT {
                 assertThat(cro.get("strimzi-cluster-operator-global"), is(notNullValue()));
                 assertThat(cro.get("strimzi-kafka-broker"), is(notNullValue()));
                 assertThat(cro.get("strimzi-entity-operator"), is(notNullValue()));
-                assertThat(cro.get("strimzi-topic-operator"), is(notNullValue()));
                 a.flag();
             })));
     }

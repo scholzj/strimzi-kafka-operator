@@ -11,6 +11,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.api.model.Namespaced;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.CustomResource;
@@ -33,50 +34,46 @@ import static java.util.Collections.unmodifiableList;
 
 @JsonDeserialize
 @Crd(
-        spec = @Crd.Spec(
-                names = @Crd.Spec.Names(
-                        kind = Kafka.RESOURCE_KIND,
-                        plural = Kafka.RESOURCE_PLURAL,
-                        shortNames = {Kafka.SHORT_NAME},
-                        categories = {Constants.STRIMZI_CATEGORY}
-                ),
-                group = Kafka.RESOURCE_GROUP,
-                scope = Kafka.SCOPE,
-                versions = {
-                        @Crd.Spec.Version(name = Kafka.V1BETA2, served = true, storage = false),
-                        @Crd.Spec.Version(name = Kafka.V1BETA1, served = true, storage = true),
-                        @Crd.Spec.Version(name = Kafka.V1ALPHA1, served = true, storage = false)
-                },
-                subresources = @Crd.Spec.Subresources(
-                        status = @Crd.Spec.Subresources.Status()
-                ),
-                additionalPrinterColumns = {
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Desired Kafka replicas",
-                                description = "The desired number of Kafka replicas in the cluster",
-                                jsonPath = ".spec.kafka.replicas",
-                                type = "integer"
-                        ),
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Desired ZK replicas",
-                                description = "The desired number of ZooKeeper replicas in the cluster",
-                                jsonPath = ".spec.zookeeper.replicas",
-                                type = "integer"
-                        ),
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Ready",
-                                description = "The state of the custom resource",
-                                jsonPath = ".status.conditions[?(@.type==\"Ready\")].status",
-                                type = "string"
-                        ),
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Warnings",
-                                description = "Warnings related to the custom resource",
-                                jsonPath = ".status.conditions[?(@.type==\"Warning\")].status",
-                                type = "string"
-                        )
-                }
-        )
+    spec = @Crd.Spec(
+        names = @Crd.Spec.Names(
+            kind = Kafka.RESOURCE_KIND,
+            plural = Kafka.RESOURCE_PLURAL,
+            shortNames = {Kafka.SHORT_NAME},
+            categories = {Constants.STRIMZI_CATEGORY}
+        ),
+        group = Kafka.RESOURCE_GROUP,
+        scope = Kafka.SCOPE,
+        versions = {
+            @Crd.Spec.Version(name = Kafka.V1BETA2, served = true, storage = false),
+            @Crd.Spec.Version(name = Kafka.V1BETA1, served = true, storage = true),
+            @Crd.Spec.Version(name = Kafka.V1ALPHA1, served = true, storage = false)
+        },
+        subresources = @Crd.Spec.Subresources(
+            status = @Crd.Spec.Subresources.Status()
+        ),
+        additionalPrinterColumns = {
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Desired Kafka replicas",
+                description = "The desired number of Kafka replicas in the cluster",
+                jsonPath = ".spec.kafka.replicas",
+                type = "integer"),
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Desired ZK replicas",
+                description = "The desired number of ZooKeeper replicas in the cluster",
+                jsonPath = ".spec.zookeeper.replicas",
+                type = "integer"),
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Ready",
+                description = "The state of the custom resource",
+                jsonPath = ".status.conditions[?(@.type==\"Ready\")].status",
+                type = "string"),
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Warnings",
+                description = "Warnings related to the custom resource",
+                jsonPath = ".status.conditions[?(@.type==\"Warning\")].status",
+                type = "string")
+        }
+    )
 )
 @Buildable(
         editableEnabled = false,
@@ -88,6 +85,7 @@ import static java.util.Collections.unmodifiableList;
 @EqualsAndHashCode
 @Version(Constants.V1BETA2)
 @Group(Constants.STRIMZI_GROUP)
+@SuppressFBWarnings("RCN_REDUNDANT_NULLCHECK_OF_NONNULL_VALUE")
 public class Kafka extends CustomResource<KafkaSpec, KafkaStatus> implements Namespaced, UnknownPropertyPreserving {
 
     public static final String V1BETA2 = Constants.V1BETA2;
@@ -108,6 +106,7 @@ public class Kafka extends CustomResource<KafkaSpec, KafkaStatus> implements Nam
     public static final List<String> RESOURCE_SHORTNAMES = unmodifiableList(singletonList(SHORT_NAME));
 
     private String apiVersion;
+    private String kind = RESOURCE_KIND;
     private ObjectMeta metadata; // leave it for the generator / builder
     private KafkaSpec spec;
     private Map<String, Object> additionalProperties = new HashMap<>(0);

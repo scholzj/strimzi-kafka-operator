@@ -10,7 +10,7 @@ For clients inside the Kubernetes cluster, you can create `plain` (without encry
 For clients outside the Kubernetes cluster, you create _external_ listeners and specify a connection mechanism,
 which can be `nodeport`, `loadbalancer`, `ingress` or `route` (on OpenShift).
 
-For more information on the configuration options for connecting an external client, see xref:assembly-configuring-external-listeners-str[Configuring external listeners].
+For more information on the configuration options for connecting an external client, see xref:assembly-accessing-kafka-outside-cluster-str[Accessing Kafka outside of the Kubernetes cluster].
 
 Supported authentication options:
 
@@ -21,7 +21,7 @@ Supported authentication options:
 The authentication option you choose depends on how you wish to authenticate client access to Kafka brokers.
 
 .Kafka listener authentication options
-image::listener-config-options.svg[options for listener authentication configuration]
+image::listener-config-options.png[options for listener authentication configuration]
 
 The listener `authentication` property is used to specify an authentication mechanism specific to that listener.
 
@@ -38,7 +38,7 @@ The following example shows:
 
 Each listener is configured with a unique name and port within a Kafka cluster.
 
-NOTE: Listeners cannot be configured to use the ports set aside for interbroker communication (9091) and metrics (9404).
+NOTE: Listeners cannot be configured to use the ports reserved for inter-broker communication (9091 or 9090) and metrics (9404).
 
 .An example showing listener authentication configuration
 [source,yaml,subs="attributes+"]
@@ -99,16 +99,16 @@ When a `KafkaUser.spec.authentication.type` is configured with `scram-sha-512` t
 [id='assembly-kafka-broker-listener-network-policies-{context}']
 == Network policies
 
-Strimzi automatically creates a `NetworkPolicy` resource for every listener that is enabled on a Kafka broker.
-By default, a `NetworkPolicy` grants access to a listener to all applications and namespaces.
+By default, Strimzi automatically creates a `NetworkPolicy` resource for every listener that is enabled on a Kafka broker.
+This `NetworkPolicy` allows applications to connect to listeners in all namespaces.
+Use network policies as part of the listener configuration.
 
-If you want to restrict access to a listener at the network level to only selected applications or namespaces,
-use the `networkPolicyPeers` property.
+If you want to restrict access to a listener at the network level to only selected applications or namespaces, use the `networkPolicyPeers` property.
+Each listener can have a different xref:configuration-listener-network-policy-reference[`networkPolicyPeers`] configuration.
+For more information on network policy peers, refer to the {K8sNetworkPolicyPeerAPI}.
 
-Use network policies as part of the listener authentication configuration.
-Each listener can have a different `networkPolicyPeers` configuration.
-
-For more information, refer to the xref:configuration-listener-network-policy-reference[Listener network policies] section and the {K8sNetworkPolicyPeerAPI}.
+If you want to use custom network policies, you can set the `STRIMZI_NETWORK_POLICY_GENERATION` environment variable to `false` in the Cluster Operator configuration.
+For more information, see xref:ref-operator-cluster-{context}[Cluster Operator configuration].
 
 NOTE: Your configuration of Kubernetes must support ingress `NetworkPolicies` in order to use network policies in Strimzi.
 

@@ -25,7 +25,6 @@ import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.RoleBindingOperator;
 import io.strimzi.operator.common.operator.resource.RoleOperator;
-import io.strimzi.test.annotations.ParallelTest;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
@@ -36,6 +35,7 @@ import org.hamcrest.Matcher;
 import org.hamcrest.TypeSafeDiagnosingMatcher;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
@@ -108,7 +108,7 @@ public class KafkaAssemblyOperatorRbacScopeTest {
      * This test checks that when STRIMZI_RBAC_SCOPE feature is set to 'NAMESPACE', the cluster operator only
      * deploys and binds to Roles
      */
-    @ParallelTest
+    @Test
     public void testRolesDeployedWhenNamespaceRbacScope(VertxTestContext context) {
         Kafka kafka = new KafkaBuilder()
                 .withNewMetadata()
@@ -137,14 +137,14 @@ public class KafkaAssemblyOperatorRbacScopeTest {
         CrdOperator mockKafkaOps = supplier.kafkaOperator;
         when(mockKafkaOps.getAsync(eq(namespace), eq(clusterName))).thenReturn(Future.succeededFuture(kafka));
         when(mockKafkaOps.get(eq(namespace), eq(clusterName))).thenReturn(kafka);
-        when(mockKafkaOps.updateStatusAsync(any(Kafka.class))).thenReturn(Future.succeededFuture());
+        when(mockKafkaOps.updateStatusAsync(any(), any(Kafka.class))).thenReturn(Future.succeededFuture());
 
         // Mock the operations for RoleBindings
         RoleBindingOperator mockRoleBindingOps = supplier.roleBindingOperations;
         // Capture the names of reconciled rolebindings and their patched state
         ArgumentCaptor<String> roleBindingNameCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<RoleBinding> roleBindingCaptor = ArgumentCaptor.forClass(RoleBinding.class);
-        when(mockRoleBindingOps.reconcile(eq(namespace), roleBindingNameCaptor.capture(), roleBindingCaptor.capture()))
+        when(mockRoleBindingOps.reconcile(any(), eq(namespace), roleBindingNameCaptor.capture(), roleBindingCaptor.capture()))
                 .thenReturn(Future.succeededFuture());
 
         KafkaAssemblyOperatorRolesSubset kao = new KafkaAssemblyOperatorRolesSubset(
@@ -179,7 +179,7 @@ public class KafkaAssemblyOperatorRbacScopeTest {
                             .withName("test-instance-entity-operator")
                             .build()));
 
-                    verify(supplier.clusterRoleBindingOperator, never()).reconcile(anyString(), any());
+                    verify(supplier.clusterRoleBindingOperator, never()).reconcile(any(), anyString(), any());
 
                     async.flag();
                 })));
@@ -189,7 +189,7 @@ public class KafkaAssemblyOperatorRbacScopeTest {
      * This test checks that when STRIMZI_RBAC_SCOPE feature is set to 'CLUSTER', the cluster operator
      * binds to ClusterRoles
      */
-    @ParallelTest
+    @Test
     public void testRolesDeployedWhenClusterRbacScope(VertxTestContext context) {
         Kafka kafka = new KafkaBuilder()
                 .withNewMetadata()
@@ -218,14 +218,14 @@ public class KafkaAssemblyOperatorRbacScopeTest {
         CrdOperator mockKafkaOps = supplier.kafkaOperator;
         when(mockKafkaOps.getAsync(eq(namespace), eq(clusterName))).thenReturn(Future.succeededFuture(kafka));
         when(mockKafkaOps.get(eq(namespace), eq(clusterName))).thenReturn(kafka);
-        when(mockKafkaOps.updateStatusAsync(any(Kafka.class))).thenReturn(Future.succeededFuture());
+        when(mockKafkaOps.updateStatusAsync(any(), any(Kafka.class))).thenReturn(Future.succeededFuture());
 
         // Mock the operations for RoleBindings
         RoleBindingOperator mockRoleBindingOps = supplier.roleBindingOperations;
         // Capture the names of reconciled rolebindings and their patched state
         ArgumentCaptor<String> roleBindingNameCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<RoleBinding> roleBindingCaptor = ArgumentCaptor.forClass(RoleBinding.class);
-        when(mockRoleBindingOps.reconcile(eq(namespace), roleBindingNameCaptor.capture(), roleBindingCaptor.capture()))
+        when(mockRoleBindingOps.reconcile(any(), eq(namespace), roleBindingNameCaptor.capture(), roleBindingCaptor.capture()))
                 .thenReturn(Future.succeededFuture());
 
         KafkaAssemblyOperatorRolesSubset kao = new KafkaAssemblyOperatorRolesSubset(
@@ -268,7 +268,7 @@ public class KafkaAssemblyOperatorRbacScopeTest {
      * This test checks that when STRIMZI_RBAC_SCOPE feature is set to 'NAMESPACE', the cluster operator
      * binds to ClusterRoles when it can't use Roles due to cross namespace permissions
      */
-    @ParallelTest
+    @Test
     public void testRolesDeployedWhenNamespaceRbacScopeAndMultiWatchNamespace(VertxTestContext context) {
         Kafka kafka = new KafkaBuilder()
                 .withNewMetadata()
@@ -299,14 +299,14 @@ public class KafkaAssemblyOperatorRbacScopeTest {
         CrdOperator mockKafkaOps = supplier.kafkaOperator;
         when(mockKafkaOps.getAsync(eq(namespace), eq(clusterName))).thenReturn(Future.succeededFuture(kafka));
         when(mockKafkaOps.get(eq(namespace), eq(clusterName))).thenReturn(kafka);
-        when(mockKafkaOps.updateStatusAsync(any(Kafka.class))).thenReturn(Future.succeededFuture());
+        when(mockKafkaOps.updateStatusAsync(any(), any(Kafka.class))).thenReturn(Future.succeededFuture());
 
         // Mock the operations for Roles
         RoleOperator mockRoleOps = supplier.roleOperations;
         // Capture the names of reconciled Roles and their patched state
         ArgumentCaptor<String> roleNameCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Role> roleCaptor = ArgumentCaptor.forClass(Role.class);
-        when(mockRoleOps.reconcile(anyString(), roleNameCaptor.capture(), roleCaptor.capture()))
+        when(mockRoleOps.reconcile(any(), anyString(), roleNameCaptor.capture(), roleCaptor.capture()))
                 .thenReturn(Future.succeededFuture());
 
         // Mock the operations for RoleBindings
@@ -314,7 +314,7 @@ public class KafkaAssemblyOperatorRbacScopeTest {
         // Capture the names of reconciled RoleBindings and their patched state
         ArgumentCaptor<String> roleBindingNameCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<RoleBinding> roleBindingCaptor = ArgumentCaptor.forClass(RoleBinding.class);
-        when(mockRoleBindingOps.reconcile(anyString(), roleBindingNameCaptor.capture(), roleBindingCaptor.capture()))
+        when(mockRoleBindingOps.reconcile(any(), anyString(), roleBindingNameCaptor.capture(), roleBindingCaptor.capture()))
                 .thenReturn(Future.succeededFuture());
 
         KafkaAssemblyOperatorRolesSubset kao = new KafkaAssemblyOperatorRolesSubset(

@@ -5,17 +5,22 @@
 watchNamespaces: []
 watchAnyNamespace: false
 
+defaultImageRegistry: quay.io
+defaultImageRepository: strimzi
+defaultImageTag: 0.26.0
+
 image:
-  registry: quay.io
-  repository: strimzi
+  registry: ""
+  repository: ""
   name: operator
-  tag: 0.22.1
+  tag: ""
 logVolume: co-config-volume
 logConfigMap: strimzi-cluster-operator
 logLevel: ${env:STRIMZI_LOG_LEVEL:-INFO}
 fullReconciliationIntervalMs: 120000
 operationTimeoutMs: 300000
 kubernetesServiceDnsDomain: cluster.local
+featureGates: ""
 
 tolerations: []
 affinity: {}
@@ -23,105 +28,108 @@ annotations: {}
 labels: {}
 nodeSelector: {}
 
+podSecurityContext: {}
+securityContext: {}
+
 # Docker images that operator uses to provision various components of Strimzi.  To use your own registry prefix the
 # repository name with your registry URL.
 # Ex) repository: registry.xyzcorp.com/strimzi/zookeeper
 zookeeper:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 kafka:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 kafkaConnect:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
-kafkaConnects2i:
-  image:
-    registry: quay.io
-    repository: strimzi
-    name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 topicOperator:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: operator
-    tag: 0.22.1
+    tag: ""
 userOperator:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry:
+    repository:
     name: operator
-    tag: 0.22.1
+    tag: ""
 kafkaInit:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: operator
-    tag: 0.22.1
+    tag: ""
 tlsSidecarEntityOperator:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 kafkaMirrorMaker:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 kafkaBridge:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository:
     name: kafka-bridge
-    tag: 0.19.0
+    tag: 0.20.3
 kafkaExporter:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 jmxTrans:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: jmxtrans
-    tag: 0.22.1
+    tag: ""
 kafkaMirrorMaker2:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 cruiseControl:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 tlsSidecarCruiseControl:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kafka
-    tagPrefix: 0.22.1
+    tagPrefix: ""
 kanikoExecutor:
   image:
-    registry: quay.io
-    repository: strimzi
+    registry: ""
+    repository: ""
     name: kaniko-executor
-    tag: 0.22.1
+    tag: ""
+mavenBuilder:
+  image:
+    registry: ""
+    repository: ""
+    name: maven-builder
+    tag: ""
 resources:
   limits:
     memory: 384Mi
@@ -136,10 +144,10 @@ readinessProbe:
   initialDelaySeconds: 10
   periodSeconds: 30
 
-# Override the docker registry used by all Strimzi images
-imageRegistryOverride: ""
-# Override the docker image repository used by all Strimzi images
-imageRepositoryOverride: ""
-# Override the docker image tag used by all Strimzi images
-imageTagOverride: ""
 createGlobalResources: true
+# Override the exclude pattern for exclude some labels
+labelsExclusionPattern: ""
+# Controls whether Strimzi generates network policy resources (By default true)
+generateNetworkPolicy: true
+# Override the value for Connect build timeout
+connectBuildTimeoutMs: 300000

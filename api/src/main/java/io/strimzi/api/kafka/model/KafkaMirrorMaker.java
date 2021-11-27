@@ -14,6 +14,7 @@ import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.CustomResource;
 import io.fabric8.kubernetes.model.annotation.Group;
 import io.fabric8.kubernetes.model.annotation.Version;
+import io.strimzi.api.annotations.DeprecatedType;
 import io.strimzi.api.kafka.model.status.KafkaMirrorMakerStatus;
 import io.strimzi.crdgenerator.annotations.Crd;
 import io.strimzi.crdgenerator.annotations.Description;
@@ -32,57 +33,53 @@ import static java.util.Collections.unmodifiableList;
 
 @JsonDeserialize
 @Crd(
-        spec = @Crd.Spec(
-                names = @Crd.Spec.Names(
-                        kind = KafkaMirrorMaker.RESOURCE_KIND,
-                        plural = KafkaMirrorMaker.RESOURCE_PLURAL,
-                        shortNames = {KafkaMirrorMaker.SHORT_NAME},
-                        categories = {Constants.STRIMZI_CATEGORY}
-                ),
-                group = KafkaMirrorMaker.RESOURCE_GROUP,
-                scope = KafkaMirrorMaker.SCOPE,
-                versions = {
-                        @Crd.Spec.Version(name = KafkaMirrorMaker.V1BETA2, served = true, storage = false),
-                        @Crd.Spec.Version(name = KafkaMirrorMaker.V1BETA1, served = true, storage = true),
-                        @Crd.Spec.Version(name = KafkaMirrorMaker.V1ALPHA1, served = true, storage = false)
-                },
-                subresources = @Crd.Spec.Subresources(
-                        status = @Crd.Spec.Subresources.Status(),
-                        scale = @Crd.Spec.Subresources.Scale(
-                                specReplicasPath = KafkaMirrorMaker.SPEC_REPLICAS_PATH,
-                                statusReplicasPath = KafkaMirrorMaker.STATUS_REPLICAS_PATH,
-                                labelSelectorPath = KafkaMirrorMaker.LABEL_SELECTOR_PATH
-                        )
-                ),
-                additionalPrinterColumns = {
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Desired replicas",
-                                description = "The desired number of Kafka MirrorMaker replicas",
-                                jsonPath = ".spec.replicas",
-                                type = "integer"
-                        ),
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Consumer Bootstrap Servers",
-                                description = "The boostrap servers for the consumer",
-                                jsonPath = ".spec.consumer.bootstrapServers",
-                                type = "string",
-                                priority = 1
-                        ),
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Producer Bootstrap Servers",
-                                description = "The boostrap servers for the producer",
-                                jsonPath = ".spec.producer.bootstrapServers",
-                                type = "string",
-                                priority = 1
-                        ),
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Ready",
-                                description = "The state of the custom resource",
-                                jsonPath = ".status.conditions[?(@.type==\"Ready\")].status",
-                                type = "string"
-                        )
-                }
-        )
+    spec = @Crd.Spec(
+        names = @Crd.Spec.Names(
+            kind = KafkaMirrorMaker.RESOURCE_KIND,
+            plural = KafkaMirrorMaker.RESOURCE_PLURAL,
+            shortNames = {KafkaMirrorMaker.SHORT_NAME},
+            categories = {Constants.STRIMZI_CATEGORY}
+        ),
+        group = KafkaMirrorMaker.RESOURCE_GROUP,
+        scope = KafkaMirrorMaker.SCOPE,
+        versions = {
+            @Crd.Spec.Version(name = KafkaMirrorMaker.V1BETA2, served = true, storage = false),
+            @Crd.Spec.Version(name = KafkaMirrorMaker.V1BETA1, served = true, storage = true),
+            @Crd.Spec.Version(name = KafkaMirrorMaker.V1ALPHA1, served = true, storage = false)
+        },
+        subresources = @Crd.Spec.Subresources(
+            status = @Crd.Spec.Subresources.Status(),
+            scale = @Crd.Spec.Subresources.Scale(
+                specReplicasPath = KafkaMirrorMaker.SPEC_REPLICAS_PATH,
+                statusReplicasPath = KafkaMirrorMaker.STATUS_REPLICAS_PATH,
+                labelSelectorPath = KafkaMirrorMaker.LABEL_SELECTOR_PATH
+            )
+        ),
+        additionalPrinterColumns = {
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Desired replicas",
+                description = "The desired number of Kafka MirrorMaker replicas",
+                jsonPath = ".spec.replicas",
+                type = "integer"),
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Consumer Bootstrap Servers",
+                description = "The boostrap servers for the consumer",
+                jsonPath = ".spec.consumer.bootstrapServers",
+                type = "string",
+                priority = 1),
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Producer Bootstrap Servers",
+                description = "The boostrap servers for the producer",
+                jsonPath = ".spec.producer.bootstrapServers",
+                type = "string",
+                priority = 1),
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Ready",
+                description = "The state of the custom resource",
+                jsonPath = ".status.conditions[?(@.type==\"Ready\")].status",
+                type = "string")
+        }
+    )
 )
 @Buildable(
         editableEnabled = false,
@@ -94,8 +91,9 @@ import static java.util.Collections.unmodifiableList;
 @EqualsAndHashCode
 @Version(Constants.V1BETA2)
 @Group(Constants.STRIMZI_GROUP)
+@Deprecated
+@DeprecatedType(replacedWithType = io.strimzi.api.kafka.model.KafkaMirrorMaker2.class)
 public class KafkaMirrorMaker extends CustomResource<KafkaMirrorMakerSpec, KafkaMirrorMakerStatus> implements Namespaced, UnknownPropertyPreserving {
-
     private static final long serialVersionUID = 1L;
 
     public static final String SCOPE = "Namespaced";
@@ -117,6 +115,7 @@ public class KafkaMirrorMaker extends CustomResource<KafkaMirrorMakerSpec, Kafka
     public static final String LABEL_SELECTOR_PATH = ".status.labelSelector";
 
     private String apiVersion;
+    private String kind = RESOURCE_KIND;
     private ObjectMeta metadata;
     private KafkaMirrorMakerSpec spec;
     private KafkaMirrorMakerStatus status;

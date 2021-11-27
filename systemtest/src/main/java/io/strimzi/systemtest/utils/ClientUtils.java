@@ -4,7 +4,6 @@
  */
 package io.strimzi.systemtest.utils;
 
-import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.kafkaclients.KafkaClientOperations;
 import io.strimzi.systemtest.kafkaclients.internalClients.InternalKafkaClient;
@@ -25,9 +24,7 @@ import static io.strimzi.systemtest.resources.ResourceManager.kubeClient;
 
 /**
  * ClientUtils class, which provides static methods for the all type clients
- * @see io.strimzi.systemtest.kafkaclients.externalClients.OauthExternalKafkaClient
- * @see io.strimzi.systemtest.kafkaclients.externalClients.TracingExternalKafkaClient
- * @see io.strimzi.systemtest.kafkaclients.externalClients.BasicExternalKafkaClient
+ * @see io.strimzi.systemtest.kafkaclients.externalClients.ExternalKafkaClient
  * @see io.strimzi.systemtest.kafkaclients.internalClients.InternalKafkaClient
  */
 public class ClientUtils {
@@ -65,7 +62,7 @@ public class ClientUtils {
         LOGGER.info("Waiting for producer/consumer:{} to finished", jobName);
         TestUtils.waitFor("job finished", Constants.GLOBAL_POLL_INTERVAL, timeoutForClientFinishJob(messageCount),
             () -> {
-                LOGGER.info("Job {} in namespace {}, has status {}", jobName, namespace, kubeClient().namespace(namespace).getJobStatus(jobName));
+                LOGGER.debug("Job {} in namespace {}, has status {}", jobName, namespace, kubeClient().namespace(namespace).getJobStatus(jobName));
                 return kubeClient().namespace(namespace).checkSucceededJobStatus(jobName);
             });
     }
@@ -92,18 +89,6 @@ public class ClientUtils {
     private static long timeoutForClientFinishJob(int messagesCount) {
         // need to add at least 2minutes for finishing the job
         return (long) messagesCount * 1000 + Duration.ofMinutes(2).toMillis();
-    }
-
-    public static Deployment waitUntilClientsArePresent(Deployment resource) {
-        Deployment[] deployment = new Deployment[1];
-        deployment[0] = resource;
-
-        TestUtils.waitFor(" for resource: " + resource + " to be present", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT, () -> {
-            deployment[0] = kubeClient().getDeploymentFromAnyNamespaces(ResourceManager.kubeClient().getDeploymentFromAnyNamespaceBySubstring(deployment[0].getMetadata().getName()));
-            return deployment[0] != null;
-        });
-
-        return deployment[0];
     }
 
     public static void waitUntilProducerAndConsumerSuccessfullySendAndReceiveMessages(ExtensionContext extensionContext,

@@ -10,7 +10,6 @@ import io.strimzi.operator.cluster.operator.assembly.AbstractConnectOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaBridgeAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaConnectAssemblyOperator;
-import io.strimzi.operator.cluster.operator.assembly.KafkaConnectS2IAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaMirrorMakerAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaRebalanceAssemblyOperator;
 import io.strimzi.operator.common.AbstractOperator;
@@ -23,8 +22,6 @@ import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.http.HttpServer;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +31,8 @@ import java.util.concurrent.TimeUnit;
 
 import static java.util.Arrays.asList;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * An "operator" for managing assemblies of various types <em>in a particular namespace</em>.
@@ -42,9 +41,8 @@ import io.micrometer.prometheus.PrometheusMeterRegistry;
  */
 public class ClusterOperator extends AbstractVerticle {
 
-    private static final Logger log = LogManager.getLogger(ClusterOperator.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(ClusterOperator.class.getName());
 
-    public static final String STRIMZI_CLUSTER_OPERATOR_DOMAIN = "cluster.operator.strimzi.io";
     private static final String NAME_SUFFIX = "-cluster-operator";
     private static final String CERTS_SUFFIX = NAME_SUFFIX + "-certs";
 
@@ -61,7 +59,6 @@ public class ClusterOperator extends AbstractVerticle {
     private long reconcileTimer;
     private final KafkaAssemblyOperator kafkaAssemblyOperator;
     private final KafkaConnectAssemblyOperator kafkaConnectAssemblyOperator;
-    private final KafkaConnectS2IAssemblyOperator kafkaConnectS2IAssemblyOperator;
     private final KafkaMirrorMakerAssemblyOperator kafkaMirrorMakerAssemblyOperator;
     private final KafkaMirrorMaker2AssemblyOperator kafkaMirrorMaker2AssemblyOperator;
     private final KafkaBridgeAssemblyOperator kafkaBridgeAssemblyOperator;
@@ -72,19 +69,17 @@ public class ClusterOperator extends AbstractVerticle {
                            KubernetesClient client,
                            KafkaAssemblyOperator kafkaAssemblyOperator,
                            KafkaConnectAssemblyOperator kafkaConnectAssemblyOperator,
-                           KafkaConnectS2IAssemblyOperator kafkaConnectS2IAssemblyOperator,
                            KafkaMirrorMakerAssemblyOperator kafkaMirrorMakerAssemblyOperator,
                            KafkaMirrorMaker2AssemblyOperator kafkaMirrorMaker2AssemblyOperator,
                            KafkaBridgeAssemblyOperator kafkaBridgeAssemblyOperator,
                            KafkaRebalanceAssemblyOperator kafkaRebalanceAssemblyOperator,
                            MetricsProvider metricsProvider) {
-        log.info("Creating ClusterOperator for namespace {}", namespace);
+        LOGGER.info("Creating ClusterOperator for namespace {}", namespace);
         this.namespace = namespace;
         this.config = config;
         this.client = client;
         this.kafkaAssemblyOperator = kafkaAssemblyOperator;
         this.kafkaConnectAssemblyOperator = kafkaConnectAssemblyOperator;
-        this.kafkaConnectS2IAssemblyOperator = kafkaConnectS2IAssemblyOperator;
         this.kafkaMirrorMakerAssemblyOperator = kafkaMirrorMakerAssemblyOperator;
         this.kafkaMirrorMaker2AssemblyOperator = kafkaMirrorMaker2AssemblyOperator;
         this.kafkaBridgeAssemblyOperator = kafkaBridgeAssemblyOperator;
@@ -95,34 +90,31 @@ public class ClusterOperator extends AbstractVerticle {
 
     @Override
     public void start(Promise<Void> start) {
-        log.info("Starting ClusterOperator for namespace {}", namespace);
+        LOGGER.info("Starting ClusterOperator for namespace {}", namespace);
 
         // Configure the executor here, but it is used only in other places
-        getVertx().createSharedWorkerExecutor("kubernetes-ops-pool", 10, TimeUnit.SECONDS.toNanos(120));
+        getVertx().createSharedWorkerExecutor("kubernetes-ops-pool", config.getOperationsThreadPoolSize(), TimeUnit.SECONDS.toNanos(120));
 
         List<Future> watchFutures = new ArrayList<>(8);
         List<AbstractOperator<?, ?, ?, ?>> operators = new ArrayList<>(asList(
                 kafkaAssemblyOperator, kafkaMirrorMakerAssemblyOperator,
                 kafkaConnectAssemblyOperator, kafkaBridgeAssemblyOperator, kafkaMirrorMaker2AssemblyOperator));
-        if (kafkaConnectS2IAssemblyOperator != null) {
-            operators.add(kafkaConnectS2IAssemblyOperator);
-        }
         for (AbstractOperator<?, ?, ?, ?> operator : operators) {
             watchFutures.add(operator.createWatch(namespace, operator.recreateWatch(namespace)).compose(w -> {
-                log.info("Opened watch for {} operator", operator.kind());
+                LOGGER.info("Opened watch for {} operator", operator.kind());
                 watchByKind.put(operator.kind(), w);
                 return Future.succeededFuture();
             }));
         }
 
-        watchFutures.add(AbstractConnectOperator.createConnectorWatch(kafkaConnectAssemblyOperator, kafkaConnectS2IAssemblyOperator, namespace, config.getCustomResourceSelector()));
+        watchFutures.add(AbstractConnectOperator.createConnectorWatch(kafkaConnectAssemblyOperator, namespace, config.getCustomResourceSelector()));
         watchFutures.add(kafkaRebalanceAssemblyOperator.createRebalanceWatch(namespace));
 
         CompositeFuture.join(watchFutures)
                 .compose(f -> {
-                    log.info("Setting up periodic reconciliation for namespace {}", namespace);
+                    LOGGER.info("Setting up periodic reconciliation for namespace {}", namespace);
                     this.reconcileTimer = vertx.setPeriodic(this.config.getReconciliationIntervalMs(), res2 -> {
-                        log.info("Triggering periodic reconciliation for namespace {}...", namespace);
+                        LOGGER.info("Triggering periodic reconciliation for namespace {}", namespace);
                         reconcileAll("timer");
                     });
                     return startHealthServer().map((Void) null);
@@ -133,7 +125,7 @@ public class ClusterOperator extends AbstractVerticle {
 
     @Override
     public void stop(Promise<Void> stop) {
-        log.info("Stopping ClusterOperator for namespace {}", namespace);
+        LOGGER.info("Stopping ClusterOperator for namespace {}", namespace);
         vertx.cancelTimer(reconcileTimer);
         for (Watch watch : watchByKind.values()) {
             if (watch != null) {
@@ -156,10 +148,6 @@ public class ClusterOperator extends AbstractVerticle {
         kafkaMirrorMaker2AssemblyOperator.reconcileAll(trigger, namespace, ignore);
         kafkaBridgeAssemblyOperator.reconcileAll(trigger, namespace, ignore);
         kafkaRebalanceAssemblyOperator.reconcileAll(trigger, namespace, ignore);
-
-        if (kafkaConnectS2IAssemblyOperator != null) {
-            kafkaConnectS2IAssemblyOperator.reconcileAll(trigger, namespace, ignore);
-        }
     }
 
     /**
@@ -182,9 +170,9 @@ public class ClusterOperator extends AbstractVerticle {
                 })
                 .listen(HEALTH_SERVER_PORT, ar -> {
                     if (ar.succeeded()) {
-                        log.info("ClusterOperator is now ready (health server listening on {})", HEALTH_SERVER_PORT);
+                        LOGGER.info("ClusterOperator is now ready (health server listening on {})", HEALTH_SERVER_PORT);
                     } else {
-                        log.error("Unable to bind health server on {}", HEALTH_SERVER_PORT, ar.cause());
+                        LOGGER.error("Unable to bind health server on {}", HEALTH_SERVER_PORT, ar.cause());
                     }
                     result.handle(ar);
                 });

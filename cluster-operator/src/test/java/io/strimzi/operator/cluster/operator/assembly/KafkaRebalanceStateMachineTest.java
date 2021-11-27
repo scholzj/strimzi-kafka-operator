@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.KafkaRebalanceList;
 import io.strimzi.api.kafka.model.KafkaRebalance;
@@ -26,17 +27,17 @@ import io.strimzi.operator.cluster.operator.resource.cruisecontrol.RebalanceOpti
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
+import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
-import io.strimzi.test.annotations.IsolatedTest;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
-import io.vertx.junit5.Timeout;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockserver.integration.ClientAndServer;
 
@@ -45,8 +46,8 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
+import static io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlApiImpl.HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
@@ -58,7 +59,6 @@ public class KafkaRebalanceStateMachineTest {
     private static final String RESOURCE_NAME = "my-rebalance";
     private static final String CLUSTER_NAMESPACE = "cruise-control-namespace";
     private static final String CLUSTER_NAME = "kafka-cruise-control-test-cluster";
-
     private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_18;
 
     private static ClientAndServer ccServer;
@@ -134,8 +134,9 @@ public class KafkaRebalanceStateMachineTest {
                                                          KafkaRebalanceAnnotation initialAnnotation,
                                                          KafkaRebalance kcRebalance) {
 
-        CruiseControlApi client = new CruiseControlApiImpl(vertx);
+        CruiseControlApi client = new CruiseControlApiImpl(vertx, HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS, MockCruiseControl.CC_SECRET, MockCruiseControl.CC_API_SECRET, true, true);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
+        ConfigMapOperator mockCmOps = supplier.configMapOperations;
         PlatformFeaturesAvailability pfa = new PlatformFeaturesAvailability(true, kubernetesVersion);
         KafkaRebalanceAssemblyOperator kcrao = new KafkaRebalanceAssemblyOperator(vertx, pfa, supplier, ResourceUtils.dummyClusterOperatorConfig()) {
             @Override
@@ -162,15 +163,16 @@ public class KafkaRebalanceStateMachineTest {
                 KafkaRebalance,
                 KafkaRebalanceList> mockRebalanceOps = supplier.kafkaRebalanceOperator;
 
+        when(mockCmOps.getAsync(CLUSTER_NAMESPACE, RESOURCE_NAME)).thenReturn(Future.succeededFuture(new ConfigMap()));
         when(mockRebalanceOps.get(CLUSTER_NAMESPACE, RESOURCE_NAME)).thenReturn(kcRebalance);
         when(mockRebalanceOps.getAsync(CLUSTER_NAMESPACE, RESOURCE_NAME)).thenReturn(Future.succeededFuture(kcRebalance));
 
         return kcrao.computeNextStatus(recon, HOST, client, kcRebalance, currentState, initialAnnotation, rbOptions)
                 .compose(result -> {
                     context.verify(() -> {
-                        assertThat(result.getConditions(), StateMatchers.hasStateInConditions(nextState));
+                        assertThat(result.getStatus().getConditions(), StateMatchers.hasStateInConditions(nextState));
                     });
-                    return Future.succeededFuture(result);
+                    return Future.succeededFuture(result.getStatus());
                 });
     }
 
@@ -215,7 +217,7 @@ public class KafkaRebalanceStateMachineTest {
         }
     }
 
-    @IsolatedTest
+    @Test
     public void testNewToProposalReady(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -226,7 +228,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testNewWithNotEnoughData(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         // Test the case where the user asks for a rebalance but there is not enough data, the returned status should
@@ -239,7 +241,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testNewToProposalPending(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 1);
@@ -250,7 +252,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testNewBadGoalsError(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         // Test the case where the user asks for a rebalance with custom goals which do not contain all the configured hard goals
@@ -283,7 +285,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testNewBadGoalsErrorWithSkipHGCheck(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         // Test the case where the user asks for a rebalance with custom goals which do not contain all the configured hard goals
@@ -307,7 +309,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalPendingToProposalReady(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -318,7 +320,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalPendingToProposalReadyWithDelay(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 3);
@@ -329,7 +331,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalPendingToStopped(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 3);
@@ -340,7 +342,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalReadyNoChange(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -351,7 +353,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalReadyToRebalancingWithNotEnoughData(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceNotEnoughDataError(ccServer);
@@ -362,7 +364,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalReadyToRebalancingWithPendingSummary(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 1);
@@ -373,7 +375,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalReadyToRebalancing(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -384,7 +386,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalReadyRefreshNoChange(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -395,7 +397,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalReadyRefreshToPendingProposal(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 1);
@@ -406,7 +408,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testProposalReadyRefreshToPendingProposalNotEnoughData(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceNotEnoughDataError(ccServer);
@@ -417,20 +419,19 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
-    @Timeout(value = 30, timeUnit = TimeUnit.SECONDS)
+    @Test
     public void testRebalancingCompleted(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, 0, 0);
         checkTransition(vertx, context,
                 KafkaRebalanceState.Rebalancing, KafkaRebalanceState.Ready,
                 KafkaRebalanceAnnotation.none, null,
-                MockCruiseControl.REBALANCE_NO_GOALS_RESPONSE_UTID)
+                MockCruiseControl.REBALANCE_NO_GOALS_VERBOSE_RESPONSE_UTID)
                 .onComplete(result -> checkOptimizationResults(result, context, false));
 
     }
 
-    @IsolatedTest
+    @Test
     public void testRebalancingPendingThenExecution(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         // This tests that the optimization proposal is added correctly if it was not ready when the rebalance(dryrun=false) was called.
@@ -440,12 +441,12 @@ public class KafkaRebalanceStateMachineTest {
         checkTransition(vertx, context,
                 KafkaRebalanceState.Rebalancing, KafkaRebalanceState.Rebalancing,
                 KafkaRebalanceAnnotation.none, null,
-                MockCruiseControl.REBALANCE_NO_GOALS_RESPONSE_UTID)
+                MockCruiseControl.REBALANCE_NO_GOALS_VERBOSE_RESPONSE_UTID)
                 .onComplete(result -> checkOptimizationResults(result, context, false));
 
     }
 
-    @IsolatedTest
+    @Test
     public void testRebalancingToStopped(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCUserTasksResponseNoGoals(ccServer, 0, 0);
@@ -458,7 +459,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testRebalancingCompletedWithError(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCUserTasksCompletedWithError(ccServer);
@@ -470,7 +471,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testStoppedRefreshToPendingProposal(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 1);
@@ -482,7 +483,7 @@ public class KafkaRebalanceStateMachineTest {
     }
 
 
-    @IsolatedTest
+    @Test
     public void testStoppedRefreshToProposalReady(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -493,7 +494,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testStoppedRefreshToPendingProposalNotEnoughData(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceNotEnoughDataError(ccServer);
@@ -504,7 +505,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testReadyRefreshToPendingProposal(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 1);
@@ -515,7 +516,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testReadyRefreshToProposalReady(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -526,7 +527,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testReadyRefreshToPendingProposalNotEnoughData(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceNotEnoughDataError(ccServer);
@@ -537,7 +538,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testNotReadyRefreshToPendingProposal(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 1);
@@ -548,7 +549,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testNotReadyRefreshToProposalReady(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceResponse(ccServer, 0);
@@ -559,7 +560,7 @@ public class KafkaRebalanceStateMachineTest {
 
     }
 
-    @IsolatedTest
+    @Test
     public void testNotReadyRefreshToPendingProposalNotEnoughData(Vertx vertx, VertxTestContext context) throws IOException, URISyntaxException {
 
         MockCruiseControl.setupCCRebalanceNotEnoughDataError(ccServer);

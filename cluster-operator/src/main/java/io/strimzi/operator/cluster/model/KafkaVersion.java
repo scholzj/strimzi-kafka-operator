@@ -79,25 +79,22 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
         private final KafkaVersion defaultVersion;
         private final Map<String, String> kafkaImages;
         private final Map<String, String> kafkaConnectImages;
-        private final Map<String, String> kafkaConnectS2iImages;
         private final Map<String, String> kafkaMirrorMakerImages;
         private final Map<String, String> kafkaMirrorMaker2Images;
 
         public Lookup(Map<String, String> kafkaImages,
                       Map<String, String> kafkaConnectImages,
-                      Map<String, String> kafkaConnectS2iImages,
                       Map<String, String> kafkaMirrorMakerImages,
                       Map<String, String> kafkaMirrorMaker2Images) {
             this(new InputStreamReader(
                     KafkaVersion.class.getResourceAsStream("/" + KAFKA_VERSIONS_RESOURCE),
                     StandardCharsets.UTF_8),
-                    kafkaImages, kafkaConnectImages, kafkaConnectS2iImages, kafkaMirrorMakerImages, kafkaMirrorMaker2Images);
+                    kafkaImages, kafkaConnectImages, kafkaMirrorMakerImages, kafkaMirrorMaker2Images);
         }
 
         protected Lookup(Reader reader,
                          Map<String, String> kafkaImages,
                          Map<String, String> kafkaConnectImages,
-                         Map<String, String> kafkaConnectS2iImages,
                          Map<String, String> kafkaMirrorMakerImages,
                          Map<String, String> kafkaMirrorMaker2Images) {
             map = new HashMap<>();
@@ -108,7 +105,6 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
             }
             this.kafkaImages = kafkaImages;
             this.kafkaConnectImages = kafkaConnectImages;
-            this.kafkaConnectS2iImages = kafkaConnectS2iImages;
             this.kafkaMirrorMakerImages = kafkaMirrorMakerImages;
             this.kafkaMirrorMaker2Images = kafkaMirrorMaker2Images;
         }
@@ -153,7 +149,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
                     .collect(Collectors.toSet());
         }
 
-        private String image(final String crImage, final String crVersion, Map<String, String> images, String envVar)
+        private String image(final String crImage, final String crVersion, Map<String, String> images)
                 throws NoImageException {
             final String image;
             if (crImage == null) {
@@ -184,9 +180,30 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
          */
         public String kafkaImage(String image, String version) {
             try {
-                return image(image, version, kafkaImages, ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES);
+                return image(image, version, kafkaImages);
             } catch (NoImageException e) {
                 throw asInvalidResourceException(version, e);
+            }
+        }
+
+        /**
+         * Validates whether each supported version has configured image and whether each configured image matches
+         * supported Kafka version.
+         *
+         * @param versions The versions to validate.
+         * @param images Map with configured images
+         * @throws NoImageException If one of the versions lacks an image.
+         * @throws UnsupportedVersionException If any version with configured image is not supported
+         */
+        public void validateImages(Set<String> versions, Map<String, String> images) throws NoImageException, UnsupportedVersionException   {
+            for (String version : versions) {
+                image(null, version, images);
+            }
+
+            for (String version : images.keySet())  {
+                if (!versions.contains(version)) {
+                    throw new UnsupportedVersionException("Kafka version " + version + " has a container image configured but is not supported.");
+                }
             }
         }
 
@@ -194,11 +211,10 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
          * Validate that the given versions have images present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_IMAGES}.
          * @param versions The versions to validate.
          * @throws NoImageException If one of the versions lacks an image.
+         * @throws UnsupportedVersionException If any version with configured image is not supported
          */
-        public void validateKafkaImages(Iterable<String> versions) throws NoImageException {
-            for (String version : versions) {
-                image(null, version, kafkaImages, ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES);
-            }
+        public void validateKafkaImages(Set<String> versions) throws NoImageException, UnsupportedVersionException {
+            validateImages(versions, kafkaImages);
         }
 
         /**
@@ -213,8 +229,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
             try {
                 return image(image,
                         version,
-                        kafkaConnectImages,
-                        ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES);
+                        kafkaConnectImages);
             } catch (NoImageException e) {
                 throw asInvalidResourceException(version, e);
             }
@@ -224,41 +239,10 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
          * Validate that the given versions have images present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_CONNECT_IMAGES}.
          * @param versions The versions to validate.
          * @throws NoImageException If one of the versions lacks an image.
+         * @throws UnsupportedVersionException If any version with configured image is not supported
          */
-        public void validateKafkaConnectImages(Iterable<String> versions) throws NoImageException {
-            for (String version : versions) {
-                image(null, version, kafkaConnectImages, ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES);
-            }
-        }
-
-        /**
-         * The Kafka Connect S2I image to use for a Kafka Connect cluster.
-         * @param image The image given in the CR.
-         * @param version The version given in the CR.
-         * @return The image to use.
-         * @throws InvalidResourceException If no image was given in the CR and the version given
-         * was not present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_CONNECT_S2I_IMAGES}.
-         */
-        public String kafkaConnectS2IVersion(String image, String version) {
-            try {
-                return image(image,
-                        version,
-                        kafkaConnectS2iImages,
-                        ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_S2I_IMAGES);
-            } catch (NoImageException e) {
-                throw asInvalidResourceException(version, e);
-            }
-        }
-
-        /**
-         * Validate that the given versions have images present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_CONNECT_S2I_IMAGES}.
-         * @param versions The versions to validate.
-         * @throws NoImageException If one of the versions lacks an image.
-         */
-        public void validateKafkaConnectS2IImages(Iterable<String> versions) throws NoImageException {
-            for (String version : versions) {
-                image(null, version, kafkaConnectS2iImages, ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_S2I_IMAGES);
-            }
+        public void validateKafkaConnectImages(Set<String> versions) throws NoImageException, UnsupportedVersionException {
+            validateImages(versions, kafkaConnectImages);
         }
 
         /**
@@ -273,8 +257,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
             try {
                 return image(image,
                         version,
-                        kafkaMirrorMakerImages,
-                        ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES);
+                        kafkaMirrorMakerImages);
             } catch (NoImageException e) {
                 throw asInvalidResourceException(version, e);
             }
@@ -290,11 +273,10 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
          * Validate that the given versions have images present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_MIRROR_MAKER_IMAGES}.
          * @param versions The versions to validate.
          * @throws NoImageException If one of the versions lacks an image.
+         * @throws UnsupportedVersionException If any version with configured image is not supported
          */
-        public void validateKafkaMirrorMakerImages(Iterable<String> versions) throws NoImageException {
-            for (String version : versions) {
-                image(null, version, kafkaMirrorMakerImages, ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES);
-            }
+        public void validateKafkaMirrorMakerImages(Set<String> versions) throws NoImageException, UnsupportedVersionException {
+            validateImages(versions, kafkaMirrorMakerImages);
         }
 
        /**
@@ -309,8 +291,7 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
             try {
                 return image(image,
                         version,
-                        kafkaMirrorMaker2Images,
-                        ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES);
+                        kafkaMirrorMaker2Images);
             } catch (NoImageException e) {
                 throw asInvalidResourceException(version, e);
             }
@@ -320,11 +301,10 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
          * Validate that the given versions have images present in {@link ClusterOperatorConfig#STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES}.
          * @param versions The versions to validate.
          * @throws NoImageException If one of the versions lacks an image.
+         * @throws UnsupportedVersionException If any version with configured image is not supported
          */
-        public void validateKafkaMirrorMaker2Images(Iterable<String> versions) throws NoImageException {
-            for (String version : versions) {
-                image(null, version, kafkaMirrorMaker2Images, ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES);
-            }
+        public void validateKafkaMirrorMaker2Images(Set<String> versions) throws NoImageException, UnsupportedVersionException {
+            validateImages(versions, kafkaMirrorMaker2Images);
         }
 
         @Override
@@ -342,7 +322,6 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
                         .append(" msg: ").append(version.messageVersion)
                         .append(" kafka-image: ").append(kafkaImages.get(v))
                         .append(" connect-image: ").append(kafkaConnectImages.get(v))
-                        .append(" connects2i-image: ").append(kafkaConnectS2iImages.get(v))
                         .append(" mirrormaker-image: ").append(kafkaMirrorMakerImages.get(v))
                         .append(" mirrormaker2-image: ").append(kafkaMirrorMaker2Images.get(v))
                         .append("}");
@@ -457,7 +436,8 @@ public class KafkaVersion implements Comparable<KafkaVersion> {
                 return 1;
             }
         }
-        return components.length - otherComponents.length;
+        // mismatch was not found, but the versions are of different length, e.g. 2.8 and 2.8.0
+        return 0;
     }
 
     @Override

@@ -4,8 +4,13 @@
  */
 package io.strimzi.operator.topic;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
+
 import io.apicurio.registry.utils.ConcurrentUtil;
-import io.debezium.kafka.KafkaCluster;
 import io.strimzi.operator.topic.zk.Zk;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -15,6 +20,7 @@ import io.vertx.junit5.VertxTestContext;
 import org.I0Itec.zkclient.ZkClient;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.zookeeper.CreateMode;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -22,15 +28,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ThreadLocalRandom;
-
 @ExtendWith(VertxExtension.class)
 public class TopicStoreUpgradeTest {
     private static final Map<String, String> MANDATORY_CONFIG;
+    private static EmbeddedKafkaCluster cluster;
 
     static {
         MANDATORY_CONFIG = new HashMap<>();
@@ -99,7 +100,6 @@ public class TopicStoreUpgradeTest {
         Properties kafkaProperties = new Properties();
         kafkaProperties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, config.get(Config.KAFKA_BOOTSTRAP_SERVERS));
         kafkaProperties.put(StreamsConfig.APPLICATION_ID_CONFIG, config.get(Config.APPLICATION_ID));
-        kafkaProperties.put(StreamsConfig.APPLICATION_SERVER_CONFIG, config.get(Config.APPLICATION_SERVER));
 
         ConcurrentUtil.result(Zk2KafkaStreams.upgrade(zk, config, kafkaProperties, true));
 
@@ -120,10 +120,13 @@ public class TopicStoreUpgradeTest {
     public static void before() throws Exception {
         vertx = Vertx.vertx();
 
-        KafkaCluster kc = KafkaStreamsTopicStoreTest.prepareKafkaCluster(MANDATORY_CONFIG);
+        cluster = new EmbeddedKafkaCluster(1);
+        cluster.start();
 
-        String zkConnectionString = "localhost:" + kc.zkPort();
-        ZkClient zkc = new ZkClient(zkConnectionString);
+        MANDATORY_CONFIG.put(Config.KAFKA_BOOTSTRAP_SERVERS.key, cluster.bootstrapServers());
+        MANDATORY_CONFIG.put(Config.ZOOKEEPER_CONNECT.key, cluster.zKConnectString());
+
+        ZkClient zkc = new ZkClient(cluster.zKConnectString());
         try {
             zkc.create("/strimzi", null, CreateMode.PERSISTENT);
             zkc.create("/strimzi/topics", null, CreateMode.PERSISTENT);
@@ -134,10 +137,7 @@ public class TopicStoreUpgradeTest {
 
     @AfterAll
     public static void after() {
-        try {
-            KafkaStreamsTopicStoreTest.shutdownKafkaCluster();
-        } finally {
-            vertx.close();
-        }
+        cluster.stop();
+        vertx.close();
     }
 }

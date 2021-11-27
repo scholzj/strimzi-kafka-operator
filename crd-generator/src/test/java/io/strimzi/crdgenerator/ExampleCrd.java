@@ -5,6 +5,7 @@
 package io.strimzi.crdgenerator;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
@@ -39,8 +40,7 @@ import java.util.Map;
             name = "Foo",
             description = "The foo",
             jsonPath = "...",
-            type = "integer"
-        )
+            type = "integer")
     }
     ))
 @OneOf({@OneOf.Alternative(@OneOf.Alternative.Property("either")), @OneOf.Alternative(@OneOf.Alternative.Property("or"))})
@@ -151,10 +151,10 @@ public class ExampleCrd<T, U extends Number, V extends U> extends CustomResource
     @Description("Example of a polymorphic type")
     @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "discrim")
     @JsonSubTypes({
-            @JsonSubTypes.Type(value = PolymorphicLeft.class, name = "left"),
-            @JsonSubTypes.Type(value = PolymorphicRight.class, name = "right")
+        @JsonSubTypes.Type(value = PolymorphicLeft.class, name = "left"),
+        @JsonSubTypes.Type(value = PolymorphicRight.class, name = "right")
     })
-    public static class PolymorphicTop {
+    public abstract static class PolymorphicTop {
         private String discrim;
         private String commonProperty;
 
@@ -186,6 +186,11 @@ public class ExampleCrd<T, U extends Number, V extends U> extends CustomResource
         public void setLeftProperty(String leftProperty) {
             this.leftProperty = leftProperty;
         }
+
+        @Override
+        public String getDiscrim() {
+            return "left";
+        }
     }
 
     public static class PolymorphicRight extends PolymorphicTop {
@@ -198,6 +203,12 @@ public class ExampleCrd<T, U extends Number, V extends U> extends CustomResource
 
         public void setRightProperty(String rightProperty) {
             this.rightProperty = rightProperty;
+        }
+
+        @Override
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        public String getDiscrim() {
+            return "right";
         }
     }
 

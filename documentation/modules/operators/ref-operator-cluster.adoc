@@ -31,6 +31,17 @@ env:
 The timeout for internal operations, in milliseconds. This value should be
 increased when using Strimzi on clusters where regular Kubernetes operations take longer than usual (because of slow downloading of Docker images, for example).
 
+`STRIMZI_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS`:: Optional, default 10000 ms.
+
+The session timeout (in milliseconds) for the Cluster Operator's ZooKeeper admin client.
+This value should be increased if ZooKeeper requests from the Cluster Operator are regularly failing due to timeout issues.
+There is a maximum allowed session time set on the ZooKeeper server side via the `maxSessionTimeout` config.
+By default this session max value is 20 times the default `tickTime` (whose default is 2000) therefore 40000 ms.
+If you require a higher timeout, you will need to change the `maxSessionTimeout` ZooKeeper server config value.
+
+`STRIMZI_OPERATIONS_THREAD_POOL_SIZE`:: Optional, default 10
+The worker thread pool size, which is used for various asynchronous and blocking operations that are run by the cluster operator.
+
 `STRIMZI_OPERATOR_NAMESPACE`:: The name of the namespace where the Strimzi Cluster Operator is running.
 Do not configure this variable manually. Use the Kubernetes Downward API.
 +
@@ -55,22 +66,8 @@ env:
     value: label1=value1,label2=value2
 ----
 
-`STRIMZI_CUSTOM_RESOURCE_SELECTOR`:: Optional.
-Specifies label selector used to filter the custom resources handled by the operator.
-The operator will operate only on those custom resources which will have the specified labels set.
-Resources without these labels will not be seen by the operator.
-The label selector applies to `Kafka`, `KafkaConnect`, `KafkaConnectS2I`, `KafkaBridge`, `KafkaMirrorMaker`, and `KafkaMirrorMaker2` resources.
-`KafkaRebalance` and `KafkaConnector` resources will be operated only when their corresponding Kafka and Kafka Connect clusters have the matching labels.
-+
-[source,yaml,options="nowrap"]
-----
-env:
-  - name: STRIMZI_CUSTOM_RESOURCE_SELECTOR
-    value: label1=value1,label2=value2
-----
-
 `STRIMZI_LABELS_EXCLUSION_PATTERN`:: Optional, default regex pattern is `^app.kubernetes.io/(?!part-of).*`.
-Specifies regex exclusion pattern used to filter labels propagation from the main custom resource to its subresources.
+Specifies the regex exclusion pattern used to filter labels propagation from the main custom resource to its subresources.
 The labels exclusion filter is not applied to labels in template sections such as `spec.kafka.template.pod.metadata.labels`.
 +
 [source,yaml,options="nowrap"]
@@ -78,6 +75,38 @@ The labels exclusion filter is not applied to labels in template sections such a
 env:
   - name: STRIMZI_LABELS_EXCLUSION_PATTERN
     value: "^key1.*"
+----
+
+`STRIMZI_CUSTOM_{COMPONENT_NAME}_LABELS`:: Optional.
+One or more custom labels to apply to all the pods created by the `{COMPONENT_NAME}` custom resource.
+The Cluster Operator labels the pods when the custom resource is created or is next reconciled.
++
+Environment variables exist for the following components:
++
+* `KAFKA`
+* `KAFKA_CONNECT`
+* `KAFKA_CONNECT_BUILD`
+* `ZOOKEEPER`
+* `ENTITY_OPERATOR`
+* `KAFKA_MIRROR_MAKER2`
+* `KAFKA_MIRROR_MAKER`
+* `CRUISE_CONTROL`
+* `KAFKA_BRIDGE`
+* `KAFKA_EXPORTER`
+* `JMX_TRANS`
+
+`STRIMZI_CUSTOM_RESOURCE_SELECTOR`:: Optional.
+Specifies label selector used to filter the custom resources handled by the operator.
+The operator will operate only on those custom resources which will have the specified labels set.
+Resources without these labels will not be seen by the operator.
+The label selector applies to `Kafka`, `KafkaConnect`, `KafkaBridge`, `KafkaMirrorMaker`, and `KafkaMirrorMaker2` resources.
+`KafkaRebalance` and `KafkaConnector` resources will be operated only when their corresponding Kafka and Kafka Connect clusters have the matching labels.
++
+[source,yaml,options="nowrap"]
+----
+env:
+  - name: STRIMZI_CUSTOM_RESOURCE_SELECTOR
+    value: label1=value1,label2=value2
 ----
 
 `STRIMZI_KAFKA_IMAGES`:: Required.
@@ -94,12 +123,6 @@ This provides a mapping from the Kafka version to the corresponding Docker image
 The required syntax is whitespace or comma separated `_<version>_=_<image>_` pairs.
 For example `{KafkaVersionLower}={DockerKafkaImagePrevious}, {KafkaVersionHigher}={DockerKafkaImageCurrent}`.
 This is used when a `KafkaConnect.spec.version` property is specified but not the `KafkaConnect.spec.image`.
-
-`STRIMZI_KAFKA_CONNECT_S2I_IMAGES`:: Required.
-This provides a mapping from the Kafka version to the corresponding Docker image containing a Kafka connect of that version.
-The required syntax is whitespace or comma separated `_<version>_=_<image>_` pairs.
-For example `{KafkaVersionLower}={DockerKafkaImagePrevious}, {KafkaVersionHigher}={DockerKafkaImageCurrent}`.
-This is used when a `KafkaConnectS2I.spec.version` property is specified but not the `KafkaConnectS2I.spec.image`.
 
 `STRIMZI_KAFKA_MIRROR_MAKER_IMAGES`:: Required.
 This provides a mapping from the Kafka version to the corresponding Docker image containing a Kafka mirror maker of that version.
@@ -171,6 +194,112 @@ If you are using a different DNS domain name suffix in your cluster, change the 
 The timeout for building new Kafka Connect images with additional connectots, in milliseconds.
 This value should be increased when using Strimzi to build container images containing many connectors or using a slow container registry.
 
+`STRIMZI_NETWORK_POLICY_GENERATION` :: Optional, default `true`.
+Controls whether Strimzi generates network policy resources.
+Network policies allow connections between Kafka components.
+
+Set this environment variable to `false` to disable network policy generation. You might do this, for example, if you want to use custom network policies. Custom network policies allow more control over maintaining the connections between components.
+
+`STRIMZI_FEATURE_GATES`:: Optional.
+Enables or disables features and functionality controlled by feature gates.
+For more information about each feature gate, see xref:ref-operator-cluster-feature-gates-{context}[].
+
+[id='ref-operator-cluster-feature-gates-{context}']
+== Feature gates
+
+Strimzi operators support _feature gates_ to enable or disable certain features and functionality.
+Enabling a feature gate changes the behavior of the relevant operator and introduces the feature to your Strimzi deployment.
+
+Feature gates have a default state of either _enabled_ or _disabled_.
+To modify a feature gate's default state, use the `STRIMZI_FEATURE_GATES` environment variable in the operator's configuration.
+You can modify multiple feature gates using this single environment variable.
+
+Feature gates have three stages of maturity:
+
+* Alpha — typically disabled by default
+* Beta — typically enabled by default
+* General Availability (GA) — typically always enabled
+
+Alpha stage features might be experimental or unstable, subject to change, or not sufficiently tested for production use.
+Beta stage features are well tested and their functionality is not likely to change.
+GA stage features are stable and should not change in the future.
+Alpha and beta stage features are removed if they do not prove to be useful.
+
+NOTE: Feature gates might be removed when they reach GA. This means that the feature was incorporated into the Strimzi core features and can no longer be disabled.
+
+.All feature gates and the Strimzi versions when they moved to alpha, beta, or GA
+[cols="4*",options="header",stripes="none",separator=¦]
+|===
+
+¦Feature gate
+¦Alpha
+¦Beta
+¦GA
+
+¦`ControlPlaneListener`
+¦0.23.0
+¦0.27.0
+¦ -
+
+¦`ServiceAccountPatching`
+¦0.24.0
+¦0.27.0
+¦ -
+
+|===
+
+[discrete]
+=== Configuring feature gates
+
+You configure feature gates using the `STRIMZI_FEATURE_GATES` environment variable in the operator's configuration.
+Specify a comma-separated list of feature gate names and prefixes.
+A `+` prefix enables the feature gate and a `-` prefix  disables it.
+
+.Example feature gate configuration that enables `FeatureGate1` and disables `FeatureGate2`
+[source,yaml,options="nowrap"]
+----
+env:
+  - name: STRIMZI_FEATURE_GATES
+    value: +FeatureGate1,-FeatureGate2
+----
+
+=== Control plane listener feature gate
+
+Use the `ControlPlaneListener` feature gate to change the communication paths used for inter-broker communications within your Kafka cluster.
+In Strimzi, control plane traffic consists of controller connections that maintain the desired state of the Kafka cluster.
+Data plane traffic mainly consists of data replication between the leader broker and the follower brokers.
+
+When the `ControlPlaneListener` feature gate is disabled, control plane and data plane traffic go through the same internal listener on port 9091.
+This was the default behavior before the feature gate was introduced.
+
+When `ControlPlaneListener` is enabled, control plane traffic goes through a dedicated _control plane listener_ on port 9090.
+Data plane traffic continues to use the internal listener on port 9091.
+
+Using control plane listeners might improve performance because important controller connections, such as partition leadership changes, are not delayed by data replication across brokers.
+
+.Disabling the control plane listener feature gate
+
+The `ControlPlaneListener` feature gate is in the beta stage and has a default state of _enabled_.
+To disable it, specify `-ControlPlaneListener` in the `STRIMZI_FEATURE_GATES` environment variable in the Cluster Operator configuration.
+
+This feature gate must be disabled when:
+
+* Upgrading from Strimzi 0.22 and earlier
+* Downgrading to Strimzi 0.22 and earlier
+
+NOTE: The `ControlPlaneListener` feature gate moved to beta stage in Strimzi 0.27.0 and is expected to remain in the beta stage until Strimzi 0.31.
+
+=== Service Account patching feature gate
+
+The `ServiceAccountPatching` feature gate is currently in the beta phase and enabled by default.
+By default, the Cluster Operator reconciles service accounts and updates them when needed.
+For example, you can change service account labels and annotations after the operands are already created.
+To disable service account patching, disable the `ServiceAccountPatching` feature gate.
+
+Add `-ServiceAccountPatching` to the `STRIMZI_FEATURE_GATES` environment variable in the Cluster Operator configuration.
+
+NOTE: The `ServiceAccountPatching` feature gate moved to beta stage in Strimzi 0.27.0 and is expected to remain in the beta stage until Strimzi 0.30.
+
 == Logging configuration by ConfigMap
 
 The Cluster Operator's logging is configured by the `strimzi-cluster-operator` `ConfigMap`.
@@ -185,7 +314,7 @@ kubectl create -f _install/cluster-operator/050-ConfigMap-strimzi-cluster-operat
 
 Alternatively, edit the `ConfigMap` directly:
 [source,shell,subs=+quotes]
-kubectl edit cm strimzi-cluster-operator
+kubectl edit configmap strimzi-cluster-operator
 
 To change the frequency of the reload interval, set a time in seconds in the `monitorInterval` option in the created `ConfigMap`.
 
@@ -246,11 +375,11 @@ When the Cluster Operator deploys resources for a desired `Kafka` resource it al
 
 * The Kafka broker pods use a `ServiceAccount` called `_cluster-name_-kafka`
   - When the rack feature is used, the `strimzi-_cluster-name_-kafka-init` `ClusterRoleBinding` is used to grant this `ServiceAccount` access to the nodes within the cluster via a `ClusterRole` called `strimzi-kafka-broker`
-  - When the rack feature is not used no binding is created
+  - When the rack feature is not used and the cluster is not exposed via nodeport, no binding is created
 * The ZooKeeper pods use a `ServiceAccount` called `_cluster-name_-zookeeper`
 * The Entity Operator pod uses a `ServiceAccount` called `_cluster-name_-entity-operator`
     - The Topic Operator produces Kubernetes events with status information, so the `ServiceAccount` is bound to a `ClusterRole` called `strimzi-entity-operator` which grants this access via the `strimzi-entity-operator` `RoleBinding`
-* The pods for `KafkaConnect` and `KafkaConnectS2I` resources use a `ServiceAccount` called `_cluster-name_-cluster-connect`
+* The pods for `KafkaConnect` resource uses a `ServiceAccount` called `_cluster-name_-cluster-connect`
 * The pods for `KafkaMirrorMaker` use a `ServiceAccount` called `_cluster-name_-mirror-maker`
 * The pods for `KafkaMirrorMaker2` use a `ServiceAccount` called `_cluster-name_-mirrormaker2`
 * The pods for `KafkaBridge` use a `ServiceAccount` called `_cluster-name_-bridge`
@@ -341,7 +470,7 @@ include::../install/cluster-operator/021-ClusterRoleBinding-strimzi-cluster-oper
 `ClusterRoleBindings` are also needed for the `ClusterRoles` needed for delegation:
 
 [source,yaml,options="nowrap"]
-.Example `ClusterRoleBinding` for the Cluster Operator for the Kafka broker rack-awarness
+.Example `ClusterRoleBinding` for the Cluster Operator for the Kafka broker rack-awareness
 ----
 include::../install/cluster-operator/030-ClusterRoleBinding-strimzi-cluster-operator-kafka-broker-delegation.yaml[]
 ----
@@ -349,7 +478,7 @@ include::../install/cluster-operator/030-ClusterRoleBinding-strimzi-cluster-oper
 and
 
 [source,yaml,options="nowrap"]
-.Example `ClusterRoleBinding` for the Cluster Operator for the Kafka client rack-awarness
+.Example `ClusterRoleBinding` for the Cluster Operator for the Kafka client rack-awareness
 ----
 include::../install/cluster-operator/033-ClusterRoleBinding-strimzi-cluster-operator-kafka-client-delegation.yaml[]
 ----

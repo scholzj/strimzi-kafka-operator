@@ -14,7 +14,9 @@ import io.strimzi.test.TestUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.List;
 import java.util.Random;
+import java.util.stream.Collectors;
 
 import static io.strimzi.systemtest.enums.CustomResourceStatus.NotReady;
 import static io.strimzi.systemtest.enums.CustomResourceStatus.Ready;
@@ -79,7 +81,7 @@ public class KafkaTopicUtils {
         TestUtils.waitFor("KafkaTopic creation " + topicNamePrefix, Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, READINESS_TIMEOUT,
             () -> KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).list().getItems().stream()
                     .filter(topic -> topic.getMetadata().getName().contains(topicNamePrefix))
-                    .findFirst().get().getStatus().getConditions().get(0).getType().equals(Ready.toString())
+                    .findFirst().orElseThrow().getStatus().getConditions().get(0).getType().equals(Ready.toString())
         );
     }
 
@@ -111,7 +113,15 @@ public class KafkaTopicUtils {
         LOGGER.info("Waiting for KafkaTopic change {}", topicName);
         TestUtils.waitFor("KafkaTopic change " + topicName, Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, Constants.GLOBAL_TIMEOUT,
             () -> KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).withName(topicName).get().getSpec().getPartitions() == partitions,
-            () -> LOGGER.info("Kafka Topic {} did not change partition", KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).withName(topicName).get())
+            () -> LOGGER.error("Kafka Topic {} did not change partition", KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).withName(topicName).get())
+        );
+    }
+
+    public static void waitForKafkaTopicReplicasChange(String namespaceName, String topicName, int replicas) {
+        LOGGER.info("Waiting for KafkaTopic change {}", topicName);
+        TestUtils.waitFor("KafkaTopic change " + topicName, Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, Constants.GLOBAL_TIMEOUT,
+            () -> KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).withName(topicName).get().getSpec().getReplicas() == replicas,
+            () -> LOGGER.error("Kafka Topic {} did not change replicas", KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).withName(topicName).get())
         );
     }
 
@@ -125,9 +135,9 @@ public class KafkaTopicUtils {
      * @param topicName name of KafkaTopic
      * @param state desired state
      */
-    public static boolean waitForKafkaTopicStatus(String namespaceName, String topicName, Enum<?>  state) {
-        KafkaTopic kafkaTopic = KafkaTopicResource.kafkaTopicClient().inNamespace(namespaceName).withName(topicName).get();
-        return ResourceManager.waitForResourceStatus(KafkaTopicResource.kafkaTopicClient(), kafkaTopic, state);
+    public static boolean waitForKafkaTopicStatus(String namespaceName, String topicName, Enum<?> state) {
+        return ResourceManager.waitForResourceStatus(KafkaTopicResource.kafkaTopicClient(), KafkaTopic.RESOURCE_KIND,
+            namespaceName, topicName, state, ResourceOperation.getTimeoutForResourceReadiness(KafkaTopic.RESOURCE_KIND));
     }
 
     public static boolean waitForKafkaTopicReady(String namespaceName, String topicName) {
@@ -136,10 +146,6 @@ public class KafkaTopicUtils {
 
     public static boolean waitForKafkaTopicReady(String topicName) {
         return waitForKafkaTopicStatus(kubeClient().getNamespace(), topicName, Ready);
-    }
-
-    public static boolean waitForKafkaTopicNotReady(String namespaceName, String topicName) {
-        return waitForKafkaTopicStatus(namespaceName, topicName, NotReady);
     }
 
     public static boolean waitForKafkaTopicNotReady(String topicName) {
@@ -155,8 +161,7 @@ public class KafkaTopicUtils {
     }
 
     public static String describeTopicViaKafkaPod(String topicName, String kafkaPodName, String bootstrapServer) {
-        return cmdKubeClient().execInPod(kafkaPodName, "/bin/bash -c",
-            ".bin/kafka-topics.sh",
+        return cmdKubeClient().execInPod(kafkaPodName, "/opt/kafka/bin/kafka-topics.sh",
             "--topic",
             topicName,
             "--describe",
@@ -185,5 +190,17 @@ public class KafkaTopicUtils {
             LOGGER.info("KafkaTopic's spec gonna be stable in {} polls", Constants.GLOBAL_STABILITY_OFFSET_COUNT - stableCounter[0]);
             return false;
         });
+    }
+
+    public static List<KafkaTopic> getAllKafkaTopicsWithPrefix(String namespace, String prefix) {
+        return KafkaTopicResource.kafkaTopicClient().inNamespace(namespace).list().getItems()
+            .stream().filter(p -> p.getMetadata().getName().startsWith(prefix))
+            .collect(Collectors.toList());
+    }
+
+    public static void deleteAllKafkaTopicsWithPrefix(String namespace, String prefix) {
+        KafkaTopicUtils.getAllKafkaTopicsWithPrefix(namespace, prefix).forEach(topic ->
+            cmdKubeClient().namespace(namespace).deleteByName(KafkaTopic.RESOURCE_SINGULAR, topic.getMetadata().getName())
+        );
     }
 }

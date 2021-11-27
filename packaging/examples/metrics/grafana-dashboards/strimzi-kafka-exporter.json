@@ -464,7 +464,7 @@
         "#F2495C",
         "#d44a3a"
       ],
-      "description": "Number of partitions which are at their minimum in sync replica count (| ISR | == | min.insync.replicas |).",
+      "description": "Number of partitions which are at their minimum in sync replica count (| ISR | == | min.insync.replicas |)",
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -546,7 +546,7 @@
         "#F2495C",
         "#d44a3a"
       ],
-      "description": "Number of partitions which are under their minimum in sync replica count (| ISR | < | min.insync.replicas |).",
+      "description": "Number of partitions which are under their minimum in sync replica count (| ISR | < | min.insync.replicas |)",
       "format": "none",
       "gauge": {
         "maxValue": 100,
@@ -679,7 +679,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "count(kafka_topic_partition_leader_is_preferred{topic=~\"$topic\"}<1)",
+          "expr": "sum(kafka_topic_partition_leader_is_preferred{topic=~\"$topic\"} < bool 1)",
           "format": "time_series",
           "intervalFactor": 1,
           "refId": "A"

@@ -24,8 +24,8 @@ import java.util.List;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({"type", "clientId", "tokenEndpointUri",
-                    "tlsTrustedCertificates", "disableTlsHostnameVerification",
-                    "delegateToKafkaAcls", "grantsRefreshPeriodSeconds", "grantsRefreshPoolSize", "superUsers"})
+    "tlsTrustedCertificates", "disableTlsHostnameVerification",
+    "delegateToKafkaAcls", "grantsRefreshPeriodSeconds", "grantsRefreshPoolSize", "superUsers"})
 @EqualsAndHashCode
 public class KafkaAuthorizationKeycloak extends KafkaAuthorization {
     private static final long serialVersionUID = 1L;
@@ -45,8 +45,19 @@ public class KafkaAuthorizationKeycloak extends KafkaAuthorization {
 
     @Description("Must be `" + TYPE_KEYCLOAK + "`")
     @Override
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getType() {
         return TYPE_KEYCLOAK;
+    }
+
+    /**
+     * When delegation to Kafka Simple Authorizer is enabled, the Kafka Admin API can be used to manage the Kafka ACLs.
+     * If it is disabled, using the Admin API is not possible.
+     *
+     * @return True when delegation to Kafka Simple Authorizer is enabled and the Kafka Admin API can be used to manage Simple ACLs.
+     */
+    public boolean supportsAdminApi()   {
+        return delegateToKafkaAcls;
     }
 
     @Description("OAuth Client ID which the Kafka client can use to authenticate against the OAuth server and use the token endpoint URI.")

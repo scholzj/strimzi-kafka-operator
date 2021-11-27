@@ -11,8 +11,10 @@ import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBridgeResources;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.systemtest.AbstractST;
+import io.strimzi.systemtest.BeforeAllOnce;
 import io.strimzi.systemtest.Constants;
-import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.annotations.IsolatedSuite;
+import io.strimzi.systemtest.resources.operator.SetupClusterOperator;
 import io.strimzi.systemtest.annotations.IsolatedTest;
 import io.strimzi.systemtest.templates.crd.KafkaBridgeTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaClientsTemplates;
@@ -26,10 +28,8 @@ import io.strimzi.systemtest.utils.kubeUtils.objects.ServiceUtils;
 import io.strimzi.test.timemeasuring.Operation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
-import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
@@ -37,14 +37,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static io.strimzi.systemtest.Constants.BRIDGE;
+import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
 import static io.strimzi.systemtest.Constants.REGRESSION;
 import static io.strimzi.systemtest.utils.kafkaUtils.KafkaUtils.generateRandomNameOfKafka;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 
 @Tag(REGRESSION)
+@IsolatedSuite
 class RecoveryST extends AbstractST {
 
-    static final String NAMESPACE = "recovery-cluster-test";
     static String sharedClusterName;
 
     private static final Logger LOGGER = LogManager.getLogger(RecoveryST.class);
@@ -73,10 +74,10 @@ class RecoveryST extends AbstractST {
         // kafka cluster already deployed
         String kafkaStatefulSetName = KafkaResources.kafkaStatefulSetName(sharedClusterName);
         String kafkaStatefulSetUid = kubeClient().getStatefulSetUid(kafkaStatefulSetName);
-        kubeClient().getClient().apps().deployments().inNamespace(NAMESPACE).withName(ResourceManager.getCoDeploymentName()).scale(0, true);
+        kubeClient().getClient().apps().deployments().inNamespace(INFRA_NAMESPACE).withName(Constants.STRIMZI_DEPLOYMENT_NAME).scale(0, true);
         kubeClient().deleteStatefulSet(kafkaStatefulSetName);
         PodUtils.waitForPodsWithPrefixDeletion(kafkaStatefulSetName);
-        kubeClient().getClient().apps().deployments().inNamespace(NAMESPACE).withName(ResourceManager.getCoDeploymentName()).scale(1, true);
+        kubeClient().getClient().apps().deployments().inNamespace(INFRA_NAMESPACE).withName(Constants.STRIMZI_DEPLOYMENT_NAME).scale(1, true);
 
         LOGGER.info("Waiting for recovery {}", kafkaStatefulSetName);
         StatefulSetUtils.waitForStatefulSetRecovery(kafkaStatefulSetName, kafkaStatefulSetUid);
@@ -93,10 +94,10 @@ class RecoveryST extends AbstractST {
         LOGGER.info("Running deleteZookeeperStatefulSet with cluster {}", sharedClusterName);
         String zookeeperStatefulSetName = KafkaResources.zookeeperStatefulSetName(sharedClusterName);
         String zookeeperStatefulSetUid = kubeClient().getStatefulSetUid(zookeeperStatefulSetName);
-        kubeClient().getClient().apps().deployments().inNamespace(NAMESPACE).withName(ResourceManager.getCoDeploymentName()).scale(0, true);
+        kubeClient().getClient().apps().deployments().inNamespace(INFRA_NAMESPACE).withName(Constants.STRIMZI_DEPLOYMENT_NAME).scale(0, true);
         kubeClient().deleteStatefulSet(zookeeperStatefulSetName);
         PodUtils.waitForPodsWithPrefixDeletion(zookeeperStatefulSetName);
-        kubeClient().getClient().apps().deployments().inNamespace(NAMESPACE).withName(ResourceManager.getCoDeploymentName()).scale(1, true);
+        kubeClient().getClient().apps().deployments().inNamespace(INFRA_NAMESPACE).withName(Constants.STRIMZI_DEPLOYMENT_NAME).scale(1, true);
 
         LOGGER.info("Waiting for recovery {}", zookeeperStatefulSetName);
         StatefulSetUtils.waitForStatefulSetRecovery(zookeeperStatefulSetName, zookeeperStatefulSetUid);
@@ -221,7 +222,7 @@ class RecoveryST extends AbstractST {
         String operationId = timeMeasuringSystem.startTimeMeasuring(Operation.CLUSTER_RECOVERY, extensionContext.getRequiredTestClass().getName(), extensionContext.getDisplayName());
         LOGGER.info("Running deleteKafkaBridgeService with cluster {}", sharedClusterName);
         String kafkaBridgeServiceName = KafkaBridgeResources.serviceName(sharedClusterName);
-        String kafkaBridgeServiceUid = kubeClient().namespace(NAMESPACE).getServiceUid(kafkaBridgeServiceName);
+        String kafkaBridgeServiceUid = kubeClient().namespace(INFRA_NAMESPACE).getServiceUid(kafkaBridgeServiceName);
         kubeClient().deleteService(kafkaBridgeServiceName);
 
         LOGGER.info("Waiting for service {} recovery", kafkaBridgeServiceName);
@@ -292,15 +293,17 @@ class RecoveryST extends AbstractST {
         KafkaUtils.waitForKafkaReady(clusterName);
 
         timeMeasuringSystem.stopOperation(operationId, extensionContext.getRequiredTestClass().getName(), extensionContext.getDisplayName());
-        KafkaResource.kafkaClient().inNamespace(NAMESPACE).delete(kafka);
+        KafkaResource.kafkaClient().inNamespace(INFRA_NAMESPACE).delete(kafka);
     }
 
     @BeforeEach
     void setup(ExtensionContext extensionContext) {
-        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
-        String clusterOperatorName = clusterName + "-" + Constants.STRIMZI_DEPLOYMENT_NAME;
-
-        installClusterOperator(extensionContext, clusterOperatorName, NAMESPACE, Constants.CO_OPERATION_TIMEOUT_DEFAULT, Constants.RECONCILIATION_INTERVAL);
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .createInstallation()
+            .runInstallation();
 
         sharedClusterName = generateRandomNameOfKafka("recovery-cluster");
         String kafkaClientsName = Constants.KAFKA_CLIENTS + "-" + sharedClusterName;
@@ -308,16 +311,5 @@ class RecoveryST extends AbstractST {
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(sharedClusterName, 3, 1).build());
         resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(false, kafkaClientsName).build());
         resourceManager.createResource(extensionContext, KafkaBridgeTemplates.kafkaBridge(sharedClusterName, KafkaResources.plainBootstrapAddress(sharedClusterName), 1).build());
-    }
-
-    @BeforeAll
-    void prepare(ExtensionContext extensionContext) {
-        prepareEnvForOperator(extensionContext, NAMESPACE);
-        if (Environment.isNamespaceRbacScope()) {
-            // if roles only, only deploy the rolebindings
-            applyRoleBindings(extensionContext, NAMESPACE, NAMESPACE);
-        } else {
-            applyBindings(extensionContext, NAMESPACE);
-        }
     }
 }

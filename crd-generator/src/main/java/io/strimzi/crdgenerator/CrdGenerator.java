@@ -413,7 +413,9 @@ public class CrdGenerator {
             result.put("version", Arrays.stream(crd.versions())
                     .map(v -> ApiVersion.parse(v.name()))
                     .filter(this::shouldIncludeVersion)
-                    .findFirst().map(v -> v.toString()).get());
+                    .findFirst()
+                    .map(ApiVersion::toString)
+                    .orElseThrow());
         }
 
         if (!perVersionSchemas) {
@@ -705,6 +707,7 @@ public class CrdGenerator {
         } else {
             for (Class c : subtypes(crdClass)) {
                 hasAnyGetterAndAnySetter(c);
+                checkDiscriminatorIsIncluded(crdClass, c);
             }
         }
         checkInherits(crdClass, "java.io.Serializable");
@@ -715,6 +718,26 @@ public class CrdGenerator {
             checkClassOverrides(crdClass, "hashCode");
         }
         checkClassOverrides(crdClass, "equals", Object.class);
+    }
+
+    private void checkDiscriminatorIsIncluded(Class<?> crdClass, Class c) {
+        try {
+            String typePropertyName = crdClass.getAnnotation(JsonTypeInfo.class).property();
+            String methodName = "get" + typePropertyName.substring(0, 1).toUpperCase(Locale.ENGLISH) + typePropertyName.substring(1).toLowerCase(Locale.ENGLISH);
+            @SuppressWarnings("unchecked")
+            Method method = c.getMethod(methodName);
+
+            if (!isAnnotatedWithIncludeNonNull(method)) {
+                err(c.getCanonicalName() + "#" + methodName + " is not annotated with @JsonInclude(JsonInclude.Include.NON_NULL)");
+            }
+        } catch (NoSuchMethodException e) {
+            err(e.getMessage());
+        }
+    }
+
+    private boolean isAnnotatedWithIncludeNonNull(Method method) {
+        JsonInclude ann = method.getAnnotation(JsonInclude.class);
+        return ann != null && ann.value().equals(JsonInclude.Include.NON_NULL);
     }
 
     private void checkInherits(Class<?> crdClass, String className) {
@@ -920,7 +943,7 @@ public class CrdGenerator {
     private ObjectNode addSimpleTypeConstraints(ApiVersion crApiVersion, ObjectNode result, Property property) {
 
         Example example = property.getAnnotation(Example.class);
-        // TODO make support verions
+        // TODO make support versions
         if (example != null) {
             result.put("example", example.value());
         }
@@ -1037,6 +1060,11 @@ public class CrdGenerator {
             return "array";
         } else if (type.isEnum()) {
             return "string";
+        } else if (Double.class.equals(type)
+                || double.class.equals(type)
+                || float.class.equals(type)
+                || Float.class.equals(type)) {
+            return "number";
         } else {
             throw new RuntimeException(type.getName());
         }

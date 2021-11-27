@@ -4,6 +4,13 @@
  */
 package io.strimzi.operator.cluster.model;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.regex.Pattern;
+
 import io.fabric8.kubernetes.api.model.Secret;
 import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.api.kafka.model.Kafka;
@@ -12,14 +19,7 @@ import io.strimzi.certs.CertManager;
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.ClusterOperator;
 import io.strimzi.operator.common.PasswordGenerator;
-
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.regex.Pattern;
+import io.strimzi.operator.common.Reconciliation;
 
 public class ClusterCa extends Ca {
 
@@ -34,11 +34,11 @@ public class ClusterCa extends Ca {
 
     private final Pattern ipv4Address = Pattern.compile("[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}");
 
-    public ClusterCa(CertManager certManager, PasswordGenerator passwordGenerator, String clusterName, Secret caCertSecret, Secret caKeySecret) {
-        this(certManager, passwordGenerator, clusterName, caCertSecret, caKeySecret, 365, 30, true, null);
+    public ClusterCa(Reconciliation reconciliation, CertManager certManager, PasswordGenerator passwordGenerator, String clusterName, Secret caCertSecret, Secret caKeySecret) {
+        this(reconciliation, certManager, passwordGenerator, clusterName, caCertSecret, caKeySecret, 365, 30, true, null);
     }
 
-    public ClusterCa(CertManager certManager,
+    public ClusterCa(Reconciliation reconciliation, CertManager certManager,
                      PasswordGenerator passwordGenerator,
                      String clusterName,
                      Secret clusterCaCert,
@@ -47,12 +47,12 @@ public class ClusterCa extends Ca {
                      int renewalDays,
                      boolean generateCa,
                      CertificateExpirationPolicy policy) {
-        super(certManager, passwordGenerator, "cluster-ca",
+        super(reconciliation, certManager, passwordGenerator,
+                "cluster-ca",
                 AbstractModel.clusterCaCertSecretName(clusterName),
                 forceRenewal(clusterCaCert, clusterCaKey, "cluster-ca.key"),
                 AbstractModel.clusterCaKeySecretName(clusterName),
-                adapt060ClusterCaSecret(clusterCaKey),
-                validityDays, renewalDays, generateCa, policy);
+                adapt060ClusterCaSecret(clusterCaKey), validityDays, renewalDays, generateCa, policy);
         this.clusterName = clusterName;
     }
 
@@ -79,7 +79,6 @@ public class ClusterCa extends Ca {
         return "cluster-ca";
     }
 
-    @SuppressWarnings("deprecation")
     public void initCaSecrets(List<Secret> secrets) {
         for (Secret secret: secrets) {
             String name = secret.getMetadata().getName();
@@ -115,6 +114,36 @@ public class ClusterCa extends Ca {
         return cruiseControlSecret;
     }
 
+    public Map<String, CertAndKey> generateCcCerts(Kafka kafka, boolean isMaintenanceTimeWindowsSatisfied) throws IOException {
+        String cluster = kafka.getMetadata().getName();
+        String namespace = kafka.getMetadata().getNamespace();
+
+        DnsNameGenerator ccDnsGenerator = DnsNameGenerator.of(namespace, CruiseControl.serviceName(cluster));
+
+        Function<Integer, Subject> subjectFn = i -> {
+            Subject.Builder subject = new Subject.Builder()
+                    .withOrganizationName("io.strimzi")
+                    .withCommonName(CruiseControl.serviceName(cluster));
+
+            subject.addDnsName(CruiseControl.serviceName(cluster));
+            subject.addDnsName(String.format("%s.%s",  CruiseControl.serviceName(cluster), namespace));
+            subject.addDnsName(ccDnsGenerator.serviceDnsNameWithoutClusterDomain());
+            subject.addDnsName(ccDnsGenerator.serviceDnsName());
+            subject.addDnsName(CruiseControl.serviceName(cluster));
+            subject.addDnsName("localhost");
+            return subject.build();
+        };
+
+        LOGGER.debugCr(reconciliation, "{}: Reconciling Cruise Control certificates", this);
+        return maybeCopyOrGenerateCerts(
+            reconciliation,
+           1,
+            subjectFn,
+            cruiseControlSecret,
+            podNum -> "cruise-control",
+            isMaintenanceTimeWindowsSatisfied);
+    }
+
     public Map<String, CertAndKey> generateZkCerts(Kafka kafka, boolean isMaintenanceTimeWindowsSatisfied) throws IOException {
         String cluster = kafka.getMetadata().getName();
         String namespace = kafka.getMetadata().getNamespace();
@@ -123,28 +152,25 @@ public class ClusterCa extends Ca {
         DnsNameGenerator zkHeadlessDnsGenerator = DnsNameGenerator.of(namespace, ZookeeperCluster.headlessServiceName(cluster));
 
         Function<Integer, Subject> subjectFn = i -> {
-            Map<String, String> sbjAltNames = new HashMap<>(6);
-            sbjAltNames.put("DNS.1", ZookeeperCluster.serviceName(cluster));
-            sbjAltNames.put("DNS.2", String.format("%s.%s", ZookeeperCluster.serviceName(cluster), namespace));
-            sbjAltNames.put("DNS.3", zkDnsGenerator.serviceDnsNameWithoutClusterDomain());
-            sbjAltNames.put("DNS.4", zkDnsGenerator.serviceDnsName());
-            sbjAltNames.put("DNS.5", ZookeeperCluster.podDnsName(namespace, cluster, i));
-            sbjAltNames.put("DNS.6", ZookeeperCluster.podDnsNameWithoutSuffix(namespace, cluster, i));
-            sbjAltNames.put("DNS.7", zkDnsGenerator.wildcardServiceDnsNameWithoutClusterDomain());
-            sbjAltNames.put("DNS.8", zkDnsGenerator.wildcardServiceDnsName());
-            sbjAltNames.put("DNS.9", zkHeadlessDnsGenerator.wildcardServiceDnsNameWithoutClusterDomain());
-            sbjAltNames.put("DNS.10", zkHeadlessDnsGenerator.wildcardServiceDnsName());
-
-            Subject subject = new Subject();
-            subject.setOrganizationName("io.strimzi");
-            subject.setCommonName(ZookeeperCluster.zookeeperClusterName(cluster));
-            subject.setSubjectAltNames(sbjAltNames);
-
-            return subject;
+            Subject.Builder subject = new Subject.Builder()
+                    .withOrganizationName("io.strimzi")
+                    .withCommonName(ZookeeperCluster.zookeeperClusterName(cluster));
+            subject.addDnsName(ZookeeperCluster.serviceName(cluster));
+            subject.addDnsName(String.format("%s.%s", ZookeeperCluster.serviceName(cluster), namespace));
+            subject.addDnsName(zkDnsGenerator.serviceDnsNameWithoutClusterDomain());
+            subject.addDnsName(zkDnsGenerator.serviceDnsName());
+            subject.addDnsName(ZookeeperCluster.podDnsName(namespace, cluster, i));
+            subject.addDnsName(ZookeeperCluster.podDnsNameWithoutSuffix(namespace, cluster, i));
+            subject.addDnsName(zkDnsGenerator.wildcardServiceDnsNameWithoutClusterDomain());
+            subject.addDnsName(zkDnsGenerator.wildcardServiceDnsName());
+            subject.addDnsName(zkHeadlessDnsGenerator.wildcardServiceDnsNameWithoutClusterDomain());
+            subject.addDnsName(zkHeadlessDnsGenerator.wildcardServiceDnsName());
+            return subject.build();
         };
 
-        log.debug("{}: Reconciling zookeeper certificates", this);
+        LOGGER.debugCr(reconciliation, "{}: Reconciling zookeeper certificates", this);
         return maybeCopyOrGenerateCerts(
+            reconciliation,
             kafka.getSpec().getZookeeper().getReplicas(),
             subjectFn,
             zkNodesSecret,
@@ -153,7 +179,7 @@ public class ClusterCa extends Ca {
     }
 
     public Map<String, CertAndKey> generateBrokerCerts(Kafka kafka, Set<String> externalBootstrapAddresses,
-            Map<Integer, Set<String>> externalAddresses, boolean isMaintenanceTimeWindowsSatisfied) throws IOException {
+                                                       Map<Integer, Set<String>> externalAddresses, boolean isMaintenanceTimeWindowsSatisfied) throws IOException {
         String cluster = kafka.getMetadata().getName();
         String namespace = kafka.getMetadata().getNamespace();
 
@@ -161,49 +187,46 @@ public class ClusterCa extends Ca {
         DnsNameGenerator kafkaHeadlessDnsGenerator = DnsNameGenerator.of(namespace, KafkaCluster.headlessServiceName(cluster));
 
         Function<Integer, Subject> subjectFn = i -> {
-            Map<String, String> sbjAltNames = new HashMap<>();
-            sbjAltNames.put("DNS.1", KafkaCluster.serviceName(cluster));
-            sbjAltNames.put("DNS.2", String.format("%s.%s", KafkaCluster.serviceName(cluster), namespace));
-            sbjAltNames.put("DNS.3", kafkaDnsGenerator.serviceDnsNameWithoutClusterDomain());
-            sbjAltNames.put("DNS.4", kafkaDnsGenerator.serviceDnsName());
-            sbjAltNames.put("DNS.5", KafkaCluster.headlessServiceName(cluster));
-            sbjAltNames.put("DNS.6", String.format("%s.%s", KafkaCluster.headlessServiceName(cluster), namespace));
-            sbjAltNames.put("DNS.7", kafkaHeadlessDnsGenerator.serviceDnsNameWithoutClusterDomain());
-            sbjAltNames.put("DNS.8", kafkaHeadlessDnsGenerator.serviceDnsName());
-            sbjAltNames.put("DNS.9", KafkaCluster.podDnsName(namespace, cluster, i));
-            sbjAltNames.put("DNS.10", KafkaCluster.podDnsNameWithoutClusterDomain(namespace, cluster, i));
-            int nextDnsId = 11;
-            int nextIpId = 1;
+            Subject.Builder subject = new Subject.Builder()
+                    .withOrganizationName("io.strimzi")
+                    .withCommonName(KafkaCluster.kafkaClusterName(cluster));
+
+            subject.addDnsName(KafkaCluster.serviceName(cluster));
+            subject.addDnsName(String.format("%s.%s", KafkaCluster.serviceName(cluster), namespace));
+            subject.addDnsName(kafkaDnsGenerator.serviceDnsNameWithoutClusterDomain());
+            subject.addDnsName(kafkaDnsGenerator.serviceDnsName());
+            subject.addDnsName(KafkaCluster.headlessServiceName(cluster));
+            subject.addDnsName(String.format("%s.%s", KafkaCluster.headlessServiceName(cluster), namespace));
+            subject.addDnsName(kafkaHeadlessDnsGenerator.serviceDnsNameWithoutClusterDomain());
+            subject.addDnsName(kafkaHeadlessDnsGenerator.serviceDnsName());
+            subject.addDnsName(KafkaCluster.podDnsName(namespace, cluster, i));
+            subject.addDnsName(KafkaCluster.podDnsNameWithoutClusterDomain(namespace, cluster, i));
 
             if (externalBootstrapAddresses != null)   {
                 for (String dnsName : externalBootstrapAddresses) {
-                    String sna = !ipv4Address.matcher(dnsName).matches() ?
-                            String.format("DNS.%d", nextDnsId++) :
-                            String.format("IP.%d", nextIpId++);
-
-                    sbjAltNames.put(sna, dnsName);
+                    if (!ipv4Address.matcher(dnsName).matches()) {
+                        subject.addDnsName(dnsName);
+                    } else {
+                        subject.addIpAddress(dnsName);
+                    }
                 }
             }
 
             if (externalAddresses.get(i) != null)   {
                 for (String dnsName : externalAddresses.get(i)) {
-                    String sna = !ipv4Address.matcher(dnsName).matches() ?
-                            String.format("DNS.%d", nextDnsId++) :
-                            String.format("IP.%d", nextIpId++);
-
-                    sbjAltNames.put(sna, dnsName);
+                    if (!ipv4Address.matcher(dnsName).matches()) {
+                        subject.addDnsName(dnsName);
+                    } else {
+                        subject.addIpAddress(dnsName);
+                    }
                 }
             }
 
-            Subject subject = new Subject();
-            subject.setOrganizationName("io.strimzi");
-            subject.setCommonName(KafkaCluster.kafkaClusterName(cluster));
-            subject.setSubjectAltNames(sbjAltNames);
-
-            return subject;
+            return subject.build();
         };
-        log.debug("{}: Reconciling kafka broker certificates", this);
+        LOGGER.debugCr(reconciliation, "{}: Reconciling kafka broker certificates", this);
         return maybeCopyOrGenerateCerts(
+            reconciliation,
             kafka.getSpec().getKafka().getReplicas(),
             subjectFn,
             brokersSecret,

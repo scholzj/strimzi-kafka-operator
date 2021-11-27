@@ -24,10 +24,10 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({ "version", "replicas", "image",
-        "bootstrapServers", "tls", "authentication", "config", "resources",
-        "livenessProbe", "readinessProbe", "jvmOptions", "jmxOptions",
-        "affinity", "tolerations", "logging", "metrics", "tracing",
-        "template", "externalConfiguration"})
+    "bootstrapServers", "tls", "authentication", "config", "resources",
+    "livenessProbe", "readinessProbe", "jvmOptions", "jmxOptions",
+    "affinity", "tolerations", "logging", "metrics", "tracing",
+    "template", "externalConfiguration"})
 @EqualsAndHashCode(callSuper = true, doNotUseGetters = true)
 public class KafkaConnectSpec extends AbstractKafkaConnectSpec {
 
@@ -40,7 +40,7 @@ public class KafkaConnectSpec extends AbstractKafkaConnectSpec {
     private String clientRackInitImage;
     private Rack rack;
     private String bootstrapServers;
-    private KafkaConnectTls tls;
+    private ClientTls tls;
     private KafkaClientAuthentication authentication;
     private Build build;
 
@@ -73,7 +73,7 @@ public class KafkaConnectSpec extends AbstractKafkaConnectSpec {
         this.rack = rack;
     }
 
-    @Description("Bootstrap servers to connect to. This should be given as a comma separated list of _<hostname>_:\u200D_<port>_ pairs.")
+    @Description("Bootstrap servers to connect to. This should be given as a comma separated list of _<hostname>_:_<port>_ pairs.")
     @JsonProperty(required = true)
     public String getBootstrapServers() {
         return bootstrapServers;
@@ -85,11 +85,11 @@ public class KafkaConnectSpec extends AbstractKafkaConnectSpec {
 
     @Description("TLS configuration")
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public KafkaConnectTls getTls() {
+    public ClientTls getTls() {
         return tls;
     }
 
-    public void setTls(KafkaConnectTls tls) {
+    public void setTls(ClientTls tls) {
         this.tls = tls;
     }
 

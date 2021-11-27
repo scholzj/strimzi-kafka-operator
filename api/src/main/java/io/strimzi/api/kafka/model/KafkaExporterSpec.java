@@ -26,9 +26,9 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
 @JsonPropertyOrder({
-        "image", "groupRegex",
-        "topicRegex", "resources", "logging",
-        "enableSaramaLogging", "template"})
+    "image", "groupRegex",
+    "topicRegex", "resources", "logging",
+    "enableSaramaLogging", "template"})
 @EqualsAndHashCode
 public class KafkaExporterSpec implements UnknownPropertyPreserving, Serializable {
     private static final long serialVersionUID = 1L;
@@ -88,7 +88,7 @@ public class KafkaExporterSpec implements UnknownPropertyPreserving, Serializabl
     }
 
     @Description("Only log messages with the given severity or above. " +
-            "Valid levels: [`debug`, `info`, `warn`, `error`, `fatal`]. " +
+            "Valid levels: [`info`, `debug`, `trace`]. " +
             "Default log level is `info`.")
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
     public String getLogging() {

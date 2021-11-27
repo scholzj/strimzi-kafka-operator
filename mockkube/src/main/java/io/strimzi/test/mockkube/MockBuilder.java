@@ -12,9 +12,11 @@ import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.LabelSelectorRequirement;
 import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.KubernetesClientTimeoutException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
+import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -192,7 +194,7 @@ class MockBuilder<T extends HasMetadata,
             String value = i.getArgument(1);
             return mockWithLabels(singletonMap(label, value));
         });
-        when(mixed.withLabelSelector(any())).thenAnswer(i -> {
+        when(mixed.withLabelSelector(any(LabelSelector.class))).thenAnswer(i -> {
             LabelSelector labelSelector = i.getArgument(0);
             Map<String, String> matchLabels = labelSelector.getMatchLabels();
             List<LabelSelectorRequirement> matchExpressions = labelSelector.getMatchExpressions();
@@ -213,6 +215,12 @@ class MockBuilder<T extends HasMetadata,
     }
 
     public MixedOperation<T, L, R> build2(Supplier<MixedOperation<T, L, R>> x) {
+        MixedOperation<T, L, R> build = build();
+        when(x.get()).thenReturn(build);
+        return build;
+    }
+
+    public MixedOperation<T, L, R> buildNns(Supplier<NonNamespaceOperation<T, L, R>> x) {
         MixedOperation<T, L, R> build = build();
         when(x.get()).thenReturn(build);
         return build;
@@ -314,7 +322,7 @@ class MockBuilder<T extends HasMetadata,
                 }
                 return t;
             });
-        } catch (InterruptedException e) {
+        } catch (KubernetesClientTimeoutException e) {
             throw new RuntimeException(e);
         }
     }
@@ -368,8 +376,9 @@ class MockBuilder<T extends HasMetadata,
         }
     }
 
+    @SuppressWarnings("unchecked")
     protected void mockPatch(String resourceName, R resource) {
-        when(resource.patch(any())).thenAnswer(invocation -> {
+        when(resource.patch((T) any())).thenAnswer(invocation -> {
             return doPatch(resourceName, resource, invocation.getArgument(0));
         });
     }
@@ -459,7 +468,7 @@ class MockBuilder<T extends HasMetadata,
 
     @SuppressWarnings("unchecked")
     protected OngoingStubbing<T> mockSetStatus(String resourceName, R resource) {
-        return when(resource.updateStatus((T) any())).thenAnswer(i -> {
+        return when(resource.replaceStatus((T) any())).thenAnswer(i -> {
             T r = i.getArgument(0);
             updateStatus(r.getMetadata().getNamespace(), r.getMetadata().getName(), r);
             LOGGER.debug("{} {} setStatus {}", resourceType, resourceName, r);

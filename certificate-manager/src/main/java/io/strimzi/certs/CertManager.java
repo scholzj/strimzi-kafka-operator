@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
+import java.time.ZonedDateTime;
 import java.util.List;
 
 public interface CertManager {
@@ -24,16 +25,6 @@ public interface CertManager {
     void generateSelfSignedCert(File keyFile, File certFile, Subject sbj, int days) throws IOException;
 
     /**
-     * Generate a self-signed certificate
-     *
-     * @param keyFile path to the file which will contain the private key
-     * @param certFile path to the file which will contain the self signed certificate
-     * @param days certificate duration
-     * @throws IOException If an input or output file could not be read/written.
-     */
-    void generateSelfSignedCert(File keyFile, File certFile, int days) throws IOException;
-
-    /**
      * Renew a new self-signed certificate, keeping the existing private key
      * @param keyFile path to the file containing the existing private key
      * @param certFile path to the file which contains the old certificate and
@@ -43,6 +34,14 @@ public interface CertManager {
      * @throws IOException If an input or output file could not be read/written.
      */
     void renewSelfSignedCert(File keyFile, File certFile, Subject sbj, int days) throws IOException;
+
+    void generateRootCaCert(Subject subject, File subjectKeyFile, File subjectCertFile,
+                            ZonedDateTime notBefore, ZonedDateTime notAfter, int pathLength) throws IOException;
+
+    void generateIntermediateCaCert(File issuerCaKeyFile, File issuerCaCertFile,
+                                    Subject subject,
+                                    File subjectKeyFile, File subjectCertFile,
+                                    ZonedDateTime notBefore, ZonedDateTime notAfter, int pathLength) throws IOException;
 
     /**
      * Add the provided certificate to the truststore which is created if it doesn't exist
@@ -102,35 +101,11 @@ public interface CertManager {
      * @param caKey path to the file containing the CA private key
      * @param caCert path to the file containing the CA certificate
      * @param crtFile path to the file which will contain the signed certificate
-     * @param days certificate duration
-     * @throws IOException If an input or output file could not be read/written.
-     */
-    void generateCert(File csrFile, File caKey, File caCert, File crtFile, int days) throws IOException;
-
-    /**
-     * Generate a certificate signed by a Certificate Authority
-     *
-     * @param csrFile path to the file containing the certificate sign request
-     * @param caKey path to the file containing the CA private key
-     * @param caCert path to the file containing the CA certificate
-     * @param crtFile path to the file which will contain the signed certificate
      * @param sbj subject information
      * @param days certificate duration
      * @throws IOException If an input or output file could not be read/written.
      */
     void generateCert(File csrFile, File caKey, File caCert, File crtFile, Subject sbj, int days) throws IOException;
-
-    /**
-     * Generate a certificate signed by a Certificate Authority
-     *
-     * @param csrFile path to the file containing the certificate sign request
-     * @param caKey CA private key bytes
-     * @param caCert CA certificate bytes
-     * @param crtFile path to the file which will contain the signed certificate
-     * @param days certificate duration
-     * @throws IOException If an input or output file could not be read/written.
-     */
-    void generateCert(File csrFile, byte[] caKey, byte[] caCert, File crtFile, int days) throws IOException;
 
     /**
      * Generate a certificate signed by a Certificate Authority

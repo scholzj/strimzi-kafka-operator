@@ -39,14 +39,14 @@ public class HelmClient {
     }
 
     /** Install a chart given its local path, release name, and values to override */
-    public HelmClient install(Path chart, String releaseName, Map<String, String> valuesMap) {
+    public HelmClient install(Path chart, String releaseName, Map<String, Object> valuesMap) {
         LOGGER.info("Installing helm-chart {}", releaseName);
         String values = Stream.of(valuesMap).flatMap(m -> m.entrySet().stream())
                 .map(entry -> String.format("%s=%s", entry.getKey(), entry.getValue()))
                 .collect(Collectors.joining(","));
         Exec.exec(null, wait(namespace(command("install",
                 releaseName,
-                "--set-string", values,
+                "--set", values,
                 "--timeout", INSTALL_TIMEOUT_SECONDS,
                 chart.toString()))), 0, true, true);
         return this;
@@ -55,7 +55,19 @@ public class HelmClient {
     /** Delete a chart given its release name */
     public HelmClient delete(String releaseName) {
         LOGGER.info("Deleting helm-chart {}", releaseName);
-        Exec.exec(null, namespace(command("delete", releaseName)), 0, false, false);
+        delete(namespace, releaseName);
+        return this;
+    }
+
+    /**
+     * Delete a Helm chart in specific namespace by given release name
+     * @param namespace namespace where chart is installed
+     * @param releaseName helm chart release name
+     * @return this
+     */
+    public HelmClient delete(String namespace, String releaseName) {
+        LOGGER.info("Deleting helm-chart:{} in namespace:{}", releaseName, namespace);
+        Exec.exec(null, command("delete", releaseName, "--namespace", namespace), 0, false, false);
         return this;
     }
 

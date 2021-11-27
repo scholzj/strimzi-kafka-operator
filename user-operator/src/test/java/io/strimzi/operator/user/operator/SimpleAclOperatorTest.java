@@ -7,6 +7,7 @@ package io.strimzi.operator.user.operator;
 import io.strimzi.api.kafka.model.AclOperation;
 import io.strimzi.api.kafka.model.AclResourcePatternType;
 import io.strimzi.api.kafka.model.AclRuleType;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.user.model.acl.SimpleAclRule;
 import io.strimzi.operator.user.model.acl.SimpleAclRuleResource;
 import io.strimzi.operator.user.model.acl.SimpleAclRuleResourceType;
@@ -40,7 +41,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 import static java.util.Arrays.asList;
@@ -70,7 +70,7 @@ public class SimpleAclOperatorTest {
     }
 
     @Test
-    public void testGetUsersFromAcls(VertxTestContext context)  {
+    public void testGetAllUsers(VertxTestContext context)  {
         Admin mockAdminClient = mock(AdminClient.class);
         SimpleAclOperator aclOp = new SimpleAclOperator(vertx, mockAdminClient);
 
@@ -97,8 +97,13 @@ public class SimpleAclOperatorTest {
                 asList(fooAclBinding, barAclBinding, bazAclBinding, allAclBinding, anonymousAclBinding);
 
         assertDoesNotThrow(() -> mockDescribeAcls(mockAdminClient, AclBindingFilter.ANY, aclBindings));
-        assertThat(aclOp.getUsersWithAcls(), is(new HashSet<>(asList("foo", "bar", "baz"))));
-        context.completeNow();
+
+        Checkpoint async = context.checkpoint();
+        aclOp.getAllUsers()
+                .onComplete(context.succeeding(users -> context.verify(() -> {
+                    assertThat(users, is(new HashSet<>(asList("foo", "bar", "baz"))));
+                    async.flag();
+                })));
     }
 
     @Test
@@ -130,7 +135,7 @@ public class SimpleAclOperatorTest {
         });
 
         Checkpoint async = context.checkpoint();
-        aclOp.reconcile("CN=foo", new LinkedHashSet<>(asList(resource2ReadRule, resource2WriteRule, resource1DescribeRule)))
+        aclOp.reconcile(Reconciliation.DUMMY_RECONCILIATION, "CN=foo", new LinkedHashSet<>(asList(resource2ReadRule, resource2WriteRule, resource1DescribeRule)))
                 .onComplete(context.succeeding(rr -> context.verify(() -> {
                     Collection<AclBinding> capturedAclBindings = aclBindingsCaptor.getValue();
                     assertThat(capturedAclBindings, hasSize(3));
@@ -169,7 +174,7 @@ public class SimpleAclOperatorTest {
         });
 
         Checkpoint async = context.checkpoint();
-        aclOp.reconcile("CN=foo", new LinkedHashSet(asList(rule1)))
+        aclOp.reconcile(Reconciliation.DUMMY_RECONCILIATION, "CN=foo", new LinkedHashSet(asList(rule1)))
                 .onComplete(context.succeeding(rr -> context.verify(() -> {
 
                     // Create Write rule for resource 2
@@ -212,7 +217,7 @@ public class SimpleAclOperatorTest {
         });
 
         Checkpoint async = context.checkpoint();
-        aclOp.reconcile("CN=foo", null)
+        aclOp.reconcile(Reconciliation.DUMMY_RECONCILIATION, "CN=foo", null)
                 .onComplete(context.succeeding(rr -> context.verify(() -> {
 
                     Collection<AclBindingFilter> capturedAclBindingFilters = aclBindingFiltersCaptor.getValue();
@@ -228,29 +233,38 @@ public class SimpleAclOperatorTest {
                 })));
     }
 
-    private void mockDescribeAcls(Admin mockAdminClient, AclBindingFilter aclBindingFilter, Collection<AclBinding> aclBindings)
-            throws InterruptedException, ExecutionException {
+    private void mockDescribeAcls(Admin mockAdminClient, AclBindingFilter aclBindingFilter, Collection<AclBinding> aclBindings) {
         DescribeAclsResult result = mock(DescribeAclsResult.class);
         KafkaFuture<Collection<AclBinding>> future = mock(KafkaFuture.class);
-        when(future.get()).thenReturn(aclBindings);
+        when(future.whenComplete(any())).thenAnswer(invocation -> {
+            KafkaFuture.BiConsumer consumer = invocation.getArgument(0);
+            consumer.accept(aclBindings, null);
+            return null;
+        });
         when(result.values()).thenReturn(future);
         when(mockAdminClient.describeAcls(aclBindingFilter != null ? aclBindingFilter : any())).thenReturn(result);
     }
 
-    private void mockCreateAcls(Admin mockAdminClient, ArgumentCaptor<Collection<AclBinding>> aclBindingsCaptor)
-            throws InterruptedException, ExecutionException {
+    private void mockCreateAcls(Admin mockAdminClient, ArgumentCaptor<Collection<AclBinding>> aclBindingsCaptor) {
         CreateAclsResult result = mock(CreateAclsResult.class);
         KafkaFuture<Void> future = mock(KafkaFuture.class);
-        when(future.get()).thenReturn(null);
+        when(future.whenComplete(any())).thenAnswer(invocation -> {
+            KafkaFuture.BiConsumer consumer = invocation.getArgument(0);
+            consumer.accept(null, null);
+            return null;
+        });
         when(result.all()).thenReturn(future);
         when(mockAdminClient.createAcls(aclBindingsCaptor.capture())).thenReturn(result);
     }
 
-    private void mockDeleteAcls(Admin mockAdminClient, Collection<AclBinding> aclBindings, ArgumentCaptor<Collection<AclBindingFilter>> aclBindingFiltersCaptor)
-            throws InterruptedException, ExecutionException {
+    private void mockDeleteAcls(Admin mockAdminClient, Collection<AclBinding> aclBindings, ArgumentCaptor<Collection<AclBindingFilter>> aclBindingFiltersCaptor) {
         DeleteAclsResult result = mock(DeleteAclsResult.class);
         KafkaFuture<Collection<AclBinding>> future = mock(KafkaFuture.class);
-        when(future.get()).thenReturn(aclBindings);
+        when(future.whenComplete(any())).thenAnswer(invocation -> {
+            KafkaFuture.BiConsumer consumer = invocation.getArgument(0);
+            consumer.accept(aclBindings, null);
+            return null;
+        });
         when(result.all()).thenReturn(future);
         when(mockAdminClient.deleteAcls(aclBindingFiltersCaptor.capture())).thenReturn(result);
     }

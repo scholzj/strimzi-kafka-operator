@@ -99,6 +99,9 @@ spec:
                     accessTokenIsJwt:
                       type: boolean
                       description: Configure whether access token should be treated as JWT. This should be set to `false` if the authorization server returns opaque tokens. Defaults to `true`.
+                    audience:
+                      type: string
+                      description: OAuth audience to use when authenticating against the authorization server. Some authorization servers require the audience to be explicitly set. The possible values depend on how the authorization server is configured. By default, `audience` is not specified when performing the token endpoint request.
                     certificateAndKey:
                       type: object
                       properties:
@@ -224,6 +227,14 @@ spec:
                         - allowedMethods
                       description: CORS configuration for the HTTP Bridge.
                   description: The HTTP related configuration.
+                adminClient:
+                  type: object
+                  properties:
+                    config:
+                      x-kubernetes-preserve-unknown-fields: true
+                      type: object
+                      description: The Kafka AdminClient configuration used for AdminClient instances created by the bridge.
+                  description: Kafka AdminClient related configuration.
                 consumer:
                   type: object
                   properties:
@@ -259,11 +270,11 @@ spec:
                       description: A map of -XX options to the JVM.
                     "-Xms":
                       type: string
-                      pattern: '[0-9]+[mMgG]?'
+                      pattern: ^[0-9]+[mMgG]?$
                       description: -Xms option to to the JVM.
                     "-Xmx":
                       type: string
-                      pattern: '[0-9]+[mMgG]?'
+                      pattern: ^[0-9]+[mMgG]?$
                       description: -Xmx option to to the JVM.
                     gcLoggingEnabled:
                       type: boolean
@@ -461,6 +472,8 @@ spec:
                                   type: string
                                 gmsaCredentialSpecName:
                                   type: string
+                                hostProcess:
+                                  type: boolean
                                 runAsUserName:
                                   type: string
                           description: Configures pod-level security attributes and common container settings.
@@ -574,6 +587,25 @@ spec:
                                               matchLabels:
                                                 x-kubernetes-preserve-unknown-fields: true
                                                 type: object
+                                          namespaceSelector:
+                                            type: object
+                                            properties:
+                                              matchExpressions:
+                                                type: array
+                                                items:
+                                                  type: object
+                                                  properties:
+                                                    key:
+                                                      type: string
+                                                    operator:
+                                                      type: string
+                                                    values:
+                                                      type: array
+                                                      items:
+                                                        type: string
+                                              matchLabels:
+                                                x-kubernetes-preserve-unknown-fields: true
+                                                type: object
                                           namespaces:
                                             type: array
                                             items:
@@ -588,6 +620,25 @@ spec:
                                     type: object
                                     properties:
                                       labelSelector:
+                                        type: object
+                                        properties:
+                                          matchExpressions:
+                                            type: array
+                                            items:
+                                              type: object
+                                              properties:
+                                                key:
+                                                  type: string
+                                                operator:
+                                                  type: string
+                                                values:
+                                                  type: array
+                                                  items:
+                                                    type: string
+                                          matchLabels:
+                                            x-kubernetes-preserve-unknown-fields: true
+                                            type: object
+                                      namespaceSelector:
                                         type: object
                                         properties:
                                           matchExpressions:
@@ -642,6 +693,25 @@ spec:
                                               matchLabels:
                                                 x-kubernetes-preserve-unknown-fields: true
                                                 type: object
+                                          namespaceSelector:
+                                            type: object
+                                            properties:
+                                              matchExpressions:
+                                                type: array
+                                                items:
+                                                  type: object
+                                                  properties:
+                                                    key:
+                                                      type: string
+                                                    operator:
+                                                      type: string
+                                                    values:
+                                                      type: array
+                                                      items:
+                                                        type: string
+                                              matchLabels:
+                                                x-kubernetes-preserve-unknown-fields: true
+                                                type: object
                                           namespaces:
                                             type: array
                                             items:
@@ -656,6 +726,25 @@ spec:
                                     type: object
                                     properties:
                                       labelSelector:
+                                        type: object
+                                        properties:
+                                          matchExpressions:
+                                            type: array
+                                            items:
+                                              type: object
+                                              properties:
+                                                key:
+                                                  type: string
+                                                operator:
+                                                  type: string
+                                                values:
+                                                  type: array
+                                                  items:
+                                                    type: string
+                                          matchLabels:
+                                            x-kubernetes-preserve-unknown-fields: true
+                                            type: object
+                                      namespaceSelector:
                                         type: object
                                         properties:
                                           matchExpressions:
@@ -715,6 +804,10 @@ spec:
                               ip:
                                 type: string
                           description: The pod's HostAliases. HostAliases is an optional list of hosts and IPs that will be injected into the Pod's hosts file if specified.
+                        tmpDirSizeLimit:
+                          type: string
+                          pattern: ^([0-9.]+)([eEinumkKMGTP]*[-+]?[0-9]*)$
+                          description: Defines the total amount (for example `1Gi`) of local storage required for temporary EmptyDir volume (`/tmp`). Default value is `1Mi`.
                         enableServiceLinks:
                           type: boolean
                           description: Indicates whether information about services should be injected into Pod's environment variables.
@@ -781,6 +874,26 @@ spec:
                               - IPv6
                           description: Specifies the IP Families used by the service. Available options are `IPv4` and `IPv6. If unspecified, Kubernetes will choose the default value based on the `ipFamilyPolicy` setting. Available on Kubernetes 1.20 and newer.
                       description: Template for Kafka Bridge API `Service`.
+                    podDisruptionBudget:
+                      type: object
+                      properties:
+                        metadata:
+                          type: object
+                          properties:
+                            labels:
+                              x-kubernetes-preserve-unknown-fields: true
+                              type: object
+                              description: Labels added to the resource template. Can be applied to different resources such as `StatefulSets`, `Deployments`, `Pods`, and `Services`.
+                            annotations:
+                              x-kubernetes-preserve-unknown-fields: true
+                              type: object
+                              description: Annotations added to the resource template. Can be applied to different resources such as `StatefulSets`, `Deployments`, `Pods`, and `Services`.
+                          description: Metadata to apply to the `PodDisruptionBudgetTemplate` resource.
+                        maxUnavailable:
+                          type: integer
+                          minimum: 0
+                          description: Maximum number of unavailable pods to allow automatic Pod eviction. A Pod eviction is allowed when the `maxUnavailable` number of pods or fewer are unavailable after the eviction. Setting this value to 0 prevents all voluntary evictions, so the pods must be evicted manually. Defaults to 1.
+                      description: Template for Kafka Bridge `PodDisruptionBudget`.
                     bridgeContainer:
                       type: object
                       properties:
@@ -849,11 +962,13 @@ spec:
                                   type: string
                                 gmsaCredentialSpecName:
                                   type: string
+                                hostProcess:
+                                  type: boolean
                                 runAsUserName:
                                   type: string
                           description: Security context for the container.
                       description: Template for the Kafka Bridge container.
-                    podDisruptionBudget:
+                    serviceAccount:
                       type: object
                       properties:
                         metadata:
@@ -867,12 +982,8 @@ spec:
                               x-kubernetes-preserve-unknown-fields: true
                               type: object
                               description: Annotations added to the resource template. Can be applied to different resources such as `StatefulSets`, `Deployments`, `Pods`, and `Services`.
-                          description: Metadata to apply to the `PodDistruptionBugetTemplate` resource.
-                        maxUnavailable:
-                          type: integer
-                          minimum: 0
-                          description: Maximum number of unavailable pods to allow automatic Pod eviction. A Pod eviction is allowed when the `maxUnavailable` number of pods or fewer are unavailable after the eviction. Setting this value to 0 prevents all voluntary evictions, so the pods must be evicted manually. Defaults to 1.
-                      description: Template for Kafka Bridge `PodDisruptionBudget`.
+                          description: Metadata applied to the resource.
+                      description: Template for the Kafka Bridge service account.
                   description: Template for Kafka Bridge resources. The template allows users to specify how is the `Deployment` and `Pods` generated.
                 tracing:
                   type: object

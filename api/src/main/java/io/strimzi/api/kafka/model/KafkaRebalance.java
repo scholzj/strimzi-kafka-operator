@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.api.model.Namespaced;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.CustomResource;
@@ -32,31 +33,30 @@ import static java.util.Collections.unmodifiableList;
 
 @JsonDeserialize
 @Crd(
-        spec = @Crd.Spec(
-                names = @Crd.Spec.Names(
-                        kind = KafkaRebalance.RESOURCE_KIND,
-                        plural = KafkaRebalance.RESOURCE_PLURAL,
-                        shortNames = {KafkaRebalance.SHORT_NAME},
-                        categories = {Constants.STRIMZI_CATEGORY}
-                ),
-                group = KafkaRebalance.RESOURCE_GROUP,
-                scope = KafkaRebalance.SCOPE,
-                versions = {
-                        @Crd.Spec.Version(name = KafkaRebalance.V1BETA2, served = true, storage = false),
-                        @Crd.Spec.Version(name = KafkaRebalance.V1ALPHA1, served = true, storage = true)
-                },
-                subresources = @Crd.Spec.Subresources(
-                        status = @Crd.Spec.Subresources.Status()
-                ),
-                additionalPrinterColumns = {
-                        @Crd.Spec.AdditionalPrinterColumn(
-                                name = "Cluster",
-                                description = "The name of the Kafka cluster this resource rebalances",
-                                jsonPath = ".metadata.labels.strimzi\\.io/cluster",
-                                type = "string"
-                        )
-                }
-        )
+    spec = @Crd.Spec(
+        names = @Crd.Spec.Names(
+            kind = KafkaRebalance.RESOURCE_KIND,
+            plural = KafkaRebalance.RESOURCE_PLURAL,
+            shortNames = {KafkaRebalance.SHORT_NAME},
+            categories = {Constants.STRIMZI_CATEGORY}
+        ),
+        group = KafkaRebalance.RESOURCE_GROUP,
+        scope = KafkaRebalance.SCOPE,
+        versions = {
+            @Crd.Spec.Version(name = KafkaRebalance.V1BETA2, served = true, storage = false),
+            @Crd.Spec.Version(name = KafkaRebalance.V1ALPHA1, served = true, storage = true)
+        },
+        subresources = @Crd.Spec.Subresources(
+            status = @Crd.Spec.Subresources.Status()
+        ),
+        additionalPrinterColumns = {
+            @Crd.Spec.AdditionalPrinterColumn(
+                name = "Cluster",
+                description = "The name of the Kafka cluster this resource rebalances",
+                jsonPath = ".metadata.labels.strimzi\\.io/cluster",
+                type = "string")
+        }
+    )
 )
 @Buildable(
         editableEnabled = false,
@@ -69,6 +69,7 @@ import static java.util.Collections.unmodifiableList;
 @EqualsAndHashCode
 @Version(Constants.V1BETA2)
 @Group(Constants.STRIMZI_GROUP)
+@SuppressFBWarnings("RCN_REDUNDANT_NULLCHECK_OF_NONNULL_VALUE")
 public class KafkaRebalance extends CustomResource<KafkaRebalanceSpec, KafkaRebalanceStatus> implements Namespaced, UnknownPropertyPreserving {
 
     private static final long serialVersionUID = 1L;
@@ -88,6 +89,7 @@ public class KafkaRebalance extends CustomResource<KafkaRebalanceSpec, KafkaReba
     public static final List<String> RESOURCE_SHORTNAMES = singletonList(SHORT_NAME);
 
     private String apiVersion;
+    private String kind = RESOURCE_KIND;
     private ObjectMeta metadata;
     private KafkaRebalanceSpec spec;
     private KafkaRebalanceStatus status;

@@ -22,6 +22,7 @@ import io.fabric8.openshift.api.model.BuildOutput;
 import io.fabric8.openshift.api.model.BuildOutputBuilder;
 import io.fabric8.openshift.api.model.BuildRequest;
 import io.fabric8.openshift.api.model.BuildRequestBuilder;
+import io.fabric8.openshift.api.model.DockerBuildStrategyBuilder;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.KafkaConnect;
 import io.strimzi.api.kafka.model.KafkaConnectResources;
@@ -33,10 +34,13 @@ import io.strimzi.api.kafka.model.connect.build.Plugin;
 import io.strimzi.api.kafka.model.template.KafkaConnectTemplate;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.common.Annotations;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.Util;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -46,21 +50,33 @@ public class KafkaConnectBuild extends AbstractModel {
 
     private static final String DEFAULT_KANIKO_EXECUTOR_IMAGE = "gcr.io/kaniko-project/executor:latest";
 
+    protected static final String CO_ENV_VAR_CUSTOM_CONNECT_BUILD_POD_LABELS = "STRIMZI_CUSTOM_KAFKA_CONNECT_BUILD_LABELS";
+
     private Build build;
     private List<ContainerEnvVar> templateBuildContainerEnvVars;
     private SecurityContext templateBuildContainerSecurityContext;
     private Map<String, String> templateBuildConfigLabels;
     private Map<String, String> templateBuildConfigAnnotations;
-    private String baseImage;
+    /*test*/ String baseImage;
     private List<String> additionalKanikoOptions;
+    private String pullSecret;
+
+    private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
+    static {
+        String value = System.getenv(CO_ENV_VAR_CUSTOM_CONNECT_BUILD_POD_LABELS);
+        if (value != null) {
+            DEFAULT_POD_LABELS.putAll(Util.parseMap(value));
+        }
+    }
 
     /**
      * Constructor
      *
+     * @param reconciliation The reconciliation
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
-    protected KafkaConnectBuild(HasMetadata resource) {
-        super(resource, APPLICATION_NAME);
+    protected KafkaConnectBuild(Reconciliation reconciliation, HasMetadata resource) {
+        super(reconciliation, resource, APPLICATION_NAME);
         this.name = KafkaConnectResources.buildPodName(cluster);
         this.image = System.getenv().getOrDefault(ClusterOperatorConfig.STRIMZI_DEFAULT_KANIKO_EXECUTOR_IMAGE, DEFAULT_KANIKO_EXECUTOR_IMAGE);
     }
@@ -68,12 +84,14 @@ public class KafkaConnectBuild extends AbstractModel {
     /**
      * Created the KafkaConnectBuild instance from the Kafka Connect Custom Resource
      *
+     * @param reconciliation The reconciliation
      * @param kafkaConnect  Kafka Connect CR with the build configuration
      * @param versions      Kafka versions configuration
      * @return              Instance of KafkaConnectBuild class
      */
-    public static KafkaConnectBuild fromCrd(KafkaConnect kafkaConnect, KafkaVersion.Lookup versions) {
-        KafkaConnectBuild build = new KafkaConnectBuild(kafkaConnect);
+    @SuppressWarnings({"checkstyle:CyclomaticComplexity", "checkstyle:NPathComplexity"})
+    public static KafkaConnectBuild fromCrd(Reconciliation reconciliation, KafkaConnect kafkaConnect, KafkaVersion.Lookup versions) {
+        KafkaConnectBuild build = new KafkaConnectBuild(reconciliation, kafkaConnect);
         KafkaConnectSpec spec = kafkaConnect.getSpec();
 
         if (spec == null) {
@@ -98,9 +116,7 @@ public class KafkaConnectBuild extends AbstractModel {
             }
         }
 
-        if (spec.getImage() == null) {
-            build.baseImage = versions.kafkaConnectVersion(spec.getImage(), spec.getVersion());
-        }
+        build.baseImage = versions.kafkaConnectVersion(spec.getImage(), spec.getVersion());
 
         if (spec.getTemplate() != null) {
             KafkaConnectTemplate template = spec.getTemplate();
@@ -115,16 +131,26 @@ public class KafkaConnectBuild extends AbstractModel {
                 build.templateBuildContainerSecurityContext = template.getBuildContainer().getSecurityContext();
             }
 
-            if (template.getBuildConfig() != null && template.getBuildConfig().getMetadata() != null)  {
-                if (template.getBuildConfig().getMetadata().getLabels() != null)  {
-                    build.templateBuildConfigLabels = template.getBuildConfig().getMetadata().getLabels();
-                }
+            if (template.getBuildConfig() != null) {
+                build.pullSecret = template.getBuildConfig().getPullSecret();
 
-                if (template.getBuildConfig().getMetadata().getAnnotations() != null)  {
-                    build.templateBuildConfigAnnotations = template.getBuildConfig().getMetadata().getAnnotations();
+                if (template.getBuildConfig().getMetadata() != null) {
+                    if (template.getBuildConfig().getMetadata().getLabels() != null) {
+                        build.templateBuildConfigLabels = template.getBuildConfig().getMetadata().getLabels();
+                    }
+
+                    if (template.getBuildConfig().getMetadata().getAnnotations() != null) {
+                        build.templateBuildConfigAnnotations = template.getBuildConfig().getMetadata().getAnnotations();
+                    }
                 }
             }
+
+            if (template.getBuildServiceAccount() != null && template.getBuildServiceAccount().getMetadata() != null) {
+                build.templateServiceAccountLabels = template.getBuildServiceAccount().getMetadata().getLabels();
+                build.templateServiceAccountAnnotations = template.getBuildServiceAccount().getMetadata().getAnnotations();
+            }
         }
+        build.templatePodLabels = Util.mergeLabelsOrAnnotations(build.templatePodLabels, DEFAULT_POD_LABELS);
 
         build.build = spec.getBuild();
 
@@ -244,9 +270,8 @@ public class KafkaConnectBuild extends AbstractModel {
      * @return  List of volumes
      */
     private List<Volume> getVolumes(boolean isOpenShift) {
-        List<Volume> volumes = new ArrayList<>(3);
+        List<Volume> volumes = new ArrayList<>(2);
 
-        volumes.add(VolumeUtils.createEmptyDirVolume("workspace", null));
         volumes.add(VolumeUtils.createConfigMapVolume("dockerfile", KafkaConnectResources.dockerFileConfigMapName(cluster), Collections.singletonMap("Dockerfile", "Dockerfile")));
 
         if (build.getOutput() instanceof DockerOutput) {
@@ -268,9 +293,8 @@ public class KafkaConnectBuild extends AbstractModel {
      * @return  List of volume mounts
      */
     private List<VolumeMount> getVolumeMounts() {
-        List<VolumeMount> volumeMounts = new ArrayList<>(3);
+        List<VolumeMount> volumeMounts = new ArrayList<>(2);
 
-        volumeMounts.add(new VolumeMountBuilder().withName("workspace").withMountPath("/workspace").build());
         volumeMounts.add(new VolumeMountBuilder().withName("dockerfile").withMountPath("/dockerfile").build());
 
         if (build.getOutput() instanceof DockerOutput) {
@@ -314,7 +338,6 @@ public class KafkaConnectBuild extends AbstractModel {
 
         List<String> args = additionalKanikoOptions != null ? new ArrayList<>(4 + additionalKanikoOptions.size()) : new ArrayList<>(4);
         args.add("--dockerfile=/dockerfile/Dockerfile");
-        args.add("--context=dir://workspace");
         args.add("--image-name-with-digest-file=/dev/termination-log");
         args.add("--destination=" + build.getOutput().getImage());
 
@@ -386,6 +409,11 @@ public class KafkaConnectBuild extends AbstractModel {
             throw new RuntimeException("Unknown output type " + build.getOutput().getType());
         }
 
+        DockerBuildStrategyBuilder dockerBuildStrategyBuilder = new DockerBuildStrategyBuilder();
+        if (pullSecret != null) {
+            dockerBuildStrategyBuilder.withNewPullSecret().withName(pullSecret).endPullSecret();
+        }
+
         return new BuildConfigBuilder()
                 .withNewMetadata()
                     .withName(KafkaConnectResources.buildConfigName(cluster))
@@ -402,8 +430,7 @@ public class KafkaConnectBuild extends AbstractModel {
                     .endSource()
                     .withNewStrategy()
                         .withType("Docker")
-                        .withNewDockerStrategy()
-                        .endDockerStrategy()
+                        .withDockerStrategy(dockerBuildStrategyBuilder.build())
                     .endStrategy()
                     .withResources(build.getResources())
                     .withRunPolicy("Serial")

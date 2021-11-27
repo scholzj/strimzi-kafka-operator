@@ -20,13 +20,13 @@ import io.strimzi.kafka.config.model.ConfigModel;
 import io.strimzi.kafka.config.model.Scope;
 import io.strimzi.operator.cluster.model.KafkaConfiguration;
 import io.strimzi.operator.cluster.model.KafkaVersion;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.model.OrderedProperties;
 import io.strimzi.operator.common.operator.resource.AbstractJsonDiff;
 import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
 
@@ -41,10 +41,12 @@ import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
  */
 public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
 
-    private static final Logger log = LogManager.getLogger(KafkaBrokerConfigurationDiff.class);
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaBrokerConfigurationDiff.class);
+    private static final String PLACE_HOLDER = Pattern.quote("STRIMZI_BROKER_ID");
+
+    private final Reconciliation reconciliation;
     private final Collection<AlterConfigOp> diff;
-    private int brokerId;
-    private Map<String, ConfigModel> configModel;
+    private final Map<String, ConfigModel> configModel;
 
     /**
      * These options are skipped because they contain placeholders
@@ -67,30 +69,17 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
             + "|zookeeper\\.clientCnxnSocket"
             + "|broker\\.rack)$");
 
-    public KafkaBrokerConfigurationDiff(Config brokerConfigs, String desired, KafkaVersion kafkaVersion, int brokerId) {
+    public KafkaBrokerConfigurationDiff(Reconciliation reconciliation, Config brokerConfigs, String desired, KafkaVersion kafkaVersion, int brokerId) {
+        this.reconciliation = reconciliation;
         this.configModel = KafkaConfiguration.readConfigModel(kafkaVersion);
-        this.brokerId = brokerId;
         this.diff = diff(brokerId, desired, brokerConfigs, configModel);
     }
 
-    private static void fillPlaceholderValue(Map<String, String> orderedProperties, String placeholder, String value) {
+    private static void fillPlaceholderValue(Map<String, String> orderedProperties, String value) {
         orderedProperties.entrySet().forEach(entry -> {
-            entry.setValue(entry.getValue().replaceAll("\\$\\{" + Pattern.quote(placeholder) + "\\}", value));
+            String v = entry.getValue().replaceAll("\\$\\{" + PLACE_HOLDER + "}", value);
+            entry.setValue(v);
         });
-    }
-
-    /**
-     * Returns true if property in desired map has a default value
-     * @param key name of the property
-     * @param config Config which contains property
-     * @return true if property in desired map has a default value
-     */
-    boolean isDesiredPropertyDefaultValue(String key, Config config) {
-        Optional<ConfigEntry> entry = config.entries().stream().filter(configEntry -> configEntry.name().equals(key)).findFirst();
-        if (entry.isPresent()) {
-            return entry.get().isDefault();
-        }
-        return false;
     }
 
     public boolean canBeUpdatedDynamically() {
@@ -98,7 +87,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
         for (AlterConfigOp entry : diff) {
             if (isEntryReadOnly(entry.configEntry())) {
                 result = false;
-                log.debug("Configuration can't be updated dynamically due to: {}", entry);
+                LOGGER.infoCr(reconciliation, "Configuration can't be updated dynamically due to: {}", entry);
                 break;
             }
         }
@@ -140,7 +129,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
      * @param configModel default configuration for {@code kafkaVersion} of broker
      * @return Collection of AlterConfigOp containing all entries which were changed from current in desired configuration
      */
-    private static Collection<AlterConfigOp> diff(int brokerId, String desired,
+    private Collection<AlterConfigOp> diff(int brokerId, String desired,
                                                   Config brokerConfigs,
                                                   Map<String, ConfigModel> configModel) {
         if (brokerConfigs == null || desired == null) {
@@ -159,7 +148,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
         orderedProperties.addStringPairs(desired);
         Map<String, String> desiredMap = orderedProperties.asMap();
 
-        fillPlaceholderValue(desiredMap, "STRIMZI_BROKER_ID", Integer.toString(brokerId));
+        fillPlaceholderValue(desiredMap, Integer.toString(brokerId));
 
         JsonNode source = patchMapper().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true).valueToTree(currentMap);
         JsonNode target = patchMapper().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true).valueToTree(desiredMap);
@@ -191,50 +180,50 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
 
             if ("remove".equals(op)) {
                 // there is a lot of properties set by default - not having them in desired causes very noisy log output
-                log.trace("Kafka Broker {} Config Differs : {}", brokerId, d);
-                log.trace("Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
-                log.trace("Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
+                LOGGER.traceCr(reconciliation, "Kafka Broker {} Config Differs : {}", brokerId, d);
+                LOGGER.traceCr(reconciliation, "Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
+                LOGGER.traceCr(reconciliation, "Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
             } else {
-                log.debug("Kafka Broker {} Config Differs : {}", brokerId, d);
-                log.debug("Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
-                log.debug("Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
+                LOGGER.debugCr(reconciliation, "Kafka Broker {} Config Differs : {}", brokerId, d);
+                LOGGER.debugCr(reconciliation, "Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
+                LOGGER.debugCr(reconciliation, "Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
             }
         }
 
         return updatedCE;
     }
 
-    private static void updateOrAdd(String propertyName, Map<String, ConfigModel> configModel, Map<String, String> desiredMap, Collection<AlterConfigOp> updatedCE) {
+    private void updateOrAdd(String propertyName, Map<String, ConfigModel> configModel, Map<String, String> desiredMap, Collection<AlterConfigOp> updatedCE) {
         if (!isIgnorableProperty(propertyName)) {
             if (isCustomEntry(propertyName, configModel)) {
-                log.trace("custom property {} has been updated/added {}", propertyName, desiredMap.get(propertyName));
+                LOGGER.traceCr(reconciliation, "custom property {} has been updated/added {}", propertyName, desiredMap.get(propertyName));
             } else {
-                log.trace("property {} has been updated/added {}", propertyName, desiredMap.get(propertyName));
+                LOGGER.traceCr(reconciliation, "property {} has been updated/added {}", propertyName, desiredMap.get(propertyName));
                 updatedCE.add(new AlterConfigOp(new ConfigEntry(propertyName, desiredMap.get(propertyName)), AlterConfigOp.OpType.SET));
             }
         } else {
-            log.trace("{} is ignorable, not considering");
+            LOGGER.traceCr(reconciliation, "{} is ignorable, not considering");
         }
     }
 
-    private static void removeProperty(Map<String, ConfigModel> configModel, Collection<AlterConfigOp> updatedCE, String pathValueWithoutSlash, ConfigEntry entry) {
+    private void removeProperty(Map<String, ConfigModel> configModel, Collection<AlterConfigOp> updatedCE, String pathValueWithoutSlash, ConfigEntry entry) {
         if (isCustomEntry(entry.name(), configModel)) {
             // we are deleting custom option
-            log.trace("removing custom property {}", entry.name());
+            LOGGER.traceCr(reconciliation, "removing custom property {}", entry.name());
         } else if (entry.isDefault()) {
             // entry is in current, is not in desired, is default -> it uses default value, skip.
             // Some default properties do not have set ConfigEntry.ConfigSource.DEFAULT_CONFIG and thus
             // we are removing property. That might cause redundant RU. To fix this we would have to add defaultValue
             // to the configModel
-            log.trace("{} not set in desired, using default value", entry.name());
+            LOGGER.traceCr(reconciliation, "{} not set in desired, using default value", entry.name());
         } else {
             // entry is in current, is not in desired, is not default -> it was using non-default value and was removed
             // if the entry was custom, it should be deleted
             if (!isIgnorableProperty(pathValueWithoutSlash)) {
                 updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, null), AlterConfigOp.OpType.DELETE));
-                log.trace("{} not set in desired, unsetting back to default {}", entry.name(), "deleted entry");
+                LOGGER.infoCr(reconciliation, "{} not set in desired, unsetting back to default {}", entry.name(), "deleted entry");
             } else {
-                log.trace("{} is ignorable, not considering as removed");
+                LOGGER.traceCr(reconciliation, "{} is ignorable, not considering as removed");
             }
         }
     }
@@ -254,7 +243,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
      * @return true if entry is custom (not default)
      */
     private static boolean isCustomEntry(String entryName, Map<String, ConfigModel> configModel) {
-        return !configModel.keySet().contains(entryName);
+        return !configModel.containsKey(entryName);
     }
 
 }

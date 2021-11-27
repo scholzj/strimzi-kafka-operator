@@ -20,6 +20,7 @@ import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.Service;
+import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.TolerationBuilder;
 import io.fabric8.kubernetes.api.model.Volume;
@@ -29,7 +30,7 @@ import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeerBuilder;
-import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
+import io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.CruiseControlResources;
 import io.strimzi.api.kafka.model.CruiseControlSpec;
@@ -51,6 +52,8 @@ import io.strimzi.api.kafka.model.template.IpFamilyPolicy;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.cruisecontrol.Capacity;
+import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlConfigurationParameters;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.annotations.ParallelSuite;
@@ -63,6 +66,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static io.strimzi.operator.cluster.model.CruiseControl.API_HEALTHCHECK_PATH;
+import static io.strimzi.operator.cluster.model.CruiseControl.API_USER_NAME;
+import static io.strimzi.operator.cluster.model.CruiseControl.DEFAULT_WEBSERVER_SECURITY_ENABLED;
+import static io.strimzi.operator.cluster.model.CruiseControl.DEFAULT_WEBSERVER_SSL_ENABLED;
 import static io.strimzi.operator.cluster.model.CruiseControl.ENV_VAR_BROKER_CPU_UTILIZATION_CAPACITY;
 import static io.strimzi.operator.cluster.model.CruiseControl.ENV_VAR_BROKER_DISK_MIB_CAPACITY;
 import static io.strimzi.operator.cluster.model.CruiseControl.ENV_VAR_BROKER_INBOUND_NETWORK_KIB_PER_SECOND_CAPACITY;
@@ -91,8 +98,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SuppressWarnings({
-        "checkstyle:ClassDataAbstractionCoupling",
-        "checkstyle:ClassFanOutComplexity"
+    "checkstyle:ClassDataAbstractionCoupling",
+    "checkstyle:ClassFanOutComplexity"
 })
 @ParallelSuite
 public class CruiseControlTest {
@@ -105,16 +112,17 @@ public class CruiseControlTest {
     private final String minInsyncReplicas = "2";
     private final Map<String, Object> metricsCm = singletonMap("animal", "wombat");
     private final String metricsCMName = "metrics-cm";
-    private final JmxPrometheusExporterMetrics jmxMetricsConfig = io.strimzi.operator.cluster.TestUtils.getJmxPrometheusExporterMetrics(AbstractModel.ANCILLARY_CM_KEY_METRICS, metricsCMName);
+    private final JmxPrometheusExporterMetrics jmxMetricsConfig = io.strimzi.operator.cluster.TestUtils.getJmxPrometheusExporterMetrics("metrics-config.yml", metricsCMName);
 
     private final Map<String, Object> kafkaConfig = singletonMap(CruiseControl.MIN_INSYNC_REPLICAS, minInsyncReplicas);
     private final Map<String, Object> zooConfig = singletonMap("foo", "bar");
-
-    CruiseControlConfiguration configuration = new CruiseControlConfiguration(new HashMap<String, Object>() {{
+    private final Map<String, Object> ccConfig = new HashMap<String, Object>() {{
             putAll(CruiseControlConfiguration.getCruiseControlDefaultPropertiesMap());
             put("num.partition.metrics.windows", "2");
-        }}.entrySet()
-    );
+        }};
+
+    private final CruiseControlConfiguration ccConfiguration = new CruiseControlConfiguration(Reconciliation.DUMMY_RECONCILIATION, ccConfig.entrySet());
+
     private final Storage kafkaStorage = new EphemeralStorage();
     private final SingleVolumeStorage zkStorage = new EphemeralStorage();
     private final InlineLogging kafkaLogJson = new InlineLogging();
@@ -131,21 +139,25 @@ public class CruiseControlTest {
 
     private final CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
             .withImage(ccImage)
-            .withConfig((Map) configuration.asOrderedProperties().asMap())
+            .withConfig(ccConfig)
+            .withNewTemplate()
+                .withNewPod()
+                    .withTmpDirSizeLimit("100Mi")
+                .endPod()
+            .endTemplate()
             .build();
 
-    private final Kafka resource =
-            new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-            .editSpec()
-                .editKafka()
-                    .withVersion(version)
-                    .withConfig(kafkaConfig)
-                .endKafka()
-                .withCruiseControl(cruiseControlSpec)
-            .endSpec()
-            .build();
-
-    private final CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+    private final CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, createKafka(cruiseControlSpec), VERSIONS);
+    private Kafka createKafka(CruiseControlSpec cruiseControlSpec) {
+        return new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                .editSpec()
+                    .editKafka()
+                        .withConfig(kafkaConfig)
+                   .endKafka()
+                  .withCruiseControl(cruiseControlSpec)
+                .endSpec()
+                .build();
+    }
 
     private Map<String, String> expectedLabels(String name)    {
         return TestUtils.map(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
@@ -176,22 +188,27 @@ public class CruiseControlTest {
         expected.add(new EnvVarBuilder().withName(ENV_VAR_BROKER_CPU_UTILIZATION_CAPACITY).withValue(Integer.toString(DEFAULT_BROKER_CPU_UTILIZATION_CAPACITY)).build());
         expected.add(new EnvVarBuilder().withName(ENV_VAR_BROKER_INBOUND_NETWORK_KIB_PER_SECOND_CAPACITY).withValue(Double.toString(DEFAULT_BROKER_INBOUND_NETWORK_KIB_PER_SECOND_CAPACITY)).build());
         expected.add(new EnvVarBuilder().withName(ENV_VAR_BROKER_OUTBOUND_NETWORK_KIB_PER_SECOND_CAPACITY).withValue(Double.toString(DEFAULT_BROKER_OUTBOUND_NETWORK_KIB_PER_SECOND_CAPACITY)).build());
-        expected.add(new EnvVarBuilder().withName(KafkaMirrorMakerCluster.ENV_VAR_KAFKA_HEAP_OPTS).withValue(kafkaHeapOpts).build());
-        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_CRUISE_CONTROL_CONFIGURATION).withValue(configuration.getConfiguration()).build());
+        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_API_SSL_ENABLED).withValue(Boolean.toString(DEFAULT_WEBSERVER_SSL_ENABLED)).build());
+        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_API_AUTH_ENABLED).withValue(Boolean.toString(DEFAULT_WEBSERVER_SECURITY_ENABLED)).build());
+        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_API_USER).withValue(API_USER_NAME).build());
+        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_API_PORT).withValue(Integer.toString(CruiseControl.REST_API_PORT)).build());
+        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_API_HEALTHCHECK_PATH).withValue(API_HEALTHCHECK_PATH).build());
+        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_KAFKA_HEAP_OPTS).withValue(kafkaHeapOpts).build());
+        expected.add(new EnvVarBuilder().withName(CruiseControl.ENV_VAR_CRUISE_CONTROL_CONFIGURATION).withValue(ccConfiguration.getConfiguration()).build());
 
         return expected;
     }
 
     public String getCapacityConfigurationFromEnvVar(Kafka resource, String envVar) {
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
         Deployment dep = cc.generateDeployment(true, null, null, null);
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
 
         // checks on the main Cruise Control container
-        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
         List<EnvVar> ccEnvVars = ccContainer.getEnv();
 
-        return ccEnvVars.stream().filter(var -> envVar.equals(var.getName())).map(EnvVar::getValue).findFirst().get();
+        return ccEnvVars.stream().filter(var -> envVar.equals(var.getName())).map(EnvVar::getValue).findFirst().orElseThrow();
     }
 
     @ParallelTest
@@ -203,17 +220,12 @@ public class CruiseControlTest {
         userDefinedBrokerCapacity.setInboundNetwork("50000KB/s");
         userDefinedBrokerCapacity.setOutboundNetwork("50000KB/s");
 
-        Kafka resource = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-            .editSpec()
-                .editKafka()
-                    .withVersion(version)
-                .endKafka()
-                .withNewCruiseControl()
-                    .withImage(ccImage)
-                    .withBrokerCapacity(userDefinedBrokerCapacity)
-                .endCruiseControl()
-            .endSpec()
-            .build();
+        CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
+                .withImage(ccImage)
+                .withBrokerCapacity(userDefinedBrokerCapacity)
+                .build();
+
+        Kafka resource = createKafka(cruiseControlSpec);
 
         Capacity generatedCapacity = new Capacity(resource.getSpec());
         assertThat(getCapacityConfigurationFromEnvVar(resource, ENV_VAR_BROKER_DISK_MIB_CAPACITY), is(Double.toString(generatedCapacity.getDiskMiB())));
@@ -272,12 +284,13 @@ public class CruiseControlTest {
         assertThat(dep.getMetadata().getOwnerReferences().get(0), is(cc.createOwnerReference()));
 
         // checks on the main Cruise Control container
-        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
         assertThat(ccContainer.getImage(), is(cc.image));
         assertThat(ccContainer.getLivenessProbe().getInitialDelaySeconds(), is(Integer.valueOf(CruiseControl.DEFAULT_HEALTHCHECK_DELAY)));
         assertThat(ccContainer.getLivenessProbe().getTimeoutSeconds(), is(Integer.valueOf(CruiseControl.DEFAULT_HEALTHCHECK_TIMEOUT)));
         assertThat(ccContainer.getReadinessProbe().getInitialDelaySeconds(), is(Integer.valueOf(CruiseControl.DEFAULT_HEALTHCHECK_DELAY)));
         assertThat(ccContainer.getReadinessProbe().getTimeoutSeconds(), is(Integer.valueOf(CruiseControl.DEFAULT_HEALTHCHECK_TIMEOUT)));
+
         assertThat(ccContainer.getEnv(), is(getExpectedEnvVars()));
         assertThat(ccContainer.getPorts().size(), is(1));
         assertThat(ccContainer.getPorts().get(0).getName(), is(CruiseControl.REST_API_PORT_NAME));
@@ -286,46 +299,48 @@ public class CruiseControlTest {
 
         // Test volumes
         List<Volume> volumes = dep.getSpec().getTemplate().getSpec().getVolumes();
-        assertThat(volumes.size(), is(5));
+        assertThat(volumes.size(), is(6));
 
-        Volume volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        Volume volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getSecret().getSecretName(), is(CruiseControl.secretName(cluster)));
 
-        volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getSecret().getSecretName(), is(AbstractModel.clusterCaCertSecretName(cluster)));
 
-        volume = volumes.stream().filter(vol -> CruiseControl.LOG_AND_METRICS_CONFIG_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volume = volumes.stream().filter(vol -> CruiseControl.LOG_AND_METRICS_CONFIG_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getConfigMap().getName(), is(CruiseControl.metricAndLogConfigsName(cluster)));
 
-        volume = volumes.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volume = volumes.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
+        assertThat(volume.getEmptyDir().getSizeLimit(), is(new Quantity("100Mi")));
 
-        volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
+        assertThat(volume.getEmptyDir().getSizeLimit(), is(new Quantity("100Mi")));
 
         // Test volume mounts
         // TLS sidecar container
         List<VolumeMount> volumesMounts = dep.getSpec().getTemplate().getSpec().getContainers().get(0).getVolumeMounts();
-        assertThat(volumesMounts.size(), is(4));
+        assertThat(volumesMounts.size(), is(5));
 
-        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_MOUNT));
 
-        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT));
 
-        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.LOG_AND_METRICS_CONFIG_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.LOG_AND_METRICS_CONFIG_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(CruiseControl.LOG_AND_METRICS_CONFIG_VOLUME_MOUNT));
 
-        volumeMount = volumesMounts.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volumeMount = volumesMounts.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
 
@@ -333,15 +348,15 @@ public class CruiseControlTest {
         volumesMounts = dep.getSpec().getTemplate().getSpec().getContainers().get(1).getVolumeMounts();
         assertThat(volumesMounts.size(), is(3));
 
-        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_MOUNT));
 
-        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT));
 
-        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
     }
@@ -355,12 +370,12 @@ public class CruiseControlTest {
     public void testImagePullPolicy() {
         Deployment dep = cc.generateDeployment(true, null, ImagePullPolicy.ALWAYS, null);
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
-        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
         assertThat(ccContainer.getImagePullPolicy(), is(ImagePullPolicy.ALWAYS.toString()));
 
         dep = cc.generateDeployment(true, null,  ImagePullPolicy.IFNOTPRESENT, null);
         containers = dep.getSpec().getTemplate().getSpec().getContainers();
-        ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
         assertThat(ccContainer.getImagePullPolicy(), is(ImagePullPolicy.IFNOTPRESENT.toString()));
     }
 
@@ -387,11 +402,8 @@ public class CruiseControlTest {
                 .endTemplate()
                 .build();
 
-        Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
-                kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, cruiseControlSpec);
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
-
+        Kafka resource = createKafka(cruiseControlSpec);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
         List<EnvVar> envVarList = cc.getEnvVars();
 
         assertThat(envVarList, hasItems(new EnvVar(testEnvOneKey, testEnvOneValue, null)));
@@ -421,11 +433,8 @@ public class CruiseControlTest {
                 .endTemplate()
                 .build();
 
-        Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
-                kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, cruiseControlSpec);
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
-
+        Kafka resource = createKafka(cruiseControlSpec);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
         List<EnvVar> envVarList = cc.getEnvVars();
 
         assertThat(envVarList, hasItems(new EnvVar(testEnvOneKey, testEnvOneValue, null)));
@@ -434,15 +443,13 @@ public class CruiseControlTest {
 
     @ParallelTest
     public void testCruiseControlNotDeployed() {
-        Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
-                kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null,  null);
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        Kafka resource = createKafka(null);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
 
         try {
             assertThat(cc.generateDeployment(true, null, null, null), is(nullValue()));
             assertThat(cc.generateService(), is(nullValue()));
-            assertThat(cc.generateSecret(null, true), is(nullValue()));
+            assertThat(cc.generateSecret(resource, null, true), is(nullValue()));
         } catch (Throwable expected) {
             assertEquals(NullPointerException.class, expected.getClass());
         }
@@ -467,10 +474,8 @@ public class CruiseControlTest {
 
     @ParallelTest
     public void testGenerateServiceWhenDisabled()   {
-        Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
-                kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, null);
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        Kafka resource = createKafka(null);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
 
         assertThrows(NullPointerException.class, () -> cc.generateService());
     }
@@ -486,13 +491,16 @@ public class CruiseControlTest {
         Map<String, String> svcLabels = TestUtils.map("l5", "v5", "l6", "v6");
         Map<String, String> svcAnots = TestUtils.map("a5", "v5", "a6", "v6");
 
+        Map<String, String> saLabels = TestUtils.map("l7", "v7", "l8", "v8");
+        Map<String, String> saAnots = TestUtils.map("a7", "v7", "a8", "v8");
+
         Affinity affinity = new AffinityBuilder()
                 .withNewNodeAffinity()
                     .withNewRequiredDuringSchedulingIgnoredDuringExecution()
                         .withNodeSelectorTerms(new NodeSelectorTermBuilder()
                                 .addNewMatchExpression()
-                                    .withNewKey("key1")
-                                    .withNewOperator("In")
+                                    .withKey("key1")
+                                    .withOperator("In")
                                     .withValues("value1", "value2")
                                 .endMatchExpression()
                                 .build())
@@ -516,42 +524,45 @@ public class CruiseControlTest {
                 .withIp("192.168.1.87")
                 .build();
 
-        Kafka resource = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                .editSpec()
-                    .withNewCruiseControl()
-                        .withImage(ccImage)
-                        .withNewTemplate()
-                            .withNewDeployment()
-                                .withNewMetadata()
-                                    .withLabels(depLabels)
-                                    .withAnnotations(depAnots)
-                                .endMetadata()
-                            .endDeployment()
-                            .withNewPod()
-                                .withNewMetadata()
-                                    .withLabels(podLabels)
-                                    .withAnnotations(podAnots)
-                                .endMetadata()
-                                .withNewPriorityClassName("top-priority")
-                                .withNewSchedulerName("my-scheduler")
-                                .withHostAliases(hostAlias1, hostAlias2)
-                                .withAffinity(affinity)
-                                .withTolerations(tolerations)
-                            .endPod()
-                            .withNewApiService()
-                                .withNewMetadata()
-                                    .withLabels(svcLabels)
-                                    .withAnnotations(svcAnots)
-                                .endMetadata()
-                                .withIpFamilyPolicy(IpFamilyPolicy.PREFER_DUAL_STACK)
-                                .withIpFamilies(IpFamily.IPV6, IpFamily.IPV4)
-                            .endApiService()
-                        .endTemplate()
-                    .endCruiseControl()
-                .endSpec()
+        CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
+                .withImage(ccImage)
+                .withNewTemplate()
+                    .withNewDeployment()
+                        .withNewMetadata()
+                            .withLabels(depLabels)
+                            .withAnnotations(depAnots)
+                        .endMetadata()
+                    .endDeployment()
+                .withNewPod()
+                    .withNewMetadata()
+                        .withLabels(podLabels)
+                        .withAnnotations(podAnots)
+                    .endMetadata()
+                    .withPriorityClassName("top-priority")
+                    .withSchedulerName("my-scheduler")
+                    .withHostAliases(hostAlias1, hostAlias2)
+                    .withAffinity(affinity)
+                    .withTolerations(tolerations)
+                .endPod()
+                .withNewApiService()
+                    .withNewMetadata()
+                        .withLabels(svcLabels)
+                        .withAnnotations(svcAnots)
+                    .endMetadata()
+                    .withIpFamilyPolicy(IpFamilyPolicy.PREFER_DUAL_STACK)
+                    .withIpFamilies(IpFamily.IPV6, IpFamily.IPV4)
+                .endApiService()
+                .withNewServiceAccount()
+                    .withNewMetadata()
+                        .withLabels(saLabels)
+                        .withAnnotations(saAnots)
+                    .endMetadata()
+                .endServiceAccount()
+                .endTemplate()
                 .build();
 
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        Kafka resource = createKafka(cruiseControlSpec);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
 
         // Check Deployment
         Deployment dep = cc.generateDeployment(true, depAnots, null, null);
@@ -576,6 +587,11 @@ public class CruiseControlTest {
         assertThat(svc.getMetadata().getAnnotations(),  is(svcAnots));
         assertThat(svc.getSpec().getIpFamilyPolicy(), is("PreferDualStack"));
         assertThat(svc.getSpec().getIpFamilies(), contains("IPv6", "IPv4"));
+
+        // Check Service Account
+        ServiceAccount sa = cc.generateServiceAccount();
+        assertThat(sa.getMetadata().getLabels().entrySet().containsAll(saLabels.entrySet()), is(true));
+        assertThat(sa.getMetadata().getAnnotations().entrySet().containsAll(saAnots.entrySet()), is(true));
     }
 
     @ParallelTest
@@ -590,20 +606,12 @@ public class CruiseControlTest {
                 .endTemplate()
                 .build();
 
-        Kafka resource =
-                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                        .editSpec()
-                        .editKafka()
-                        .withVersion(version)
-                        .endKafka()
-                        .withCruiseControl(cruiseControlSpec)
-                        .endSpec()
-                        .build();
+        Kafka resource = createKafka(cruiseControlSpec);
 
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
         Deployment dep = cc.generateDeployment(true,  null, null, null);
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
-        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
 
         PodDisruptionBudget pdb = cc.generatePodDisruptionBudget();
         assertThat(pdb.getSpec().getMaxUnavailable(), is(new IntOrString(maxUnavailable)));
@@ -624,23 +632,56 @@ public class CruiseControlTest {
                 .withResources(new ResourceRequirementsBuilder().withLimits(limits).withRequests(requests).build())
                 .build();
 
-        Kafka resource =
-                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                .editSpec()
-                    .editKafka()
-                        .withVersion(version)
-                    .endKafka()
-                    .withCruiseControl(cruiseControlSpec)
-                .endSpec()
-                .build();
+        Kafka resource = createKafka(cruiseControlSpec);
 
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
         Deployment dep = cc.generateDeployment(true, null, null, null);
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
-        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
 
         assertThat(ccContainer.getResources().getLimits(), is(limits));
         assertThat(ccContainer.getResources().getRequests(), is(requests));
+    }
+
+    @ParallelTest
+    public void testApiSecurity() {
+        // Test with security enabled
+        testApiSecurity(true, true);
+
+        // Test with security disabled
+        testApiSecurity(false, false);
+    }
+
+    public void testApiSecurity(Boolean apiAuthEnabled, Boolean apiSslEnabled) {
+        String e1Key = CruiseControl.ENV_VAR_API_AUTH_ENABLED;
+        String e1Value = apiAuthEnabled.toString();
+        EnvVar e1 = new EnvVar(e1Key, e1Value, null);
+
+        String e2Key = CruiseControl.ENV_VAR_API_SSL_ENABLED;
+        String e2Value = apiSslEnabled.toString();
+        EnvVar e2 = new EnvVar(e2Key, e2Value, null);
+
+        Map<String, Object> config = ccConfig;
+        config.put(CruiseControlConfigurationParameters.CRUISE_CONTROL_WEBSERVER_SECURITY_ENABLE.getValue(), apiAuthEnabled);
+        config.put(CruiseControlConfigurationParameters.CRUISE_CONTROL_WEBSERVER_SSL_ENABLE.getValue(), apiSslEnabled);
+
+        CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
+                .withImage(ccImage)
+                .withConfig(config)
+                .build();
+
+        Kafka resource = createKafka(cruiseControlSpec);
+
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
+        Deployment dep = cc.generateDeployment(true, null, null, null);
+        List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
+
+        // checks on the main Cruise Control container
+        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        List<EnvVar> envVarList = ccContainer.getEnv();
+
+        assertThat(envVarList.contains(e1),  is(true));
+        assertThat(envVarList.contains(e2),  is(true));
     }
 
     @ParallelTest
@@ -657,22 +698,14 @@ public class CruiseControlTest {
                 .endReadinessProbe()
                 .build();
 
-        Kafka resource =
-                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                .editSpec()
-                    .editKafka()
-                        .withVersion(version)
-                    .endKafka()
-                    .withCruiseControl(cruiseControlSpec)
-                .endSpec()
-                .build();
+        Kafka resource = createKafka(cruiseControlSpec);
 
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
         Deployment dep = cc.generateDeployment(true, null, null, null);
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
 
         // checks on the main Cruise Control container
-        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().get();
+        Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
         assertThat(ccContainer.getImage(), is(cc.image));
         assertThat(ccContainer.getLivenessProbe().getInitialDelaySeconds(), is(Integer.valueOf(healthDelay)));
         assertThat(ccContainer.getLivenessProbe().getTimeoutSeconds(), is(Integer.valueOf(healthTimeout)));
@@ -684,7 +717,7 @@ public class CruiseControlTest {
     public void testSecurityContext() {
         CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
                 .withImage(ccImage)
-                .withConfig((Map) configuration.asOrderedProperties().asMap())
+                .withConfig(ccConfig)
                 .withNewTemplate()
                     .withNewPod()
                         .withSecurityContext(new PodSecurityContextBuilder().withFsGroup(123L).withRunAsGroup(456L).withRunAsUser(789L).build())
@@ -692,17 +725,9 @@ public class CruiseControlTest {
                 .endTemplate()
                 .build();
 
-        Kafka resource =
-                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                        .editSpec()
-                            .editKafka()
-                                .withVersion(version)
-                            .endKafka()
-                            .withCruiseControl(cruiseControlSpec)
-                        .endSpec()
-                        .build();
+        Kafka resource = createKafka(cruiseControlSpec);
 
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
 
         Deployment dep = cc.generateDeployment(true, null, null, null);
         assertThat(dep.getSpec().getTemplate().getSpec().getSecurityContext(), is(notNullValue()));
@@ -721,7 +746,7 @@ public class CruiseControlTest {
     public void testCruiseControlContainerSecurityContext() {
         SecurityContext securityContext = new SecurityContextBuilder()
                 .withPrivileged(false)
-                .withNewReadOnlyRootFilesystem(false)
+                .withReadOnlyRootFilesystem(false)
                 .withAllowPrivilegeEscalation(false)
                 .withRunAsNonRoot(true)
                 .withNewCapabilities()
@@ -731,7 +756,7 @@ public class CruiseControlTest {
 
         CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
                 .withImage(ccImage)
-                .withConfig((Map) configuration.asOrderedProperties().asMap())
+                .withConfig(ccConfig)
                 .withNewTemplate()
                     .withNewCruiseControlContainer()
                         .withSecurityContext(securityContext)
@@ -739,17 +764,9 @@ public class CruiseControlTest {
                 .endTemplate()
                 .build();
 
-        Kafka resource =
-                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                        .editSpec()
-                            .editKafka()
-                                .withVersion(version)
-                            .endKafka()
-                            .withCruiseControl(cruiseControlSpec)
-                        .endSpec()
-                        .build();
+        Kafka resource = createKafka(cruiseControlSpec);
 
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
 
         Deployment dep = cc.generateDeployment(true, null, null, null);
 
@@ -764,7 +781,7 @@ public class CruiseControlTest {
     public void testTlsSidecarContainerSecurityContext() {
         SecurityContext securityContext = new SecurityContextBuilder()
                 .withPrivileged(false)
-                .withNewReadOnlyRootFilesystem(false)
+                .withReadOnlyRootFilesystem(false)
                 .withAllowPrivilegeEscalation(false)
                 .withRunAsNonRoot(true)
                 .withNewCapabilities()
@@ -774,7 +791,7 @@ public class CruiseControlTest {
 
         CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
                 .withImage(ccImage)
-                .withConfig((Map) configuration.asOrderedProperties().asMap())
+                .withConfig(ccConfig)
                 .withNewTemplate()
                     .withNewTlsSidecarContainer()
                         .withSecurityContext(securityContext)
@@ -782,17 +799,9 @@ public class CruiseControlTest {
                 .endTemplate()
                 .build();
 
-        Kafka resource =
-                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                        .editSpec()
-                            .editKafka()
-                                .withVersion(version)
-                            .endKafka()
-                            .withCruiseControl(cruiseControlSpec)
-                        .endSpec()
-                        .build();
+        Kafka resource = createKafka(cruiseControlSpec);
 
-        CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
 
         Deployment dep = cc.generateDeployment(true, null, null, null);
 
@@ -855,7 +864,7 @@ public class CruiseControlTest {
 
         assertThat(np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).findFirst().orElse(null), is(notNullValue()));
 
-        List<NetworkPolicyPeer> rules = np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).map(NetworkPolicyIngressRule::getFrom).findFirst().orElse(null);
+        List<NetworkPolicyPeer> rules = np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).map(NetworkPolicyIngressRule::getFrom).findFirst().orElseThrow();
 
         assertThat(rules.size(), is(1));
         assertThat(rules.contains(clusterOperatorPeer), is(true));
@@ -867,26 +876,17 @@ public class CruiseControlTest {
         String customGoals = "com.linkedin.kafka.cruisecontrol.analyzer.goals.RackAwareGoal," +
                 "com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal";
 
-        Map<String, Object> customGoalConfig = (Map) configuration.asOrderedProperties().asMap();
+        Map<String, Object> customGoalConfig = ccConfig;
         customGoalConfig.put(CRUISE_CONTROL_DEFAULT_GOALS_CONFIG_KEY.getValue(), customGoals);
 
-        CruiseControlSpec ccSpecWithCustomGoals = new CruiseControlSpecBuilder()
+        CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
                 .withImage(ccImage)
                 .withConfig(customGoalConfig)
                 .build();
 
-        Kafka resourceWithCustomGoals =
-                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
-                        .editSpec()
-                            .editKafka()
-                                .withVersion(version)
-                                .withConfig(kafkaConfig)
-                            .endKafka()
-                            .withCruiseControl(ccSpecWithCustomGoals)
-                        .endSpec()
-                        .build();
+        Kafka resourceWithCustomGoals = createKafka(cruiseControlSpec);
 
-        CruiseControl cruiseControlWithCustomGoals = CruiseControl.fromCrd(resourceWithCustomGoals, VERSIONS);
+        CruiseControl cruiseControlWithCustomGoals = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resourceWithCustomGoals, VERSIONS);
 
         String anomalyDetectionGoals =  cruiseControlWithCustomGoals
                 .getConfiguration().asOrderedProperties().asMap()
@@ -903,16 +903,12 @@ public class CruiseControlTest {
                 .endValueFrom()
                 .build();
 
-        Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas,
-                image, healthDelay, healthTimeout))
-                .editSpec()
-                    .withNewCruiseControl()
-                        .withMetricsConfig(metrics)
-                    .endCruiseControl()
-                .endSpec()
+        CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
+                .withMetricsConfig(metrics)
                 .build();
 
-        CruiseControl cc = CruiseControl.fromCrd(kafkaAssembly, VERSIONS);
+        Kafka kafkaAssembly = createKafka(cruiseControlSpec);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafkaAssembly, VERSIONS);
 
         assertThat(cc.isMetricsEnabled(), is(true));
         assertThat(cc.getMetricsConfigInCm(), is(metrics));
@@ -920,15 +916,10 @@ public class CruiseControlTest {
 
     @ParallelTest
     public void testMetricsParsingNoMetrics() {
-        Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas,
-                image, healthDelay, healthTimeout))
-                .editSpec()
-                    .withNewCruiseControl()
-                    .endCruiseControl()
-                    .endSpec()
-                .build();
+        CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder().build();
+        Kafka kafkaAssembly = createKafka(cruiseControlSpec);
 
-        CruiseControl cc = CruiseControl.fromCrd(kafkaAssembly, VERSIONS);
+        CruiseControl cc = CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafkaAssembly, VERSIONS);
 
         assertThat(cc.isMetricsEnabled(), is(false));
         assertThat(cc.getMetricsConfigInCm(), is(nullValue()));

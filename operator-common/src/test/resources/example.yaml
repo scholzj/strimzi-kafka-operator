@@ -21,15 +21,33 @@ spec:
       transaction.state.log.replication.factor: 3
     foo: bar
     listeners:
-      plain: {}
-      tls: {}
+      - name: plain
+        port: 9092
+        tls: false
+        type: internal
+      - name: tls
+        port: 9093
+        tls: true
+        type: internal
+        authentication:
+          type: oauth
+          enableECDSA: true
     replicas: 3
     storage:
       type: ephemeral
     version: 2.8.0
-    tlsSidecar: {}
-  topicOperator: {}
+    template:
+      pod:
+        securityContext:
+          supplementalGroups:
+            - 971001234
   zookeeper:
     replicas: 3
     storage:
       type: ephemeral
+  kafkaExporter:
+    template:
+      service:
+        metadata:
+          labels:
+            key: value

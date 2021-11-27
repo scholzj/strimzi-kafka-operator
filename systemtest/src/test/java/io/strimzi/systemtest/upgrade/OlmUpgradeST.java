@@ -9,13 +9,14 @@ import io.strimzi.systemtest.Environment;
 import io.strimzi.systemtest.enums.OlmInstallationStrategy;
 import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.crd.kafkaclients.KafkaBasicExampleClients;
-import io.strimzi.systemtest.resources.specific.OlmResource;
+import io.strimzi.systemtest.resources.operator.specific.OlmResource;
 import io.strimzi.systemtest.utils.ClientUtils;
 import io.strimzi.systemtest.utils.FileUtils;
+import io.strimzi.systemtest.utils.RollingUpdateUtils;
 import io.strimzi.systemtest.utils.TestKafkaVersion;
 import io.strimzi.systemtest.utils.kubeUtils.controllers.DeploymentUtils;
-import io.strimzi.systemtest.utils.kubeUtils.controllers.StatefulSetUtils;
 import io.strimzi.systemtest.utils.specific.OlmUtils;
+import io.strimzi.test.annotations.IsolatedSuite;
 import io.strimzi.test.k8s.KubeClusterResource;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -42,6 +43,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
  * Tests in this class use OLM for install cluster operator.
  */
 @Tag(OLM_UPGRADE)
+@IsolatedSuite
 public class OlmUpgradeST extends AbstractUpgradeST {
 
     private static final Logger LOGGER = LogManager.getLogger(OlmUpgradeST.class);
@@ -96,7 +98,7 @@ public class OlmUpgradeST extends AbstractUpgradeST {
         // 2. Approve installation
         //   a) get name of install-plan
         //   b) approve installation
-        olmResource.create(namespace, OlmInstallationStrategy.Manual, fromVersion);
+        olmResource.create(OlmInstallationStrategy.Manual, fromVersion);
 
         String url = testParameters.getString("urlFrom");
         File dir = FileUtils.downloadAndUnzip(url);
@@ -117,7 +119,7 @@ public class OlmUpgradeST extends AbstractUpgradeST {
         LOGGER.info("Old deployment name of cluster operator is {}", clusterOperatorDeploymentName);
 
         // ======== Cluster Operator upgrade starts ========
-        makeSnapshots(clusterName);
+        makeSnapshots();
         // wait until non-used install plan is present (sometimes install-plan did not append immediately and we need to wait for at least 10m)
         OlmUtils.waitUntilNonUsedInstallPlanIsPresent(Environment.OLM_OPERATOR_LATEST_RELEASE_VERSION);
 
@@ -125,8 +127,8 @@ public class OlmUpgradeST extends AbstractUpgradeST {
         OlmResource.upgradeClusterOperator();
 
         // wait until RU is finished
-        zkPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.zookeeperStatefulSetName(clusterName), 3, zkPods);
-        kafkaPods = StatefulSetUtils.waitTillSsHasRolled(KafkaResources.kafkaStatefulSetName(clusterName), 3, kafkaPods);
+        zkPods = RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(zkSelector, 3, zkPods);
+        kafkaPods = RollingUpdateUtils.waitTillComponentHasRolledAndPodsReady(kafkaSelector, 3, kafkaPods);
         eoPods = DeploymentUtils.waitTillDepHasRolled(KafkaResources.entityOperatorDeploymentName(clusterName), 1, eoPods);
         // ======== Cluster Operator upgrade ends ========
 
@@ -142,7 +144,7 @@ public class OlmUpgradeST extends AbstractUpgradeST {
 
         // ======== Kafka upgrade starts ========
         logPodImages(clusterName);
-        changeKafkaAndLogFormatVersion(testParameters.getJsonObject("proceduresAfterOperatorUpgrade"), testParameters, clusterName, extensionContext);
+        changeKafkaAndLogFormatVersion(testParameters.getJsonObject("proceduresAfterOperatorUpgrade"), testParameters, extensionContext);
         logPodImages(clusterName);
         // ======== Kafka upgrade ends ========
 
@@ -162,7 +164,7 @@ public class OlmUpgradeST extends AbstractUpgradeST {
         cluster.setNamespace(namespace);
         cluster.createNamespace(namespace);
 
-        olmResource = new OlmResource();
+        olmResource = new OlmResource(namespace);
     }
 
     @AfterAll

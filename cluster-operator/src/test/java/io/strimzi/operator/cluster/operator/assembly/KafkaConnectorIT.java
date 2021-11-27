@@ -4,7 +4,6 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
-import io.debezium.kafka.KafkaCluster;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.strimzi.api.kafka.Crds;
@@ -21,7 +20,6 @@ import io.strimzi.operator.common.MetricsProvider;
 import io.strimzi.operator.common.MicrometerMetricsProvider;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
-import io.strimzi.test.annotations.ParallelTest;
 import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -31,17 +29,16 @@ import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import io.vertx.micrometer.MicrometerMetricsOptions;
 import io.vertx.micrometer.VertxPrometheusOptions;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.hamcrest.CoreMatchers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -58,44 +55,35 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(VertxExtension.class)
 public class KafkaConnectorIT {
-
-    private static final Logger log = LogManager.getLogger(KafkaConnectorIT.class.getName());
-
-    private KafkaCluster cluster;
+    private static EmbeddedKafkaCluster cluster;
     private static Vertx vertx;
     private ConnectCluster connectCluster;
 
     @BeforeAll
-    public static void before() {
+    public static void before() throws IOException {
         vertx = Vertx.vertx(new VertxOptions().setMetricsOptions(
                 new MicrometerMetricsOptions()
                         .setPrometheusOptions(new VertxPrometheusOptions().setEnabled(true))
                         .setEnabled(true)
         ));
+
+        cluster = new EmbeddedKafkaCluster(3);
+        cluster.start();
     }
 
     @AfterAll
     public static void after() {
+        cluster.stop();
         vertx.close();
     }
 
     @BeforeEach
     public void beforeEach() throws IOException, InterruptedException {
-        // Start a 3 node Kafka cluster
-        cluster = new KafkaCluster()
-            .addBrokers(3)
-            .deleteDataPriorToStartup(true)
-            .deleteDataUponShutdown(true)
-            .usingDirectory(Files.createTempDirectory("operator-integration-test").toFile());
-
-        cluster.startup();
-
         String connectClusterName = getClass().getSimpleName();
-        cluster.createTopics(connectClusterName + "-offsets", connectClusterName + "-config", connectClusterName + "-status");
 
         // Start a 3 node connect cluster
         connectCluster = new ConnectCluster()
-                .usingBrokers(cluster)
+                .usingBrokers(cluster.bootstrapServers())
                 .addConnectNodes(3);
         connectCluster.startup();
     }
@@ -105,12 +93,9 @@ public class KafkaConnectorIT {
         if (connectCluster != null) {
             connectCluster.shutdown();
         }
-        if (cluster != null) {
-            cluster.shutdown();
-        }
     }
 
-    @ParallelTest
+    @Test
     public void test(VertxTestContext context) {
         KafkaConnectApiImpl connectClient = new KafkaConnectApiImpl(vertx);
 
@@ -139,12 +124,12 @@ public class KafkaConnectorIT {
         // Intercept status updates at CrdOperator level
         // This is to bridge limitations between MockKube and the CrdOperator, as there are currently no Fabric8 APIs for status update
         CrdOperator connectCrdOperator = mock(CrdOperator.class);
-        when(connectCrdOperator.updateStatusAsync(any())).thenAnswer(invocation -> {
+        when(connectCrdOperator.updateStatusAsync(any(), any())).thenAnswer(invocation -> {
             try {
                 return Future.succeededFuture(Crds.kafkaConnectorOperation(client)
                         .inNamespace(namespace)
                         .withName(connectorName)
-                        .patch(invocation.getArgument(0)));
+                        .patch((KafkaConnector) invocation.getArgument(1)));
             } catch (Exception e) {
                 return Future.failedFuture(e);
             }
@@ -164,9 +149,9 @@ public class KafkaConnectorIT {
 
         KafkaConnectAssemblyOperator operator = new KafkaConnectAssemblyOperator(vertx, pfa,
                 new ResourceOperatorSupplier(
-                        null, null, null, null, null, null, null, null, null, null, null, null,
-                        null, null, null, null, null, null, null, null, null, null, null, null,
-                        null, null, connectCrdOperator, null, null, null, null, null, metrics, null),
+                        null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, null, null, null, null,
+                        null, null, connectCrdOperator, null, null, null, null, null, metrics, null, null),
                 ClusterOperatorConfig.fromMap(Collections.emptyMap(), KafkaVersionTestUtils.getKafkaVersionLookup()),
             connect -> new KafkaConnectApiImpl(vertx),
             connectCluster.getPort() + 2
@@ -194,7 +179,6 @@ public class KafkaConnectorIT {
 
                 assertThat(registry.get(AbstractOperator.METRICS_PREFIX + "reconciliations").tag("kind", KafkaConnector.RESOURCE_KIND).counter().count(), CoreMatchers.is(2.0));
                 assertThat(registry.get(AbstractOperator.METRICS_PREFIX + "reconciliations.successful").tag("kind", KafkaConnector.RESOURCE_KIND).counter().count(), CoreMatchers.is(2.0));
-                assertThat(registry.get(AbstractOperator.METRICS_PREFIX + "reconciliations.failed").tag("kind", KafkaConnector.RESOURCE_KIND).counter().count(), CoreMatchers.is(0.0));
 
                 assertThat(registry.get(AbstractOperator.METRICS_PREFIX + "reconciliations.duration").tag("kind", KafkaConnector.RESOURCE_KIND).timer().count(), CoreMatchers.is(2L));
                 assertThat(registry.get(AbstractOperator.METRICS_PREFIX + "reconciliations.duration").tag("kind", KafkaConnector.RESOURCE_KIND).timer().totalTime(TimeUnit.MILLISECONDS), greaterThan(0.0));

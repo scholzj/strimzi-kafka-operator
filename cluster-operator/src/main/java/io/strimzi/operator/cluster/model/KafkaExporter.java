@@ -27,10 +27,14 @@ import io.strimzi.api.kafka.model.Probe;
 import io.strimzi.api.kafka.model.ProbeBuilder;
 import io.strimzi.api.kafka.model.template.KafkaExporterTemplate;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.Util;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class KafkaExporter extends AbstractModel {
     protected static final String APPLICATION_NAME = "kafka-exporter";
@@ -54,6 +58,8 @@ public class KafkaExporter extends AbstractModel {
     protected static final String ENV_VAR_KAFKA_EXPORTER_KAFKA_SERVER = "KAFKA_EXPORTER_KAFKA_SERVER";
     protected static final String ENV_VAR_KAFKA_EXPORTER_ENABLE_SARAMA = "KAFKA_EXPORTER_ENABLE_SARAMA";
 
+    protected static final String CO_ENV_VAR_CUSTOM_KAFKA_EXPORTER_POD_LABELS = "STRIMZI_CUSTOM_KAFKA_EXPORTER_LABELS";
+
     protected String groupRegex = ".*";
     protected String topicRegex = ".*";
     protected boolean saramaLoggingEnabled;
@@ -65,13 +71,22 @@ public class KafkaExporter extends AbstractModel {
     protected List<ContainerEnvVar> templateContainerEnvVars;
     protected SecurityContext templateContainerSecurityContext;
 
+    private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
+    static {
+        String value = System.getenv(CO_ENV_VAR_CUSTOM_KAFKA_EXPORTER_POD_LABELS);
+        if (value != null) {
+            DEFAULT_POD_LABELS.putAll(Util.parseMap(value));
+        }
+    }
+
     /**
      * Constructor
      *
+     * @param reconciliation The reconciliation
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
-    protected KafkaExporter(HasMetadata resource) {
-        super(resource, APPLICATION_NAME);
+    protected KafkaExporter(Reconciliation reconciliation, HasMetadata resource) {
+        super(reconciliation, resource, APPLICATION_NAME);
         this.name = KafkaExporterResources.deploymentName(cluster);
         this.replicas = 1;
         this.readinessPath = "/metrics";
@@ -87,8 +102,8 @@ public class KafkaExporter extends AbstractModel {
 
     }
 
-    public static KafkaExporter fromCrd(Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
-        KafkaExporter kafkaExporter = new KafkaExporter(kafkaAssembly);
+    public static KafkaExporter fromCrd(Reconciliation reconciliation, Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
+        KafkaExporter kafkaExporter = new KafkaExporter(reconciliation, kafkaAssembly);
 
         KafkaExporterSpec spec = kafkaAssembly.getSpec().getKafkaExporter();
         if (spec != null) {
@@ -133,6 +148,11 @@ public class KafkaExporter extends AbstractModel {
                     kafkaExporter.templateContainerSecurityContext = template.getContainer().getSecurityContext();
                 }
 
+                if (template.getServiceAccount() != null && template.getServiceAccount().getMetadata() != null) {
+                    kafkaExporter.templateServiceAccountLabels = template.getServiceAccount().getMetadata().getLabels();
+                    kafkaExporter.templateServiceAccountAnnotations = template.getServiceAccount().getMetadata().getAnnotations();
+                }
+
                 ModelUtils.parsePodTemplate(kafkaExporter, template.getPod());
             }
 
@@ -141,6 +161,8 @@ public class KafkaExporter extends AbstractModel {
         } else {
             kafkaExporter.isDeployed = false;
         }
+
+        kafkaExporter.templatePodLabels = Util.mergeLabelsOrAnnotations(kafkaExporter.templatePodLabels, DEFAULT_POD_LABELS);
 
         return kafkaExporter;
     }
@@ -209,7 +231,7 @@ public class KafkaExporter extends AbstractModel {
     protected List<EnvVar> getEnvVars() {
         List<EnvVar> varList = new ArrayList<>();
 
-        varList.add(buildEnvVar(ENV_VAR_KAFKA_EXPORTER_LOGGING, logging));
+        varList.add(buildEnvVar(ENV_VAR_KAFKA_EXPORTER_LOGGING, Integer.toString(loggingMapping(logging))));
         varList.add(buildEnvVar(ENV_VAR_KAFKA_EXPORTER_KAFKA_VERSION, version));
         varList.add(buildEnvVar(ENV_VAR_KAFKA_EXPORTER_GROUP_REGEX, groupRegex));
         varList.add(buildEnvVar(ENV_VAR_KAFKA_EXPORTER_TOPIC_REGEX, topicRegex));
@@ -222,6 +244,18 @@ public class KafkaExporter extends AbstractModel {
         addContainerEnvsToExistingEnvs(varList, templateContainerEnvVars);
 
         return varList;
+    }
+
+    private int loggingMapping(String logLevel) {
+        if (logLevel.equalsIgnoreCase("info")) {
+            return 0;
+        } else if (logLevel.equalsIgnoreCase("debug")) {
+            return 1;
+        } else if (logLevel.equalsIgnoreCase("trace")) {
+            return 2;
+        } else {
+            return 0;
+        }
     }
 
     private List<Volume> getVolumes(boolean isOpenShift) {
@@ -313,7 +347,7 @@ public class KafkaExporter extends AbstractModel {
             return null;
         }
         Secret secret = clusterCa.kafkaExporterSecret();
-        return ModelUtils.buildSecret(clusterCa, secret, namespace, KafkaExporter.secretName(cluster), name,
+        return ModelUtils.buildSecret(reconciliation, clusterCa, secret, namespace, KafkaExporter.secretName(cluster), name,
                 "kafka-exporter", labels, createOwnerReference(), isMaintenanceTimeWindowsSatisfied);
     }
 }

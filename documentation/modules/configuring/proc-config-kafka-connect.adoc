@@ -6,9 +6,7 @@
 = Configuring Kafka Connect
 
 Use Kafka Connect to set up external data connections to your Kafka cluster.
-
-Use the properties of the `KafkaConnect` or `KafkaConnectS2I` resource to configure your Kafka Connect deployment.
-The example shown in this procedure is for the `KafkaConnect` resource, but the properties are the same for the `KafkaConnectS2I` resource.
+Use the properties of the `KafkaConnect` resource to configure your Kafka Connect deployment.
 
 .Kafka connector configuration
 KafkaConnector resources allow you to create and manage connector instances for Kafka Connect in a Kubernetes-native way.
@@ -39,7 +37,7 @@ See the _Deploying and Upgrading Strimzi_ guide for instructions on running a:
 
 .Procedure
 
-. Edit the `spec` properties for the `KafkaConnect` or `KafkaConnectS2I` resource.
+. Edit the `spec` properties of the `KafkaConnect` resource.
 +
 The properties you can configure are shown in this example configuration:
 +
@@ -157,7 +155,7 @@ spec:
         - name: JAEGER_AGENT_PORT
           value: "6831"
 ----
-<1> Use `KafkaConnect` or `KafkaConnectS2I`, as required.
+<1> Use `KafkaConnect`.
 <2> Enables KafkaConnectors for the Kafka Connect cluster.
 <3> xref:con-common-configuration-replicas-reference[The number of replica nodes].
 <4> Authentication for the Kafka Connect cluster, using the xref:type-KafkaClientAuthenticationTls-reference[TLS mechanism], as shown here, using xref:type-KafkaClientAuthenticationOAuth-reference[OAuth bearer tokens], or a SASL-based xref:type-KafkaClientAuthenticationScramSha512-reference[SCRAM-SHA-512] or xref:type-KafkaClientAuthenticationPlain-reference[PLAIN] mechanism.
@@ -170,6 +168,7 @@ Standard Apache Kafka configuration may be provided, restricted to those propert
 <9> (Required) Configuration of the container registry where new images are pushed.
 <10> (Required) List of connector plugins and their artifacts to add to the new container image. Each plugin must be configured with at least one `artifact`.
 <11> xref:type-ExternalConfiguration-reference[External configuration for Kafka connectors] using environment variables, as shown here, or volumes.
+You can also use the _Kubernetes Configuration Provider_ to xref:proc-loading-config-with-provider-str[load configuration values from external sources].
 <12> Requests for reservation of xref:con-common-configuration-resources-reference[supported resources], currently `cpu` and `memory`, and limits to specify the maximum resources that can be consumed.
 <13> Specified xref:property-kafka-connect-logging-reference[Kafka Connect loggers and log levels] added directly (`inline`) or indirectly (`external`) through a ConfigMap. A custom ConfigMap must be placed under the `log4j.properties` or `log4j2.properties` key. For the Kafka Connect `log4j.rootLogger` logger, you can set the log level to INFO, ERROR, WARN, TRACE, DEBUG, FATAL or OFF.
 <14> xref:con-common-configuration-healthchecks-reference[Healthchecks] to know when to restart a container (liveness) and when a container can accept traffic (readiness).

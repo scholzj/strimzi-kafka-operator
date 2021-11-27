@@ -39,8 +39,6 @@ public class SystemTestCertManager {
     static final String STRIMZI_INTERMEDIATE_CA = "C=CZ, L=Prague, O=Strimzi, CN=StrimziIntermediateCA";
     static final String STRIMZI_END_SUBJECT = "C=CZ, L=Prague, O=Strimzi, CN=kafka.strimzi.io";
 
-    public SystemTestCertManager() {}
-
     private static List<String> generateBaseSSLCommand(String server, String caFilePath, String hostname) {
         return new ArrayList<>(asList("echo -n | openssl",
                 "s_client",
@@ -78,11 +76,11 @@ public class SystemTestCertManager {
 
     public static List<String> getCertificateChain(String certificateName) {
         return new ArrayList<>(asList(
-                "s:/O=io.strimzi/CN=" + certificateName + "\n" +
-                "   i:/O=io.strimzi/CN=cluster-ca",
+                "s:O = io.strimzi, CN = " + certificateName + "\n" +
+                "   i:O = io.strimzi, CN = cluster-ca",
                 "Server certificate\n" +
-                "subject=/O=io.strimzi/CN=" + certificateName + "\n" +
-                "issuer=/O=io.strimzi/CN=cluster-ca"
+                "subject=O = io.strimzi, CN = " + certificateName + "\n\n" +
+                "issuer=O = io.strimzi, CN = cluster-ca"
         ));
     }
 
@@ -107,13 +105,6 @@ public class SystemTestCertManager {
     public static SystemTestCertAndKey generateEndEntityCertAndKey(SystemTestCertAndKey intermediateCert) {
         return endEntityCertBuilder(intermediateCert)
                 .withSubjectDn(STRIMZI_END_SUBJECT)
-                .withSanDnsName("*.127.0.0.1.nip.io")
-                .build();
-    }
-
-    public static SystemTestCertAndKey generateEndEntityCertAndKey(SystemTestCertAndKey intermediateCert, String subjectDn) {
-        return endEntityCertBuilder(intermediateCert)
-                .withSubjectDn(subjectDn)
                 .withSanDnsName("*.127.0.0.1.nip.io")
                 .build();
     }

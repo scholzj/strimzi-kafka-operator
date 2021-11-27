@@ -13,11 +13,14 @@ The release process should normally look like this:
 1. Create a release branch
 2. On the `main` git branch of the operators repository:
   * Update the versions to the next SNAPSHOT version using the `next_version` `make` target. For example to update the next version to `0.6.0-SNAPSHOT` run: `make NEXT_VERSION=0.6.0-SNAPSHOT next_version`.
+  * Update the product version in `attributes.adoc` to the next version
+  * Add a header for the new release to the `CHANGELOG.md` file
 
 3. Run `make clean`
 4. Export the desired version into the environment variable `RELEASE_VERSION`
 5. Run `make release`
 6. Update the `install`, `example` and `helm-chart` files in the release branch with files from `packaging/` updated by `make release`
+   * Update the checksums for released files in `.checksums` in the release branch
 7. Commit the changes to the existing files (do not add the newly created top level TAR.GZ, ZIP archives or .yaml files into Git)
 8. Push the changes to the release branch on GitHub
 9. Create the tag and push it to GitHub. Tag name determines the tag of the resulting Docker images. Therefore the Git tag name has to be the same as the `RELEASE_VERSION`, i.e. `git tag ${RELEASE_VERSION}`,
@@ -37,8 +40,9 @@ The release process should normally look like this:
 
 12. _(only for GA, not for RCs)_ On the `main` git branch of the operators repository:
   * Copy the `packaging/helm-charts/index.yaml` from the `release` branch to `main`
-  * Update the `ProductVersion` variable in `documentation/using/shared/attributes.doc`
+  * Update the `ProductVersion` variable in `documentation/using/shared/attributes.adoc`
   * Update the `install`, `examples` and `helm-chart` directories in the `main` branch with the newly released files
+  * Update the checksums for released files in `.checksums`
 
 13. _(only for GA, not for RCs)_ The maven artifacts (`api` module) will be automatically staged from Azure during the tag build. It has to be releases from [Sonatype](https://oss.sonatype.org/#stagingRepositories) to get to the main Maven repositories.
 14. _(only for GA, not for RCs)_ Update the Strimzi manifest files in Operator Hub [community operators](https://github.com/operator-framework/community-operators) repository and submit a pull request upstream. *Note*: Instructions for this step need updating.

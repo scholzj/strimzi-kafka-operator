@@ -8,12 +8,12 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.strimzi.operator.cluster.model.Ca;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.common.PasswordGenerator;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.admin.ZooKeeperAdmin;
 import org.apache.zookeeper.client.ZKClientConfig;
@@ -31,7 +31,7 @@ import java.util.function.Function;
  * Class for scaling Zookeeper 3.5 using the ZookeeperAdmin client
  */
 public class ZookeeperScaler implements AutoCloseable {
-    private static final Logger log = LogManager.getLogger(ZookeeperScaler.class);
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(ZookeeperScaler.class);
 
     private final Vertx vertx;
     private final ZooKeeperAdminProvider zooAdminProvider;
@@ -41,6 +41,7 @@ public class ZookeeperScaler implements AutoCloseable {
     private final Function<Integer, String> zkNodeAddress;
 
     private final long operationTimeoutMs;
+    private final int zkAdminSessionTimeoutMs;
 
     private final Secret clusterCaCertSecret;
     private final Secret coKeySecret;
@@ -51,26 +52,35 @@ public class ZookeeperScaler implements AutoCloseable {
     private final String keyStorePassword;
     private File keyStoreFile;
 
+    private final Reconciliation reconciliation;
+
     /**
      * ZookeeperScaler constructor
      *
+     * @param reconciliation                The reconciliation
      * @param vertx                         Vertx instance
      * @param zookeeperConnectionString     Connection string to connect to the right Zookeeper
      * @param zkNodeAddress                 Function for generating the Zookeeper node addresses
      * @param clusterCaCertSecret           Secret with Kafka cluster CA public key
      * @param coKeySecret                   Secret with Cluster Operator public and private key
      * @param operationTimeoutMs            Operation timeout
+     * @param zkAdminSessionTimeoutMs       Zookeeper Admin session timeout
      *
-     * @return  ZookeeperScaler instance
      */
-    protected ZookeeperScaler(Vertx vertx, ZooKeeperAdminProvider zooAdminProvider, String zookeeperConnectionString, Function<Integer, String> zkNodeAddress, Secret clusterCaCertSecret, Secret coKeySecret, long operationTimeoutMs) {
-        log.debug("Creating Zookeeper Scaler for cluster {}", zookeeperConnectionString);
+    protected ZookeeperScaler(Reconciliation reconciliation, Vertx vertx, ZooKeeperAdminProvider zooAdminProvider,
+                              String zookeeperConnectionString, Function<Integer, String> zkNodeAddress,
+                              Secret clusterCaCertSecret, Secret coKeySecret, long operationTimeoutMs,
+                              int zkAdminSessionTimeoutMs) {
+        this.reconciliation = reconciliation;
+
+        LOGGER.debugCr(reconciliation, "Creating Zookeeper Scaler for cluster {}", zookeeperConnectionString);
 
         this.vertx = vertx;
         this.zooAdminProvider = zooAdminProvider;
         this.zookeeperConnectionString = zookeeperConnectionString;
         this.zkNodeAddress = zkNodeAddress;
         this.operationTimeoutMs = operationTimeoutMs;
+        this.zkAdminSessionTimeoutMs = zkAdminSessionTimeoutMs;
         this.clusterCaCertSecret = clusterCaCertSecret;
         this.coKeySecret = coKeySecret;
 
@@ -78,9 +88,11 @@ public class ZookeeperScaler implements AutoCloseable {
         // We cannot use P12 because of custom CAs which for simplicity provide only PEM
         PasswordGenerator pg = new PasswordGenerator(12);
         trustStorePassword = pg.generate();
+        trustStoreFile = Util.createFileTrustStore(getClass().getName(), "p12", Ca.certs(clusterCaCertSecret), trustStorePassword.toCharArray());
 
         // Setup keystore from PKCS12 in cluster-operator secret
         keyStorePassword = new String(Util.decodeFromSecret(coKeySecret, "cluster-operator.password"), StandardCharsets.US_ASCII);
+        keyStoreFile = Util.createFileStore(getClass().getName(), "p12", Util.decodeFromSecret(coKeySecret, "cluster-operator.p12"));
     }
 
     /**
@@ -99,9 +111,16 @@ public class ZookeeperScaler implements AutoCloseable {
 
                     getCurrentConfig(zkAdmin)
                             .compose(servers -> scaleTo(zkAdmin, servers, scaleTo))
-                            .compose(nothing -> closeConnection(zkAdmin))
-                            .onSuccess(scalePromise::complete)
-                            .onFailure(scalePromise::fail);
+                            .onComplete(res ->
+                                closeConnection(zkAdmin)
+                                    .onComplete(closeResult -> {
+                                        // Ignoring the result of `closeConnection`
+                                        if (res.succeeded()) {
+                                            scalePromise.complete();
+                                        } else {
+                                            scalePromise.fail(res.cause());
+                                        }
+                                    }));
 
                     return scalePromise.future();
                 });
@@ -114,13 +133,13 @@ public class ZookeeperScaler implements AutoCloseable {
     public void close() {
         if (trustStoreFile != null) {
             if (!trustStoreFile.delete())   {
-                log.debug("Failed to delete file {}", trustStoreFile);
+                LOGGER.warnCr(reconciliation, "Failed to delete file {}", trustStoreFile);
             }
         }
 
         if (keyStoreFile != null)   {
             if (!keyStoreFile.delete())   {
-                log.debug("Failed to delete file {}", keyStoreFile);
+                LOGGER.warnCr(reconciliation, "Failed to delete file {}", keyStoreFile);
             }
         }
     }
@@ -136,11 +155,11 @@ public class ZookeeperScaler implements AutoCloseable {
         try {
             ZooKeeperAdmin zkAdmin = zooAdminProvider.createZookeeperAdmin(
                 this.zookeeperConnectionString,
-                10_000,
-                watchedEvent -> log.debug("Received event {} from ZooKeeperAdmin client connected to {}", watchedEvent, zookeeperConnectionString),
+                zkAdminSessionTimeoutMs,
+                watchedEvent -> LOGGER.debugCr(reconciliation, "Received event {} from ZooKeeperAdmin client connected to {}", watchedEvent, zookeeperConnectionString),
                 clientConfig);
 
-            Util.waitFor(vertx,
+            Util.waitFor(reconciliation, vertx,
                 String.format("ZooKeeperAdmin connection to %s", zookeeperConnectionString),
                 "connected",
                 1_000,
@@ -149,13 +168,13 @@ public class ZookeeperScaler implements AutoCloseable {
                 .onSuccess(nothing -> connected.complete(zkAdmin))
                 .onFailure(cause -> {
                     String message = String.format("Failed to connect to Zookeeper %s. Connection was not ready in %d ms.", zookeeperConnectionString, operationTimeoutMs);
-                    log.warn(message);
+                    LOGGER.warnCr(reconciliation, message);
 
                     closeConnection(zkAdmin)
                         .onComplete(nothing -> connected.fail(new ZookeeperScalingException(message, cause)));
                 });
         } catch (IOException e)   {
-            log.warn("Failed to connect to {} to scale Zookeeper", zookeeperConnectionString, e);
+            LOGGER.warnCr(reconciliation, "Failed to connect to {} to scale Zookeeper", zookeeperConnectionString, e);
             connected.fail(new ZookeeperScalingException("Failed to connect to Zookeeper " + zookeeperConnectionString, e));
         }
 
@@ -175,10 +194,10 @@ public class ZookeeperScaler implements AutoCloseable {
         Map<String, String> desiredServers = generateConfig(scaleTo, zkNodeAddress);
 
         if (isDifferent(currentServers, desiredServers))    {
-            log.debug("The Zookeeper server configuration needs to be updated");
+            LOGGER.debugCr(reconciliation, "The Zookeeper server configuration needs to be updated");
             return updateConfig(zkAdmin, desiredServers).map((Void) null);
         } else {
-            log.debug("The Zookeeper server configuration is already up to date");
+            LOGGER.debugCr(reconciliation, "The Zookeeper server configuration is already up to date");
             return Future.succeededFuture();
         }
     }
@@ -195,10 +214,10 @@ public class ZookeeperScaler implements AutoCloseable {
             try {
                 byte[] config = zkAdmin.getConfig(false, null);
                 Map<String, String> servers = parseConfig(config);
-                log.debug("Current Zookeeper configuration is {}", servers);
+                LOGGER.debugCr(reconciliation, "Current Zookeeper configuration is {}", servers);
                 promise.complete(servers);
             } catch (KeeperException | InterruptedException e)    {
-                log.warn("Failed to get current Zookeeper server configuration", e);
+                LOGGER.warnCr(reconciliation, "Failed to get current Zookeeper server configuration", e);
                 promise.fail(new ZookeeperScalingException("Failed to get current Zookeeper server configuration", e));
             }
         }, false, configPromise);
@@ -217,14 +236,14 @@ public class ZookeeperScaler implements AutoCloseable {
 
         vertx.executeBlocking(promise -> {
             try {
-                log.debug("Updating Zookeeper configuration to {}", newServers);
+                LOGGER.debugCr(reconciliation, "Updating Zookeeper configuration to {}", newServers);
                 byte[] newConfig = zkAdmin.reconfigure(null, null, serversMapToList(newServers), -1, null);
                 Map<String, String> servers = parseConfig(newConfig);
 
-                log.debug("New Zookeeper configuration is {}", servers);
+                LOGGER.debugCr(reconciliation, "New Zookeeper configuration is {}", servers);
                 promise.complete(servers);
             } catch (KeeperException | InterruptedException e)    {
-                log.warn("Failed to update Zookeeper server configuration", e);
+                LOGGER.warnCr(reconciliation, "Failed to update Zookeeper server configuration", e);
                 promise.fail(new ZookeeperScalingException("Failed to update Zookeeper server configuration", e));
             }
         }, false, configPromise);
@@ -244,7 +263,7 @@ public class ZookeeperScaler implements AutoCloseable {
                     zkAdmin.close((int) operationTimeoutMs);
                     promise.complete();
                 } catch (Exception e) {
-                    log.debug("Failed to close the ZooKeeperAdmin", e);
+                    LOGGER.warnCr(reconciliation, "Failed to close the ZooKeeperAdmin", e);
                     promise.fail(e);
                 }
             }, false, closePromise);
@@ -267,11 +286,9 @@ public class ZookeeperScaler implements AutoCloseable {
             try {
                 ZKClientConfig clientConfig = new ZKClientConfig();
 
-                trustStoreFile = Util.createFileTrustStore(getClass().getName(), "p12", Ca.cert(clusterCaCertSecret, Ca.CA_CRT), trustStorePassword.toCharArray());
-                keyStoreFile = Util.createFileStore(getClass().getName(), "p12", Util.decodeFromSecret(coKeySecret, "cluster-operator.p12"));
-
                 clientConfig.setProperty("zookeeper.clientCnxnSocket", "org.apache.zookeeper.ClientCnxnSocketNetty");
                 clientConfig.setProperty("zookeeper.client.secure", "true");
+                clientConfig.setProperty("zookeeper.sasl.client", "false");
                 clientConfig.setProperty("zookeeper.ssl.trustStore.location", trustStoreFile.getAbsolutePath());
                 clientConfig.setProperty("zookeeper.ssl.trustStore.password", trustStorePassword);
                 clientConfig.setProperty("zookeeper.ssl.trustStore.type", "PKCS12");
@@ -282,7 +299,7 @@ public class ZookeeperScaler implements AutoCloseable {
 
                 promise.complete(clientConfig);
             } catch (Exception e)    {
-                log.warn("Failed to create Zookeeper client configuration", e);
+                LOGGER.warnCr(reconciliation, "Failed to create Zookeeper client configuration", e);
                 promise.fail(new ZookeeperScalingException("Failed to create Zookeeper client configuration", e));
             }
         }, false, configPromise);

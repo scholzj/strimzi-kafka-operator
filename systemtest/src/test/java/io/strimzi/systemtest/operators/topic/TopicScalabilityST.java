@@ -5,6 +5,7 @@
 package io.strimzi.systemtest.operators.topic;
 
 import io.strimzi.systemtest.AbstractST;
+import io.strimzi.systemtest.annotations.IsolatedSuite;
 import io.strimzi.systemtest.annotations.ParallelTest;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
@@ -15,15 +16,16 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
+import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
 import static io.strimzi.systemtest.Constants.SCALABILITY;
 
 @Tag(SCALABILITY)
+@IsolatedSuite
 public class TopicScalabilityST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(TopicScalabilityST.class);
     private static final int NUMBER_OF_TOPICS = 1000;
     private static final int SAMPLE_OFFSET = 50;
-    static final String NAMESPACE = "topic-scale-cluster-test";
     private final String sharedClusterName = "topic-scalability-shared-cluster-name";
 
     @ParallelTest
@@ -51,9 +53,7 @@ public class TopicScalabilityST extends AbstractST {
 
     @BeforeAll
     void setup(ExtensionContext extensionContext) {
-        installClusterOperator(extensionContext, NAMESPACE);
-
-        LOGGER.info("Deploying shared kafka across all test cases in {} namespace", NAMESPACE);
+        LOGGER.info("Deploying shared kafka across all test cases in {} namespace", INFRA_NAMESPACE);
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(sharedClusterName, 3, 1).build());
     }
 

@@ -29,6 +29,8 @@ public class Annotations {
     public static final String ANNO_STRIMZI_LOGGING_HASH = STRIMZI_DOMAIN + "logging-hash";
     public static final String ANNO_STRIMZI_LOGGING_APPENDERS_HASH = STRIMZI_DOMAIN + "logging-appenders-hash";
     public static final String ANNO_STRIMZI_LOGGING_DYNAMICALLY_UNCHANGEABLE_HASH = STRIMZI_DOMAIN + "logging-appenders-hash";
+    public static final String ANNO_STRIMZI_AUTH_HASH = STRIMZI_DOMAIN + "auth-hash";
+
 
     public static final String STRIMZI_IO_USE_CONNECTOR_RESOURCES = STRIMZI_DOMAIN + "use-connector-resources";
     // Used to store the revision of the Kafka Connect build (hash of the Dockerfile)
@@ -60,9 +62,9 @@ public class Annotations {
     public static final String ANNO_DEP_KUBE_IO_REVISION = "deployment.kubernetes.io/revision";
 
     /**
-     * Whitelist of predicates that allows existing load balancer service annotations to be retained while reconciling the resources.
+     * List of predicates that allows existing load balancer service annotations to be retained while reconciling the resources.
      */
-    public static final List<Predicate<String>> LOADBALANCER_ANNOTATION_WHITELIST = List.of(
+    public static final List<Predicate<String>> LOADBALANCER_ANNOTATION_IGNORELIST = List.of(
         annotation -> annotation.startsWith("cattle.io/"),
         annotation -> annotation.startsWith("field.cattle.io")
     );

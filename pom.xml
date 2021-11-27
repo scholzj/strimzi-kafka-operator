@@ -5,7 +5,7 @@
     <groupId>io.strimzi</groupId>
     <artifactId>strimzi</artifactId>
     <packaging>pom</packaging>
-    <version>0.24.0-SNAPSHOT</version>
+    <version>0.27.0-SNAPSHOT</version>
 
     <licenses>
         <license>
@@ -82,64 +82,59 @@
         <maven.source.version>3.0.1</maven.source.version>
         <maven.dependency.version>3.1.1</maven.dependency.version>
         <maven.gpg.version>1.6</maven.gpg.version>
-        <maven.checkstyle.version>3.1.1</maven.checkstyle.version>
+        <maven.checkstyle.version>3.1.2</maven.checkstyle.version>
+        <checkstyle.version>9.0.1</checkstyle.version>
         <spotbugs.version>4.0.3</spotbugs.version>
         <sonatype.nexus.staging>1.6.3</sonatype.nexus.staging>
         <jacoco.version>0.7.9</jacoco.version>
         <license.maven.version>2.11</license.maven.version>
         <maven-jar-plugin.version>3.1.0</maven-jar-plugin.version>
-        <sundrio.version>0.30.0</sundrio.version>
-        <fabric8.kubernetes-client.version>5.3.0</fabric8.kubernetes-client.version>
-        <fabric8.openshift-client.version>5.3.0</fabric8.openshift-client.version>
-        <fabric8.kubernetes-model.version>5.3.0</fabric8.kubernetes-model.version>
+        <sundrio.version>0.40.1</sundrio.version>
+        <fabric8.kubernetes-client.version>5.10.1</fabric8.kubernetes-client.version>
+        <fabric8.openshift-client.version>5.10.1</fabric8.openshift-client.version>
+        <fabric8.kubernetes-model.version>5.10.1</fabric8.kubernetes-model.version>
         <fabric8.zjsonpatch.version>0.3.0</fabric8.zjsonpatch.version>
         <okhttp.version>3.12.6</okhttp.version>
         <okio.version>1.15.0</okio.version>
-        <vertx.version>4.0.3</vertx.version>
-        <vertx-junit5.version>4.0.3</vertx-junit5.version>
-        <log4j.version>2.13.3</log4j.version>
+        <vertx.version>4.2.1</vertx.version>
+        <vertx-junit5.version>4.2.1</vertx-junit5.version>
+        <vertx.kafka.client>4.2.1</vertx.kafka.client>
+        <log4j.version>2.14.1</log4j.version>
         <hamcrest.version>2.2</hamcrest.version>
         <valid4j.version>1.1</valid4j.version>
         <fasterxml.jackson-core.version>2.11.3</fasterxml.jackson-core.version>
         <fasterxml.jackson-databind.version>2.11.3</fasterxml.jackson-databind.version>
         <fasterxml.jackson-dataformat.version>2.10.5</fasterxml.jackson-dataformat.version>
         <fasterxml.jackson-annotations.version>2.11.3</fasterxml.jackson-annotations.version>
-        <kafka.version>2.7.0</kafka.version>
+        <kafka.version>3.0.0</kafka.version>
         <!-- keep in-sync with dataformat-yaml -->
-        <snakeyaml.version>1.26</snakeyaml.version>
-        <picocli.version>4.5.2</picocli.version>
         <json-path.version>4.1.1</json-path.version>
         <zkclient.version>0.11</zkclient.version>
-        <scala-library.version>2.12.12</scala-library.version>
-        <zookeeper.version>3.5.8</zookeeper.version>
+        <scala-library.version>2.13.6</scala-library.version>
+        <zookeeper.version>3.6.3</zookeeper.version>
         <mockito.version>2.28.2</mockito.version>
-        <jayway-jsonpath.version>2.5.0</jayway-jsonpath.version>
+        <jayway-jsonpath.version>2.6.0</jayway-jsonpath.version>
         <slf4j.version>1.7.25</slf4j.version>
         <quartz.version>2.3.2</quartz.version>
-        <debezium.version>1.5.0.Final</debezium.version>
-        <jaeger.version>1.3.2</jaeger.version>
+        <jaeger.version>1.6.0</jaeger.version>
         <opentracing.version>0.33.0</opentracing.version>
         <opentracing-kafka.version>0.1.13</opentracing-kafka.version>
-        <strimzi-oauth.version>0.7.2</strimzi-oauth.version>
+        <strimzi-oauth.version>0.8.1</strimzi-oauth.version>
         <commons-codec.version>1.13</commons-codec.version>
-        <registry.version>1.3.0.Final</registry.version>
-
-        <test-containers.version>1.15.2</test-containers.version>
-        <docker-java.version>3.2.7</docker-java.version>
+        <registry.version>1.3.2.Final</registry.version>
         <javax.json-api.version>1.1.4</javax.json-api.version>
         <javax.json.version>1.1.4</javax.json.version>
-        <rest-assured.version>4.3.3</rest-assured.version>
-        <rest-assured-json-path.version>4.3.3</rest-assured-json-path.version>
+        <rest-assured.version>4.4.0</rest-assured.version>
+        <rest-assured-json-path.version>4.4.0</rest-assured-json-path.version>
         <jupiter.version>5.7.0</jupiter.version>
         <junit.platform.version>1.7.0</junit.platform.version>
         <junit-platform-surefire-provider.version>1.3.2</junit-platform-surefire-provider.version>
         <opentest4j.version>1.2.0</opentest4j.version>
         <gson.version>2.8.2</gson.version>
-        <vertx.kafka.client>4.0.3</vertx.kafka.client>
         <exec-maven-plugin.version>1.6.0</exec-maven-plugin.version>
-        <netty.version>4.1.60.Final</netty.version>
+        <netty.version>4.1.68.Final</netty.version>
         <micrometer.version>1.3.1</micrometer.version>
-        <bouncycastle.version>1.68</bouncycastle.version>
+        <bouncycastle.version>1.69</bouncycastle.version>
         <!-- property to skip surefire tests during failsafe execution -->
         <!--suppress UnresolvedMavenProperty -->
         <skip.surefire.tests>${skipTests}</skip.surefire.tests>
@@ -161,11 +156,9 @@
         <module>mirror-maker-agent</module>
         <module>tracing-agent</module>
         <module>test</module>
-        <module>test-container</module>
         <module>crd-annotations</module>
         <module>crd-generator</module>
         <module>api</module>
-        <module>api-conversion</module>
         <module>mockkube</module>
         <module>config-model</module>
         <module>config-model-generator</module>
@@ -354,7 +347,7 @@
             </dependency>
             <dependency>
                 <groupId>org.apache.kafka</groupId>
-                <artifactId>kafka_2.12</artifactId>
+                <artifactId>kafka_2.13</artifactId>
                 <version>${kafka.version}</version>
             </dependency>
             <dependency>
@@ -451,20 +444,8 @@
             <dependency>
                 <!-- transitive dep; override here to avoid buggy version -->
                 <groupId>com.fasterxml.jackson.module</groupId>
-                <artifactId>jackson-module-scala_2.12</artifactId>
+                <artifactId>jackson-module-scala_2.13</artifactId>
                 <version>${fasterxml.jackson-core.version}</version>
-            </dependency>
-            <!-- used in api-conversion -->
-            <dependency>
-                <groupId>org.yaml</groupId>
-                <artifactId>snakeyaml</artifactId>
-                <version>${snakeyaml.version}</version>
-            </dependency>
-            <!-- Picocli -->
-            <dependency>
-                <groupId>info.picocli</groupId>
-                <artifactId>picocli</artifactId>
-                <version>${picocli.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.vertx</groupId>
@@ -607,19 +588,47 @@
                 <artifactId>kafka-streams</artifactId>
                 <version>${kafka.version}</version>
             </dependency>
+            <!-- Used by EmbeddedKafkaCluster -->
             <dependency>
-                <groupId>io.debezium</groupId>
-                <artifactId>debezium-core</artifactId>
-                <version>${debezium.version}</version>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-streams</artifactId>
+                <version>${kafka.version}</version>
+                <classifier>test</classifier>
                 <scope>test</scope>
+                <exclusions>
+                    <exclusion>
+                        <artifactId>*</artifactId>
+                        <groupId>*</groupId>
+                    </exclusion>
+                </exclusions>
             </dependency>
             <dependency>
-                <groupId>io.debezium</groupId>
-                <artifactId>debezium-core</artifactId>
-                <version>${debezium.version}</version>
-                <type>test-jar</type>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka.version}</version>
+                <classifier>test</classifier>
                 <scope>test</scope>
+                <exclusions>
+                    <exclusion>
+                        <artifactId>*</artifactId>
+                        <groupId>*</groupId>
+                    </exclusion>
+                </exclusions>
             </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka_2.13</artifactId>
+                <version>${kafka.version}</version>
+                <classifier>test</classifier>
+                <scope>test</scope>
+                <exclusions>
+                    <exclusion>
+                        <artifactId>*</artifactId>
+                        <groupId>*</groupId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <!-- ^^^^^ Used by EmbeddedKafkaCluster -->
             <dependency>
                 <groupId>org.mockito</groupId>
                 <artifactId>mockito-core</artifactId>
@@ -767,11 +776,6 @@
                 <version>${vertx.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.testcontainers</groupId>
-                <artifactId>testcontainers</artifactId>
-                <version>${test-containers.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>org.junit.platform</groupId>
                 <artifactId>junit-platform-commons</artifactId>
                 <version>${junit.platform.version}</version>
@@ -890,7 +894,7 @@
                     <dependency>
                         <groupId>com.puppycrawl.tools</groupId>
                         <artifactId>checkstyle</artifactId>
-                        <version>8.29</version>
+                        <version>${checkstyle.version}</version>
                     </dependency>
                 </dependencies>
                 <executions>
@@ -1054,7 +1058,8 @@
                         <configuration>
                             <failOnWarning>true</failOnWarning>
                             <ignoredUnusedDeclaredDependencies>
-                                <ignoredUnusedDeclaredDependency>io.debezium:debezium-core</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-clients</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-streams</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.scala-lang:scala-library</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-core</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-slf4j-impl</ignoredUnusedDeclaredDependency>
@@ -1062,7 +1067,7 @@
                                 <ignoredUnusedDeclaredDependency>org.projectlombok:lombok</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.slf4j:slf4j-api:jar</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.glassfish:javax.json:jar</ignoredUnusedDeclaredDependency>
-                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka_2.12:jar</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka_2.13:jar</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>io.netty:netty-transport-native-epoll:jar</ignoredUnusedDeclaredDependency>
                                 <ignoredDependency>org.junit.platform</ignoredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.kafka:connect-file</ignoredUnusedDeclaredDependency>

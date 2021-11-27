@@ -8,6 +8,7 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.resources.ResourceManager;
+import io.strimzi.test.TestUtils;
 import io.strimzi.test.executor.Exec;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.config.SaslConfigs;
@@ -35,15 +36,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Class KafkaClientProperties, which holds inner class builder for fluent way to invoke objects. It is used inside
- * all our external clients such as BasicExternalKafkaClient or OauthExternalKafkaClient.
+ * all our external clients such as ExternalKafkaClient.
  *
- * @see io.strimzi.systemtest.kafkaclients.externalClients.OauthExternalKafkaClient
- * @see io.strimzi.systemtest.kafkaclients.externalClients.BasicExternalKafkaClient
- * @see io.strimzi.systemtest.kafkaclients.externalClients.TracingExternalKafkaClient
+ * @see io.strimzi.systemtest.kafkaclients.externalClients.ExternalKafkaClient
  */
 //  This practically means, always make sure that before invoking this withSharedProperties(), you need first execute withCaSecretName().
 @SuppressFBWarnings({"NP_NONNULL_FIELD_NOT_INITIALIZED_IN_CONSTRUCTOR", "UWF_FIELD_NOT_INITIALIZED_IN_CONSTRUCTOR"})
@@ -163,7 +161,7 @@ abstract public class AbstractKafkaClientProperties<C extends AbstractKafkaClien
                 if (!properties.getProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG).equals(CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL) &&
                     !properties.getProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG).equals("SASL_" + CommonClientConfigs.DEFAULT_SECURITY_PROTOCOL)
                 ) {
-                    Secret clusterCaCertSecret = kubeClient(namespaceName).getSecret(caSecretName);
+                    Secret clusterCaCertSecret = kubeClient().getSecret(namespaceName, caSecretName);
                     File tsFile = File.createTempFile(AbstractKafkaClientProperties.class.getName(), ".truststore");
                     tsFile.deleteOnExit();
                     KeyStore ts = KeyStore.getInstance(TRUSTSTORE_TYPE_CONFIG);
@@ -171,7 +169,7 @@ abstract public class AbstractKafkaClientProperties<C extends AbstractKafkaClien
                     if (caSecretName.contains("custom-certificate")) {
                         ts.load(null, tsPassword.toCharArray());
                         CertificateFactory cf = CertificateFactory.getInstance("X.509");
-                        String clusterCaCert = kubeClient(namespaceName).getSecret(caSecretName).getData().get("ca.crt");
+                        String clusterCaCert = kubeClient().getSecret(namespaceName, caSecretName).getData().get("ca.crt");
                         Certificate cert = cf.generateCertificate(new ByteArrayInputStream(Base64.getDecoder().decode(clusterCaCert)));
                         ts.setCertificateEntry("ca.crt", cert);
                         try (FileOutputStream tsOs = new FileOutputStream(tsFile)) {
@@ -192,7 +190,7 @@ abstract public class AbstractKafkaClientProperties<C extends AbstractKafkaClien
                     && !properties.getProperty(SaslConfigs.SASL_MECHANISM).equals("OAUTHBEARER")) {
 
                     properties.setProperty(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-512");
-                    Secret userSecret = kubeClient(namespaceName).getSecret(kafkaUsername);
+                    Secret userSecret = kubeClient().getSecret(namespaceName, kafkaUsername);
                     String password = new String(Base64.getDecoder().decode(userSecret.getData().get("password")), StandardCharsets.UTF_8);
 
                     String jaasTemplate = "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"%s\" password=\"%s\";";
@@ -201,7 +199,7 @@ abstract public class AbstractKafkaClientProperties<C extends AbstractKafkaClien
                     properties.setProperty(SaslConfigs.SASL_JAAS_CONFIG, jaasCfg);
                 } else if (!kafkaUsername.isEmpty()) {
 
-                    Secret userSecret = kubeClient(namespaceName).getSecret(kafkaUsername);
+                    Secret userSecret = kubeClient().getSecret(namespaceName, kafkaUsername);
 
                     String clientsCaCert = userSecret.getData().get("ca.crt");
                     LOGGER.debug("Clients CA cert: {}", clientsCaCert);
@@ -276,7 +274,9 @@ abstract public class AbstractKafkaClientProperties<C extends AbstractKafkaClien
         File keystore = File.createTempFile(AbstractKafkaClientProperties.class.getName(), ".keystore");
         keystore.delete(); // Note horrible race condition, but this is only for testing
         // RANDFILE=/tmp/.rnd openssl pkcs12 -export -in $3 -inkey $4 -name $HOSTNAME -password pass:$2 -out $1
-        if (new ProcessBuilder("openssl",
+        // The following code is needed to avoid race-condition which we see from time to time
+        TestUtils.waitFor("client-keystore readiness", Constants.GLOBAL_POLL_INTERVAL, Constants.CO_OPERATION_TIMEOUT_MEDIUM,
+            () -> Exec.exec("openssl",
                 "pkcs12",
                 "-export",
                 "-in", certFile.getAbsolutePath(),
@@ -285,9 +285,8 @@ abstract public class AbstractKafkaClientProperties<C extends AbstractKafkaClien
                 "-CAfile", caFile.getAbsolutePath(),
                 "-name", "dfbdbd",
                 "-password", "pass:" + password,
-                "-out", keystore.getAbsolutePath()).inheritIO().start().waitFor() != 0) {
-            fail();
-        }
+                "-out", keystore.getAbsolutePath()).exitStatus());
+
         keystore.deleteOnExit();
         return keystore;
     }
@@ -322,11 +321,5 @@ abstract public class AbstractKafkaClientProperties<C extends AbstractKafkaClien
     }
     public String getClusterName() {
         return clusterName;
-    }
-    public String getCaSecretName() {
-        return caSecretName;
-    }
-    public String getKafkaUsername() {
-        return kafkaUsername;
     }
 }

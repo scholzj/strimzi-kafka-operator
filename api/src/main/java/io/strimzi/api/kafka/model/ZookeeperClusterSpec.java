@@ -7,23 +7,18 @@ package io.strimzi.api.kafka.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
-import io.fabric8.kubernetes.api.model.Toleration;
-import io.strimzi.api.annotations.DeprecatedProperty;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.template.ZookeeperClusterTemplate;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.DescriptionFile;
 import io.strimzi.crdgenerator.annotations.KubeLink;
 import io.strimzi.crdgenerator.annotations.Minimum;
-import io.strimzi.crdgenerator.annotations.PresentInVersions;
 import io.sundr.builder.annotations.Buildable;
 import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,11 +31,8 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
-        "replicas", "image", "storage", "config",
-        "affinity", "tolerations",
-        "livenessProbe", "readinessProbe",
-        "jvmOptions", "resources",
-         "metrics", "metricsConfig", "logging", "template"})
+    "replicas", "image", "storage", "config", "livenessProbe", "readinessProbe", "jvmOptions", "jmxOptions", "resources",
+    "metricsConfig", "logging", "template"})
 @EqualsAndHashCode
 public class ZookeeperClusterSpec implements HasConfigurableMetrics, UnknownPropertyPreserving, Serializable {
 
@@ -55,22 +47,16 @@ public class ZookeeperClusterSpec implements HasConfigurableMetrics, UnknownProp
     public static final int DEFAULT_REPLICAS = 3;
 
     protected SingleVolumeStorage storage;
-
     private Map<String, Object> config = new HashMap<>(0);
-
     private Logging logging;
-
-    private TlsSidecar tlsSidecar;
     private int replicas;
     private String image;
     private ResourceRequirements resources;
     private Probe livenessProbe;
     private Probe readinessProbe;
     private JvmOptions jvmOptions;
+    private KafkaJmxOptions jmxOptions;
     private MetricsConfig metricsConfig;
-    private Map<String, Object> metrics;
-    private Affinity affinity;
-    private List<Toleration> tolerations;
     private ZookeeperClusterTemplate template;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
@@ -102,20 +88,6 @@ public class ZookeeperClusterSpec implements HasConfigurableMetrics, UnknownProp
 
     public void setLogging(Logging logging) {
         this.logging = logging;
-    }
-
-    @PresentInVersions("v1alpha1-v1beta1")
-    @DeprecatedProperty(removalVersion = "v1beta2")
-    @Deprecated
-    @Description("TLS sidecar configuration. " +
-            "The TLS sidecar is not used anymore and this option will be ignored.")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public TlsSidecar getTlsSidecar() {
-        return tlsSidecar;
-    }
-
-    public void setTlsSidecar(TlsSidecar tlsSidecar) {
-        this.tlsSidecar = tlsSidecar;
     }
 
     @Description("The number of pods in the cluster.")
@@ -180,20 +152,15 @@ public class ZookeeperClusterSpec implements HasConfigurableMetrics, UnknownProp
         this.jvmOptions = jvmOptions;
     }
 
-    @DeprecatedProperty(movedToPath = "spec.zookeeper.metricsConfig", removalVersion = "v1beta2")
-    @PresentInVersions("v1alpha1-v1beta1")
-    @Deprecated
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    @Description("The Prometheus JMX Exporter configuration. " +
-            "See https://github.com/prometheus/jmx_exporter for details of the structure of this configuration.")
-    @Override
-    public Map<String, Object> getMetrics() {
-        return metrics;
+    @Description("JMX Options for Zookeeper nodes")
+    @JsonProperty("jmxOptions")
+    public KafkaJmxOptions getJmxOptions() {
+        return jmxOptions;
     }
 
-    @Override
-    public void setMetrics(Map<String, Object> metrics) {
-        this.metrics = metrics;
+    public void setJmxOptions(KafkaJmxOptions jmxOptions) {
+        this.jmxOptions = jmxOptions;
     }
 
     @Description("Metrics configuration.")
@@ -206,34 +173,6 @@ public class ZookeeperClusterSpec implements HasConfigurableMetrics, UnknownProp
     @Override
     public void setMetricsConfig(MetricsConfig metricsConfig) {
         this.metricsConfig = metricsConfig;
-    }
-
-    @PresentInVersions("v1alpha1-v1beta1")
-    @Description("The pod's affinity rules.")
-    @KubeLink(group = "core", version = "v1", kind = "affinity")
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @DeprecatedProperty(movedToPath = "spec.zookeeper.template.pod.affinity", removalVersion = "v1beta2")
-    @Deprecated
-    public Affinity getAffinity() {
-        return affinity;
-    }
-
-    public void setAffinity(Affinity affinity) {
-        this.affinity = affinity;
-    }
-
-    @PresentInVersions("v1alpha1-v1beta1")
-    @Description("The pod's tolerations.")
-    @KubeLink(group = "core", version = "v1", kind = "toleration")
-    @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    @DeprecatedProperty(movedToPath = "spec.zookeeper.template.pod.tolerations", removalVersion = "v1beta2")
-    @Deprecated
-    public List<Toleration> getTolerations() {
-        return tolerations;
-    }
-
-    public void setTolerations(List<Toleration> tolerations) {
-        this.tolerations = tolerations;
     }
 
     @Description("Template for ZooKeeper cluster resources. " +

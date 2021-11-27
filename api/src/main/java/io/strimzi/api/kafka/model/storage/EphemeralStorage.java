@@ -30,6 +30,7 @@ public class EphemeralStorage extends SingleVolumeStorage {
     private String sizeLimit;
 
     @Description("Must be `" + TYPE_EPHEMERAL + "`")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @Override
     public String getType() {
         return TYPE_EPHEMERAL;
@@ -48,7 +49,7 @@ public class EphemeralStorage extends SingleVolumeStorage {
         super.setId(id);
     }
 
-    @Pattern("^([0-9.]+)([eEinumkKMGTP]*[-+]?[0-9]*)$")
+    @Pattern(Constants.MEMORY_REGEX)
     @Description("When type=ephemeral, defines the total amount of local storage required for this EmptyDir volume (for example 1Gi).")
     public String getSizeLimit() {
         return sizeLimit;

@@ -32,7 +32,7 @@ import static java.util.Collections.emptyMap;
  */
 @DescriptionFile
 @JsonPropertyOrder({"brokerCertChainAndKey", "ingressClass", "preferredAddressType", "externalTrafficPolicy",
-        "loadBalancerSourceRanges", "bootstrap", "brokers", "ipFamilyPolicy", "ipFamilies"})
+    "loadBalancerSourceRanges", "bootstrap", "brokers", "ipFamilyPolicy", "ipFamilies"})
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @Buildable(
     editableEnabled = false,
@@ -84,7 +84,7 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
 
     @Description("Defines which address type should be used as the node address. " +
             "Available types are: `ExternalDNS`, `ExternalIP`, `InternalDNS`, `InternalIP` and `Hostname`. " +
-            "By default, the addresses will be used in the following order (the first one found will be used):\n" +
+            "By default, the addresses will be used in the following order (the first one found will be used):\n\n" +
             "* `ExternalDNS`\n" +
             "* `ExternalIP`\n" +
             "* `InternalDNS`\n" +
@@ -188,8 +188,7 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
     }
 
     @Description("The maximum connection creation rate we allow in this listener at any time. " +
-            "New connections will be throttled if the limit is reached." +
-            "Supported only on Kafka 2.7.0 and newer.")
+            "New connections will be throttled if the limit is reached.")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public Integer getMaxConnectionCreationRate() {
         return maxConnectionCreationRate;

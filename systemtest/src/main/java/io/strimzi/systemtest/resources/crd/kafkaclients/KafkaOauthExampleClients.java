@@ -4,7 +4,7 @@
  */
 package io.strimzi.systemtest.resources.crd.kafkaclients;
 
-import io.fabric8.kubernetes.api.model.batch.JobBuilder;
+import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.systemtest.keycloak.KeycloakInstance;
 
@@ -109,6 +109,11 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
         @Override
         public Builder withDelayMs(long delayMs) {
             return (Builder) super.withDelayMs(delayMs);
+        }
+
+        @Override
+        public Builder withNamespaceName(String namespaceName) {
+            return (Builder) super.withNamespaceName(namespaceName);
         }
 
         @Override
@@ -222,13 +227,17 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
                                 .withValue(oauthTokenEndpointUri)
                             .endEnv()
                             .addNewEnv()
-                                .withName("OAUTH_CRT")
+                                .withName("OAUTH_SSL_TRUSTSTORE_CERTIFICATES")
                                 .editOrNewValueFrom()
                                     .withNewSecretKeyRef()
                                         .withName(KeycloakInstance.KEYCLOAK_SECRET_NAME)
                                         .withKey(KeycloakInstance.KEYCLOAK_SECRET_CERT)
                                     .endSecretKeyRef()
                                 .endValueFrom()
+                            .endEnv()
+                            .addNewEnv()
+                                .withName("OAUTH_SSL_TRUSTSTORE_TYPE")
+                                .withValue("PEM")
                             .endEnv()
                         .endContainer()
                     .endSpec()
@@ -310,13 +319,17 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
                                 .withValue(oauthTokenEndpointUri)
                             .endEnv()
                             .addNewEnv()
-                                .withName("OAUTH_CRT")
+                                .withName("OAUTH_SSL_TRUSTSTORE_CERTIFICATES")
                                 .editOrNewValueFrom()
                                     .withNewSecretKeyRef()
                                         .withName(KeycloakInstance.KEYCLOAK_SECRET_NAME)
                                         .withKey(KeycloakInstance.KEYCLOAK_SECRET_CERT)
                                     .endSecretKeyRef()
                                 .endValueFrom()
+                            .endEnv()
+                            .addNewEnv()
+                                .withName("OAUTH_SSL_TRUSTSTORE_TYPE")
+                                .withValue("PEM")
                             .endEnv()
                             .addNewEnv()
                                 .withName("LOG_LEVEL")

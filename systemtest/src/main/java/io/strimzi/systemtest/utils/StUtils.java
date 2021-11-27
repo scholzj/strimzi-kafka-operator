@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import com.jayway.jsonpath.JsonPath;
 import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.ContainerEnvVarBuilder;
 import io.strimzi.systemtest.Constants;
@@ -28,14 +30,18 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.function.BiFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static io.strimzi.systemtest.Constants.ISOLATED_SUITE;
 import static io.strimzi.systemtest.Constants.PARALLEL_NAMESPACE;
+import static io.strimzi.systemtest.Constants.PARALLEL_SUITE;
 import static io.strimzi.systemtest.resources.ResourceManager.cmdKubeClient;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 
@@ -52,6 +58,12 @@ public class StUtils {
 
     private static final Pattern BETWEEN_JSON_OBJECTS_PATTERN = Pattern.compile("}[\\n\\r]+\\{");
     private static final Pattern ALL_BEFORE_JSON_PATTERN = Pattern.compile("(.*\\s)}, \\{", Pattern.DOTALL);
+    private static final BiFunction<String, ExtensionContext, Boolean> CONTAINS_ANNOTATION =
+        (annotationName, extensionContext) -> Arrays.stream(extensionContext.getElement().get().getAnnotations()).filter(
+            annotation -> annotation.annotationType().getName()
+                .toLowerCase(Locale.ENGLISH)
+                // more than one because in some cases the TestSuite can inherit the annotation
+                .contains(annotationName)).count() >= 1;
 
     private StUtils() { }
 
@@ -127,7 +139,7 @@ public class StUtils {
 
     public static String checkEnvVarInPod(String namespaceName, String podName, String envVarName) {
         return kubeClient(namespaceName).getPod(podName).getSpec().getContainers().get(0).getEnv()
-                .stream().filter(envVar -> envVar.getName().equals(envVarName)).findFirst().get().getValue();
+                .stream().filter(envVar -> envVar.getName().equals(envVarName)).findFirst().orElseThrow().getValue();
     }
 
     public static String checkEnvVarInPod(String podName, String envVarName) {
@@ -275,10 +287,6 @@ public class StUtils {
         });
     }
 
-    public static void checkLogForJSONFormat(Map<String, String> pods, String containerName) {
-        checkLogForJSONFormat(kubeClient().getNamespace(), pods, containerName);
-    }
-
     /**
      * Method for check if test is allowed on current Kubernetes version
      * @param maxKubernetesVersion kubernetes version which test needs
@@ -289,17 +297,6 @@ public class StUtils {
             return true;
         }
         return Double.parseDouble(kubeClient().clusterKubernetesVersion()) < Double.parseDouble(maxKubernetesVersion);
-    }
-
-    /**
-     * Method which returns log from last {@code timeSince}
-     * @param podName name of pod to take a log from
-     * @param containerName name of container
-     * @param timeSince time from which the log should be taken - 3s, 5m, 2h -- back
-     * @return log from the pod
-     */
-    public static String getLogFromPodByTime(String podName, String containerName, String timeSince) {
-        return getLogFromPodByTime(kubeClient().getNamespace(), podName, containerName, timeSince);
     }
 
     /**
@@ -315,13 +312,28 @@ public class StUtils {
     }
 
     /**
+     * Dynamic waiting for specific string inside pod's log. In case pod's log doesn't contains {@code exceptedString}
+     * it will caused WaitException.
+     * @param namespaceName name of the Namespace where the logs are checked
+     * @param podName name of the Pod
+     * @param containerName name of container
+     * @param timeSince time from which the log should be taken - 3s, 5m, 2h -- back
+     * @param exceptedString log message to be checked
+     */
+    public static void waitUntilLogFromPodContainsString(String namespaceName, String podName, String containerName, String timeSince, String exceptedString) {
+        TestUtils.waitFor("log from pod contains excepted string:" + exceptedString, Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
+            () -> getLogFromPodByTime(namespaceName, podName, containerName, timeSince).contains(exceptedString));
+    }
+
+    /**
      * Change Deployment configuration before applying it. We set different namespace, log level and image pull policy.
      * It's mostly used for use cases where we use direct kubectl command instead of fabric8 calls to api.
      * @param deploymentFile loaded Strimzi deployment file
      * @param namespace namespace where Strimzi should be installed
+     * @param strimziFeatureGatesValue feature gates value
      * @return deployment file content as String
      */
-    public static String changeDeploymentNamespace(File deploymentFile, String namespace) {
+    public static String changeDeploymentConfiguration(File deploymentFile, String namespace, final String strimziFeatureGatesValue) {
         YAMLMapper mapper = new YAMLMapper();
         try {
             JsonNode node = mapper.readTree(deploymentFile);
@@ -343,15 +355,18 @@ public class StUtils {
             ObjectNode imagePulPolicyEnvVar = objectMapper.createObjectNode();
             imagePulPolicyEnvVar.put("name", "STRIMZI_IMAGE_PULL_POLICY");
             imagePulPolicyEnvVar.put("value", Environment.COMPONENTS_IMAGE_PULL_POLICY);
+
+            if (!strimziFeatureGatesValue.isEmpty()) {
+                ObjectNode strimziFeatureGates =  new ObjectMapper().createObjectNode();
+                strimziFeatureGates.put("name", "STRIMZI_FEATURE_GATES");
+                strimziFeatureGates.put("value", strimziFeatureGatesValue);
+                ((ArrayNode) containerNode.get("env")).add(strimziFeatureGates);
+            }
             ((ArrayNode) containerNode.get("env")).add(imagePulPolicyEnvVar);
             return mapper.writeValueAsString(node);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    public static String getLineFromPod(String podName, String filePath, String grepString) {
-        return getLineFromPodContainer(kubeClient().getNamespace(), podName, null, filePath, grepString);
     }
 
     public static String getLineFromPodContainer(String namespaceName, String podName, String containerName, String filePath, String grepString) {
@@ -368,9 +383,55 @@ public class StUtils {
      * @return true if test case contains annotation ParallelNamespaceTest, otherwise false
      */
     public static boolean isParallelNamespaceTest(ExtensionContext extensionContext) {
-        return Arrays.stream(extensionContext.getElement().get().getAnnotations()).filter(
-            annotation -> annotation.annotationType().getName()
-                .toLowerCase(Locale.ENGLISH)
-                .contains(PARALLEL_NAMESPACE)).count() == 1;
+        return CONTAINS_ANNOTATION.apply(PARALLEL_NAMESPACE, extensionContext);
+    }
+
+    /**
+     * Checking if test case contains annotation ParallelSuite
+     * @param extensionContext context of the test case
+     * @return true if test case contains annotation ParallelSuite, otherwise false
+     */
+    public static boolean isParallelSuite(ExtensionContext extensionContext) {
+        return CONTAINS_ANNOTATION.apply(PARALLEL_SUITE, extensionContext);
+    }
+
+    /**
+     * Checking if test case contains annotation IsolatedSuite
+     * @param extensionContext context of the test case
+     * @return true if test case contains annotation IsolatedSuite, otherwise false
+     */
+    public static boolean isIsolatedSuite(ExtensionContext extensionContext) {
+        return CONTAINS_ANNOTATION.apply(ISOLATED_SUITE, extensionContext);
+    }
+
+    /**
+     * Retrieve namespace based on the cluster configuration
+     * @param namespace suite namespace
+     * @param extensionContext test context for get the parallel namespace
+     * @return single or parallel namespace based on cluster configuration
+     */
+    public static String getNamespaceBasedOnRbac(String namespace, ExtensionContext extensionContext) {
+        return Environment.isNamespaceRbacScope() ? namespace : extensionContext.getStore(ExtensionContext.Namespace.GLOBAL).get(Constants.NAMESPACE_KEY).toString();
+    }
+
+    /**
+     * Copies the image pull secret from the default namespace to the specified target namespace.
+     * @param namespace the target namespace
+     */
+    public static void copyImagePullSecret(String namespace) {
+        LOGGER.info("Checking if secret {} is in the default namespace", Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET);
+        if (kubeClient("default").getSecret(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET) == null) {
+            throw new RuntimeException(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET + " is not in the default namespace!");
+        }
+        Secret pullSecret = kubeClient("default").getSecret(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET);
+        kubeClient(namespace).createSecret(new SecretBuilder()
+                .withApiVersion("v1")
+                .withKind("Secret")
+                .withNewMetadata()
+                    .withName(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET)
+                .endMetadata()
+                .withType("kubernetes.io/dockerconfigjson")
+                .withData(Collections.singletonMap(".dockerconfigjson", pullSecret.getData().get(".dockerconfigjson")))
+                .build());
     }
 }

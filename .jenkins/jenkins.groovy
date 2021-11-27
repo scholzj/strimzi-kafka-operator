@@ -33,10 +33,12 @@ def buildStrimziImages() {
     """)
 }
 
-def runSystemTests(String workspace, String testCases, String testProfile, String excludeGroups, String testsInParallel) {
+def runSystemTests(String workspace, String testCases, String testProfile, String testGroups, String excludeGroups, String testsInParallel) {
+    def groupsTag = testGroups.isEmpty() ? "" : "-Dgroups=${testGroups} "
     withMaven(mavenOpts: '-Djansi.force=true') {
-        sh(script: "mvn -f ${workspace}/systemtest/pom.xml -P all verify " +
-            "-Dgroups=${testProfile} " +
+        sh(script: "mvn -f ${workspace}/systemtest/pom.xml verify " +
+            "-P${testProfile} " +
+            "${groupsTag}" +
             "-DexcludedGroups=${excludeGroups} " +
             "-Dit.test=${testCases} " +
             "-Djava.net.preferIPv4Stack=true " +
@@ -81,6 +83,12 @@ def postGithubPrComment(def file) {
         def output=readFile("out.log").trim()
         def output_err=readFile("out.err").trim()
         echo "curl output=$output output_err=$output_err"
+    }
+}
+
+def buildKafkaConfigModels() {
+    dir("${workspace}/config-model-generator") {
+        sh(script: "./build-config-models.sh build -Dstyle.color=always")
     }
 }
 

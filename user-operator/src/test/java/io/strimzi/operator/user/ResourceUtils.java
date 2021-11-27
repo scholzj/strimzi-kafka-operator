@@ -23,9 +23,11 @@ import io.strimzi.operator.user.model.acl.SimpleAclRule;
 
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class ResourceUtils {
     public static final Map LABELS = Collections.singletonMap("foo", "bar");
@@ -34,6 +36,32 @@ public class ResourceUtils {
     public static final String CA_CERT_NAME = NAME + "-cert";
     public static final String CA_KEY_NAME = NAME + "-key";
     public static final String PASSWORD = "my-password";
+
+    public static UserOperatorConfig createUserOperatorConfig(Map<String, String> labels, boolean aclsAdminApiSupported, String scramShaPassworldLength) {
+        Map<String, String> envVars = new HashMap<>(4);
+        envVars.put(UserOperatorConfig.STRIMZI_NAMESPACE, NAMESPACE);
+        envVars.put(UserOperatorConfig.STRIMZI_LABELS, labels.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining(",")));
+        envVars.put(UserOperatorConfig.STRIMZI_CA_CERT_SECRET_NAME, CA_CERT_NAME);
+        envVars.put(UserOperatorConfig.STRIMZI_CA_KEY_SECRET_NAME, CA_KEY_NAME);
+        envVars.put(UserOperatorConfig.STRIMZI_ACLS_ADMIN_API_SUPPORTED, Boolean.toString(aclsAdminApiSupported));
+        if (!scramShaPassworldLength.equals("12")) {
+            envVars.put(UserOperatorConfig.STRIMZI_SCRAM_SHA_PASSWORD_LENGTH, scramShaPassworldLength);
+        }
+
+        return UserOperatorConfig.fromMap(envVars);
+    }
+
+    public static UserOperatorConfig createUserOperatorConfig(Map<String, String> labels) {
+        return createUserOperatorConfig(labels, true, "12");
+    }
+
+    public static UserOperatorConfig createUserOperatorConfig() {
+        return createUserOperatorConfig(Map.of(), true, "12");
+    }
+
+    public static UserOperatorConfig createUserOperatorConfig(String scramShaPasswordLength) {
+        return createUserOperatorConfig(Map.of(), true, scramShaPasswordLength);
+    }
 
     public static KafkaUser createKafkaUser(KafkaUserAuthentication authentication) {
         return new KafkaUserBuilder()
@@ -45,27 +73,27 @@ public class ResourceUtils {
                                 .build()
                 )
                 .withNewSpec()
-                .withAuthentication(authentication)
-                .withNewKafkaUserAuthorizationSimple()
-                    .addNewAcl()
-                        .withNewAclRuleTopicResource()
-                            .withName("my-topic")
-                        .endAclRuleTopicResource()
-                        .withOperation(AclOperation.READ)
-                    .endAcl()
-                    .addNewAcl()
-                        .withNewAclRuleTopicResource()
-                            .withName("my-topic")
-                        .endAclRuleTopicResource()
-                        .withOperation(AclOperation.DESCRIBE)
-                    .endAcl()
-                    .addNewAcl()
-                        .withNewAclRuleGroupResource()
-                            .withName("my-group")
-                        .endAclRuleGroupResource()
-                        .withOperation(AclOperation.READ)
-                    .endAcl()
-                .endKafkaUserAuthorizationSimple()
+                    .withAuthentication(authentication)
+                    .withNewKafkaUserAuthorizationSimple()
+                        .addNewAcl()
+                            .withNewAclRuleTopicResource()
+                                .withName("my-topic")
+                            .endAclRuleTopicResource()
+                            .withOperation(AclOperation.READ)
+                        .endAcl()
+                        .addNewAcl()
+                            .withNewAclRuleTopicResource()
+                                .withName("my-topic")
+                            .endAclRuleTopicResource()
+                            .withOperation(AclOperation.DESCRIBE)
+                        .endAcl()
+                        .addNewAcl()
+                            .withNewAclRuleGroupResource()
+                                .withName("my-group")
+                            .endAclRuleGroupResource()
+                            .withOperation(AclOperation.READ)
+                        .endAcl()
+                    .endKafkaUserAuthorizationSimple()
                 .endSpec()
                 .build();
     }
@@ -80,27 +108,27 @@ public class ResourceUtils {
                                 .build()
                 )
                 .withNewSpec()
-                .withQuotas(quotas)
-                .withNewKafkaUserAuthorizationSimple()
-                    .addNewAcl()
-                        .withNewAclRuleTopicResource()
-                            .withName("my-topic")
-                        .endAclRuleTopicResource()
-                    .withOperation(AclOperation.READ)
-                    .endAcl()
-                    .addNewAcl()
-                        .withNewAclRuleTopicResource()
-                            .withName("my-topic")
-                        .endAclRuleTopicResource()
-                        .withOperation(AclOperation.DESCRIBE)
-                    .endAcl()
-                    .addNewAcl()
-                        .withNewAclRuleGroupResource()
-                            .withName("my-group")
-                        .endAclRuleGroupResource()
+                    .withQuotas(quotas)
+                    .withNewKafkaUserAuthorizationSimple()
+                        .addNewAcl()
+                            .withNewAclRuleTopicResource()
+                                .withName("my-topic")
+                            .endAclRuleTopicResource()
                         .withOperation(AclOperation.READ)
-                    .endAcl()
-                .endKafkaUserAuthorizationSimple()
+                        .endAcl()
+                        .addNewAcl()
+                            .withNewAclRuleTopicResource()
+                                .withName("my-topic")
+                            .endAclRuleTopicResource()
+                            .withOperation(AclOperation.DESCRIBE)
+                        .endAcl()
+                        .addNewAcl()
+                            .withNewAclRuleGroupResource()
+                                .withName("my-group")
+                            .endAclRuleGroupResource()
+                            .withOperation(AclOperation.READ)
+                        .endAcl()
+                    .endKafkaUserAuthorizationSimple()
                 .endSpec()
                 .build();
     }
@@ -113,11 +141,12 @@ public class ResourceUtils {
         return createKafkaUser(new KafkaUserScramSha512ClientAuthentication());
     }
 
-    public static KafkaUser createKafkaUserQuotas(Integer consumerByteRate, Integer producerByteRate, Integer requestPercentage) {
+    public static KafkaUser createKafkaUserQuotas(Integer consumerByteRate, Integer producerByteRate, Integer requestPercentage, Double controllerMutationRate) {
         KafkaUserQuotas kuq = new KafkaUserQuotasBuilder()
                 .withConsumerByteRate(consumerByteRate)
                 .withProducerByteRate(producerByteRate)
                 .withRequestPercentage(requestPercentage)
+                .withControllerMutationRate(controllerMutationRate)
                 .build();
 
         return createKafkaUser(kuq);

@@ -12,6 +12,7 @@ import io.fabric8.kubernetes.api.model.storage.StorageClass;
 import io.fabric8.kubernetes.api.model.storage.StorageClassBuilder;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.certs.CertManager;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
@@ -27,11 +28,11 @@ import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.PvcOperator;
 import io.strimzi.operator.common.operator.resource.StorageClassOperator;
-import io.strimzi.test.annotations.ParallelTest;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 
@@ -40,6 +41,7 @@ import java.util.List;
 import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -73,20 +75,18 @@ public class VolumeResizingTest {
                 .withNewSpec()
                     .withNewKafka()
                         .withReplicas(3)
-                        .withNewListeners()
-                            .addNewGenericKafkaListener()
-                                .withName("plain")
-                                .withPort(9092)
-                                .withType(KafkaListenerType.INTERNAL)
-                                .withTls(false)
-                            .endGenericKafkaListener()
-                            .addNewGenericKafkaListener()
-                                .withName("tls")
-                                .withPort(9093)
-                                .withType(KafkaListenerType.INTERNAL)
-                                .withTls(true)
-                            .endGenericKafkaListener()
-                        .endListeners()
+                        .withListeners(new GenericKafkaListenerBuilder()
+                                    .withName("plain")
+                                    .withPort(9092)
+                                    .withType(KafkaListenerType.INTERNAL)
+                                    .withTls(false)
+                                    .build(),
+                                new GenericKafkaListenerBuilder()
+                                    .withName("tls")
+                                    .withPort(9093)
+                                    .withType(KafkaListenerType.INTERNAL)
+                                    .withTls(true)
+                                    .build())
                         .withNewPersistentClaimStorage()
                             .withStorageClass("mysc")
                             .withSize("20Gi")
@@ -103,23 +103,19 @@ public class VolumeResizingTest {
                 .build();
     }
 
-    @ParallelTest
+    @Test
     public void testNoExistingVolumes()  {
         Kafka kafka = getKafkaCrd();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, VERSIONS);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, VERSIONS);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         // Mock the PVC Operator
         PvcOperator mockPvcOps = supplier.pvcOperations;
 
-        when(mockPvcOps.getAsync(eq(namespace), ArgumentMatchers.startsWith("data-")))
-                .thenAnswer(invocation -> {
-                    String pvcName = invocation.getArgument(1);
-                    return Future.succeededFuture();
-                });
+        when(mockPvcOps.getAsync(eq(namespace), ArgumentMatchers.startsWith("data-"))).thenReturn(Future.succeededFuture());
 
         ArgumentCaptor<PersistentVolumeClaim> pvcCaptor = ArgumentCaptor.forClass(PersistentVolumeClaim.class);
-        when(mockPvcOps.reconcile(anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockPvcOps.reconcile(any(), anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
 
         // Mock the StorageClass Operator
         StorageClassOperator mockSco = supplier.storageClassOperations;
@@ -150,10 +146,10 @@ public class VolumeResizingTest {
                 });
     }
 
-    @ParallelTest
+    @Test
     public void testNotBoundVolumes()  {
         Kafka kafka = getKafkaCrd();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, VERSIONS);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, VERSIONS);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         // Mock the PVC Operator
@@ -167,7 +163,7 @@ public class VolumeResizingTest {
                 });
 
         ArgumentCaptor<PersistentVolumeClaim> pvcCaptor = ArgumentCaptor.forClass(PersistentVolumeClaim.class);
-        when(mockPvcOps.reconcile(anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockPvcOps.reconcile(any(), anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
 
         // Mock the StorageClass Operator
         StorageClassOperator mockSco = supplier.storageClassOperations;
@@ -198,10 +194,10 @@ public class VolumeResizingTest {
                 });
     }
 
-    @ParallelTest
+    @Test
     public void testVolumesBoundExpandableStorageClass()  {
         Kafka kafka = getKafkaCrd();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, VERSIONS);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, VERSIONS);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         // Mock the PVC Operator
@@ -224,7 +220,7 @@ public class VolumeResizingTest {
                 });
 
         ArgumentCaptor<PersistentVolumeClaim> pvcCaptor = ArgumentCaptor.forClass(PersistentVolumeClaim.class);
-        when(mockPvcOps.reconcile(anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockPvcOps.reconcile(any(), anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
 
         // Mock the StorageClass Operator
         StorageClassOperator mockSco = supplier.storageClassOperations;
@@ -255,10 +251,10 @@ public class VolumeResizingTest {
                 });
     }
 
-    @ParallelTest
+    @Test
     public void testVolumesBoundNonExpandableStorageClass()  {
         Kafka kafka = getKafkaCrd();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, VERSIONS);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, VERSIONS);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         // Mock the PVC Operator
@@ -281,7 +277,7 @@ public class VolumeResizingTest {
                 });
 
         ArgumentCaptor<PersistentVolumeClaim> pvcCaptor = ArgumentCaptor.forClass(PersistentVolumeClaim.class);
-        when(mockPvcOps.reconcile(anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockPvcOps.reconcile(any(), anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
 
         // Mock the StorageClass Operator
         StorageClassOperator mockSco = supplier.storageClassOperations;
@@ -312,10 +308,10 @@ public class VolumeResizingTest {
                 });
     }
 
-    @ParallelTest
+    @Test
     public void testVolumesResizing()  {
         Kafka kafka = getKafkaCrd();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, VERSIONS);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, VERSIONS);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         // Mock the PVC Operator
@@ -341,7 +337,7 @@ public class VolumeResizingTest {
                 });
 
         ArgumentCaptor<PersistentVolumeClaim> pvcCaptor = ArgumentCaptor.forClass(PersistentVolumeClaim.class);
-        when(mockPvcOps.reconcile(anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockPvcOps.reconcile(any(), anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
 
         // Mock the StorageClass Operator
         StorageClassOperator mockSco = supplier.storageClassOperations;
@@ -372,10 +368,10 @@ public class VolumeResizingTest {
                 });
     }
 
-    @ParallelTest
+    @Test
     public void testVolumesWaitingForRestart()  {
         Kafka kafka = getKafkaCrd();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, VERSIONS);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, VERSIONS);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         // Mock the PVC Operator
@@ -401,7 +397,7 @@ public class VolumeResizingTest {
                 });
 
         ArgumentCaptor<PersistentVolumeClaim> pvcCaptor = ArgumentCaptor.forClass(PersistentVolumeClaim.class);
-        when(mockPvcOps.reconcile(anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockPvcOps.reconcile(any(), anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
 
         // Mock the StorageClass Operator
         StorageClassOperator mockSco = supplier.storageClassOperations;
@@ -438,10 +434,10 @@ public class VolumeResizingTest {
                 });
     }
 
-    @ParallelTest
+    @Test
     public void testVolumesResized()  {
         Kafka kafka = getKafkaCrd();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, VERSIONS);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, VERSIONS);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
 
         // Mock the PVC Operator
@@ -463,7 +459,7 @@ public class VolumeResizingTest {
                 });
 
         ArgumentCaptor<PersistentVolumeClaim> pvcCaptor = ArgumentCaptor.forClass(PersistentVolumeClaim.class);
-        when(mockPvcOps.reconcile(anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
+        when(mockPvcOps.reconcile(any(), anyString(), anyString(), pvcCaptor.capture())).thenReturn(Future.succeededFuture());
 
         // Mock the StorageClass Operator
         StorageClassOperator mockSco = supplier.storageClassOperations;

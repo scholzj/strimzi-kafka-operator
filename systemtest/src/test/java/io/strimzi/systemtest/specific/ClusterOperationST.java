@@ -13,10 +13,11 @@ import io.strimzi.systemtest.resources.crd.kafkaclients.KafkaBasicExampleClients
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
 import io.strimzi.systemtest.utils.ClientUtils;
+import io.strimzi.systemtest.utils.kubeUtils.objects.NodeUtils;
+import io.strimzi.test.annotations.IsolatedSuite;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
@@ -25,10 +26,10 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static io.strimzi.systemtest.Constants.SPECIFIC;
-import static io.strimzi.test.k8s.KubeClusterResource.cmdKubeClient;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 
 @Tag(SPECIFIC)
+@IsolatedSuite
 public class ClusterOperationST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(ClusterOperationST.class);
@@ -83,8 +84,8 @@ public class ClusterOperationST extends AbstractST {
         // Nodes draining
         // ##############################
         kubeClient().getClusterWorkers().forEach(node -> {
-            drainNode(node.getMetadata().getName());
-            setNodeSchedule(node.getMetadata().getName(), true);
+            NodeUtils.drainNode(node.getMetadata().getName());
+            NodeUtils.cordonNode(node.getMetadata().getName(), true);
         });
 
         producerNames.forEach(producerName -> ClientUtils.waitTillContinuousClientsFinish(producerName, consumerNames.get(producerName.indexOf(producerName)), NAMESPACE, continuousClientsMessageCount));
@@ -92,24 +93,8 @@ public class ClusterOperationST extends AbstractST {
         consumerNames.forEach(consumerName -> kubeClient().deleteJob(consumerName));
     }
 
-    @BeforeAll
-    void setup(ExtensionContext extensionContext) {
-        installClusterOperator(extensionContext, NAMESPACE);
-    }
-
     @AfterEach
     void restore() {
-        kubeClient().getClusterNodes().forEach(node -> setNodeSchedule(node.getMetadata().getName(), true));
-    }
-
-    private void drainNode(String nodeName) {
-        LOGGER.info("Cluster node {} is going to drain", nodeName);
-        setNodeSchedule(nodeName, false);
-        cmdKubeClient().exec("adm", "drain", nodeName, "--delete-local-data", "--force", "--ignore-daemonsets");
-    }
-
-    private void setNodeSchedule(String node, boolean schedule) {
-        LOGGER.info("Set {} schedule {}", node, schedule);
-        cmdKubeClient().exec("adm", schedule ? "uncordon" : "cordon", node);
+        kubeClient().getClusterNodes().forEach(node -> NodeUtils.cordonNode(node.getMetadata().getName(), true));
     }
 }

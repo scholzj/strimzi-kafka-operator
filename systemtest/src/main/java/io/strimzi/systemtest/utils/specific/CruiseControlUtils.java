@@ -46,21 +46,32 @@ public class CruiseControlUtils {
         POST
     }
 
-    @SuppressWarnings("Regexp")
-    @SuppressFBWarnings("DM_CONVERT_CASE")
-    public static String callApi(SupportedHttpMethods method, CruiseControlEndpoints endpoint) {
-        String ccPodName = PodUtils.getFirstPodNameContaining(CONTAINER_NAME);
-
-        return cmdKubeClient().execInPodContainer(false, ccPodName, CONTAINER_NAME, "/bin/bash", "-c",
-            "curl -X" + method.name() + " localhost:" + CRUISE_CONTROL_DEFAULT_PORT + endpoint.toString()).out();
+    public enum SupportedSchemes {
+        HTTP,
+        HTTPS
     }
 
     @SuppressWarnings("Regexp")
     @SuppressFBWarnings("DM_CONVERT_CASE")
-    public static String callApi(SupportedHttpMethods method, String endpoint) {
-        String ccPodName = PodUtils.getFirstPodNameContaining(CONTAINER_NAME);
+    public static String callApi(String namespaceName, SupportedHttpMethods method, CruiseControlEndpoints endpoint, SupportedSchemes scheme, Boolean withCredentials) {
+        String ccPodName = PodUtils.getFirstPodNameContaining(namespaceName, CONTAINER_NAME);
+        String args = " -k ";
 
-        return cmdKubeClient().execInPodContainer(false, ccPodName, CONTAINER_NAME, "/bin/bash", "-c",
+        if (withCredentials) {
+            args = " --cacert /etc/tls-sidecar/cc-certs/cruise-control.crt"
+                + " --user admin:$(cat /opt/cruise-control/api-auth-config/cruise-control.apiAdminPassword) ";
+        }
+
+        return cmdKubeClient(namespaceName).execInPodContainer(false, ccPodName, CONTAINER_NAME, "/bin/bash", "-c",
+            "curl -X" + method.name() + args + " " + scheme + "://localhost:" + CRUISE_CONTROL_DEFAULT_PORT + endpoint.toString()).out();
+    }
+
+    @SuppressWarnings("Regexp")
+    @SuppressFBWarnings("DM_CONVERT_CASE")
+    public static String callApi(String namespaceName, SupportedHttpMethods method, String endpoint) {
+        String ccPodName = PodUtils.getFirstPodNameContaining(namespaceName, CONTAINER_NAME);
+
+        return cmdKubeClient(namespaceName).execInPodContainer(false, ccPodName, CONTAINER_NAME, "/bin/bash", "-c",
             "curl -X" + method.name() + " localhost:" + CRUISE_CONTROL_METRICS_PORT + endpoint).out();
     }
 
@@ -108,7 +119,7 @@ public class CruiseControlUtils {
 
     public static void verifyThatKafkaCruiseControlMetricReporterTopicIsPresent(String namespaceName, long timeout) {
         final int numberOfPartitionsMetricTopic = 1;
-        final int numberOfReplicasMetricTopic = 1;
+        final int numberOfReplicasMetricTopic = 3;
 
         TestUtils.waitFor("Verify that kafka contains cruise control topics with related configuration.",
             Constants.GLOBAL_POLL_INTERVAL, timeout, () -> {
@@ -149,10 +160,10 @@ public class CruiseControlUtils {
         return cruiseControlProperties;
     }
 
-    public static void waitForRebalanceEndpointIsReady() {
+    public static void waitForRebalanceEndpointIsReady(String namespaceName) {
         TestUtils.waitFor("Wait for rebalance endpoint is ready",
             Constants.API_CRUISE_CONTROL_POLL, Constants.API_CRUISE_CONTROL_TIMEOUT, () -> {
-                String response = callApi(SupportedHttpMethods.POST, CruiseControlEndpoints.REBALANCE);
+                String response = callApi(namespaceName, SupportedHttpMethods.POST, CruiseControlEndpoints.REBALANCE, SupportedSchemes.HTTPS, true);
                 LOGGER.debug("API response {}", response);
                 return !response.contains("Error processing POST request '/rebalance' due to: " +
                     "'com.linkedin.kafka.cruisecontrol.exception.KafkaCruiseControlException: " +

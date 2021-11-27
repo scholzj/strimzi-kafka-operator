@@ -8,14 +8,23 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.Secret;
+import io.strimzi.api.kafka.model.CertSecretSource;
 import io.strimzi.api.kafka.model.ExternalLogging;
+import io.strimzi.api.kafka.model.GenericSecretSource;
 import io.strimzi.api.kafka.model.JmxPrometheusExporterMetrics;
 import io.strimzi.api.kafka.model.Logging;
 import io.strimzi.api.kafka.model.MetricsConfig;
+import io.strimzi.api.kafka.model.authentication.KafkaClientAuthentication;
+import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationOAuth;
+import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationPlain;
+import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationScramSha512;
+import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationTls;
+import io.strimzi.certs.CertAndKey;
 import io.strimzi.operator.cluster.model.InvalidResourceException;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.OrderedProperties;
 import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
+import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.TimeoutException;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
@@ -24,8 +33,6 @@ import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.config.ConfigResource;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -34,6 +41,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.MessageDigest;
@@ -47,6 +56,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
 import java.util.function.BooleanSupplier;
@@ -54,8 +64,9 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+@SuppressWarnings({"checkstyle:ClassFanOutComplexity"})
 public class Util {
-    private static final Logger LOGGER = LogManager.getLogger(Util.class);
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(Util.class);
 
     public static <T> Future<T> async(Vertx vertx, Supplier<T> supplier) {
         Promise<T> result = Promise.promise();
@@ -74,6 +85,7 @@ public class Util {
     /**
      * Invoke the given {@code completed} supplier on a pooled thread approximately every {@code pollIntervalMs}
      * milliseconds until it returns true or {@code timeoutMs} milliseconds have elapsed.
+     * @param reconciliation The reconciliation
      * @param vertx The vertx instance.
      * @param logContext A string used for context in logging.
      * @param logState The state we are waiting for use in log messages
@@ -82,13 +94,14 @@ public class Util {
      * @param completed Determines when the wait is complete by returning true.
      * @return A future that completes when the given {@code completed} indicates readiness.
      */
-    public static Future<Void> waitFor(Vertx vertx, String logContext, String logState, long pollIntervalMs, long timeoutMs, BooleanSupplier completed) {
-        return waitFor(vertx, logContext, logState, pollIntervalMs, timeoutMs, completed, error -> false);
+    public static Future<Void> waitFor(Reconciliation reconciliation, Vertx vertx, String logContext, String logState, long pollIntervalMs, long timeoutMs, BooleanSupplier completed) {
+        return waitFor(reconciliation, vertx, logContext, logState, pollIntervalMs, timeoutMs, completed, error -> false);
     }
 
     /**
      * Invoke the given {@code completed} supplier on a pooled thread approximately every {@code pollIntervalMs}
      * milliseconds until it returns true or {@code timeoutMs} milliseconds have elapsed.
+     * @param reconciliation The reconciliation
      * @param vertx The vertx instance.
      * @param logContext A string used for context in logging.
      * @param logState The state we are waiting for use in log messages
@@ -99,10 +112,10 @@ public class Util {
      *                    should result in the immediate completion of the returned Future.
      * @return A future that completes when the given {@code completed} indicates readiness.
      */
-    public static Future<Void> waitFor(Vertx vertx, String logContext, String logState, long pollIntervalMs, long timeoutMs, BooleanSupplier completed,
+    public static Future<Void> waitFor(Reconciliation reconciliation, Vertx vertx, String logContext, String logState, long pollIntervalMs, long timeoutMs, BooleanSupplier completed,
                                        Predicate<Throwable> failOnError) {
         Promise<Void> promise = Promise.promise();
-        LOGGER.debug("Waiting for {} to get {}", logContext, logState);
+        LOGGER.debugCr(reconciliation, "Waiting for {} to get {}", logContext, logState);
         long deadline = System.currentTimeMillis() + timeoutMs;
         Handler<Long> handler = new Handler<Long>() {
             @Override
@@ -113,18 +126,18 @@ public class Util {
                             if (completed.getAsBoolean())   {
                                 future.complete();
                             } else {
-                                LOGGER.trace("{} is not {}", logContext, logState);
+                                LOGGER.traceCr(reconciliation, "{} is not {}", logContext, logState);
                                 future.fail("Not " + logState + " yet");
                             }
                         } catch (Throwable e) {
-                            LOGGER.warn("Caught exception while waiting for {} to get {}", logContext, logState, e);
+                            LOGGER.warnCr(reconciliation, "Caught exception while waiting for {} to get {}", logContext, logState, e);
                             future.fail(e);
                         }
                     },
                     true,
                     res -> {
                         if (res.succeeded()) {
-                            LOGGER.debug("{} is {}", logContext, logState);
+                            LOGGER.debugCr(reconciliation, "{} is {}", logContext, logState);
                             promise.complete();
                         } else {
                             if (failOnError.test(res.cause())) {
@@ -133,7 +146,7 @@ public class Util {
                                 long timeLeft = deadline - System.currentTimeMillis();
                                 if (timeLeft <= 0) {
                                     String exceptionMessage = String.format("Exceeded timeout of %dms while waiting for %s to be %s", timeoutMs, logContext, logState);
-                                    LOGGER.error(exceptionMessage);
+                                    LOGGER.errorCr(reconciliation, exceptionMessage);
                                     promise.fail(new TimeoutException(exceptionMessage));
                                 } else {
                                     // Schedule ourselves to run again
@@ -214,7 +227,7 @@ public class Util {
             return f;
         } catch (IOException e) {
             if (f != null && !f.delete()) {
-                LOGGER.warn("Failed to delete temporary file in exception handler");
+                LOGGER.warnOp("Failed to delete temporary file in exception handler");
             }
             throw new RuntimeException(e);
         }
@@ -224,7 +237,7 @@ public class Util {
      * Decode binary item from Kubernetes Secret from base64 into byte array
      *
      * @param secret    Kubernetes Secret
-     * @param key       Key which should be retrived and decoded
+     * @param key       Key which should be retrieved and decoded
      * @return          Decoded bytes
      */
     public static byte[] decodeFromSecret(Secret secret, String key) {
@@ -237,16 +250,22 @@ public class Util {
      *
      * @param prefix Prefix which will be used for the filename
      * @param suffix Suffix which will be used for the filename
-     * @param certificate X509 certificate to put inside the Truststore
+     * @param certificates X509 certificates to put inside the Truststore
      * @param password Password protecting the Truststore
      * @return File with the Truststore
      */
-    public static File createFileTrustStore(String prefix, String suffix, X509Certificate certificate, char[] password) {
+    public static File createFileTrustStore(String prefix, String suffix, Set<X509Certificate> certificates, char[] password) {
         try {
             KeyStore trustStore = null;
             trustStore = KeyStore.getInstance("PKCS12");
             trustStore.load(null, password);
-            trustStore.setEntry(certificate.getSubjectDN().getName(), new KeyStore.TrustedCertificateEntry(certificate), null);
+
+            int aliasIndex = 0;
+            for (X509Certificate certificate : certificates) {
+                trustStore.setEntry(certificate.getSubjectDN().getName() + "-" + aliasIndex, new KeyStore.TrustedCertificateEntry(certificate), null);
+                aliasIndex++;
+            }
+
             return store(prefix, suffix, trustStore, password);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -264,7 +283,7 @@ public class Util {
             return f;
         } catch (IOException | KeyStoreException | NoSuchAlgorithmException | CertificateException | RuntimeException e) {
             if (f != null && !f.delete()) {
-                LOGGER.warn("Failed to delete temporary file in exception handler");
+                LOGGER.warnOp("Failed to delete temporary file in exception handler");
             }
             throw e;
         }
@@ -281,7 +300,7 @@ public class Util {
             sb.append("\t").append(entry.getKey()).append(": ").append(maskPassword(entry.getKey(), entry.getValue())).append("\n");
         }
 
-        LOGGER.info("Using config:\n" + sb.toString());
+        LOGGER.infoOp("Using config:\n" + sb.toString());
     }
 
     /**
@@ -347,6 +366,10 @@ public class Util {
     }
 
     public static <T> Future<T> kafkaFutureToVertxFuture(Vertx vertx, KafkaFuture<T> kf) {
+        return kafkaFutureToVertxFuture(null, vertx, kf);
+    }
+
+    public static <T> Future<T> kafkaFutureToVertxFuture(Reconciliation reconciliation, Vertx vertx, KafkaFuture<T> kf) {
         Promise<T> promise = Promise.promise();
         if (kf != null) {
             kf.whenComplete((result, error) -> {
@@ -360,7 +383,12 @@ public class Util {
             });
             return promise.future();
         } else {
-            LOGGER.trace("KafkaFuture is null");
+            if (reconciliation != null) {
+                LOGGER.traceCr(reconciliation, "KafkaFuture is null");
+            } else {
+                LOGGER.traceOp("KafkaFuture is null");
+            }
+
             return Future.succeededFuture();
         }
     }
@@ -499,7 +527,78 @@ public class Util {
         return loggingCmFut;
     }
 
-    public static Future<MetricsAndLogging> metricsAndLogging(ConfigMapOperator configMapOperations,
+    /**
+     * When TLS certificate or Auth certificate (or password) is changed, the has is computed.
+     * It is used for rolling updates.
+     * @param secretOperations Secret operator
+     * @param namespace namespace to get Secrets in
+     * @param auth Authentication object to compute hash from
+     * @param certSecretSources TLS trusted certificates whose hashes are joined to result
+     * @return Future computing hash from TLS + Auth
+     */
+    public static Future<Integer> authTlsHash(SecretOperator secretOperations, String namespace, KafkaClientAuthentication auth, List<CertSecretSource> certSecretSources) {
+        Future<Integer> tlsFuture;
+        if (certSecretSources == null || certSecretSources.isEmpty()) {
+            tlsFuture = Future.succeededFuture(0);
+        } else {
+            // get all TLS trusted certs, compute hash from each of them, sum hashes
+            tlsFuture = CompositeFuture.join(certSecretSources.stream().map(certSecretSource ->
+                    getCertificateAsync(secretOperations, namespace, certSecretSource)
+                    .compose(cert -> Future.succeededFuture(cert.hashCode()))).collect(Collectors.toList()))
+                .compose(hashes -> Future.succeededFuture(hashes.list().stream().collect(Collectors.summingInt(e -> (int) e))));
+        }
+
+        if (auth == null) {
+            return tlsFuture;
+        } else {
+            // compute hash from Auth
+            if (auth instanceof KafkaClientAuthenticationScramSha512) {
+                // only passwordSecret can be changed
+                return tlsFuture.compose(tlsHash -> getPasswordAsync(secretOperations, namespace, auth)
+                        .compose(password -> Future.succeededFuture(password.hashCode() + tlsHash)));
+            } else if (auth instanceof KafkaClientAuthenticationPlain) {
+                // only passwordSecret can be changed
+                return tlsFuture.compose(tlsHash -> getPasswordAsync(secretOperations, namespace, auth)
+                        .compose(password -> Future.succeededFuture(password.hashCode() + tlsHash)));
+            } else if (auth instanceof KafkaClientAuthenticationTls) {
+                // custom cert can be used (and changed)
+                return ((KafkaClientAuthenticationTls) auth).getCertificateAndKey() == null ? tlsFuture :
+                        tlsFuture.compose(tlsHash -> getCertificateAndKeyAsync(secretOperations, namespace, (KafkaClientAuthenticationTls) auth)
+                        .compose(crtAndKey -> Future.succeededFuture(crtAndKey.certAsBase64String().hashCode() + crtAndKey.keyAsBase64String().hashCode() + tlsHash)));
+            } else if (auth instanceof KafkaClientAuthenticationOAuth) {
+                List<Future> futureList = ((KafkaClientAuthenticationOAuth) auth).getTlsTrustedCertificates() == null ?
+                        new ArrayList<>() : ((KafkaClientAuthenticationOAuth) auth).getTlsTrustedCertificates().stream().map(certSecretSource ->
+                        getCertificateAsync(secretOperations, namespace, certSecretSource)
+                                .compose(cert -> Future.succeededFuture(cert.hashCode()))).collect(Collectors.toList());
+                futureList.add(tlsFuture);
+                futureList.add(addSecretHash(secretOperations, namespace, ((KafkaClientAuthenticationOAuth) auth).getAccessToken()));
+                futureList.add(addSecretHash(secretOperations, namespace, ((KafkaClientAuthenticationOAuth) auth).getClientSecret()));
+                futureList.add(addSecretHash(secretOperations, namespace, ((KafkaClientAuthenticationOAuth) auth).getRefreshToken()));
+                return CompositeFuture.join(futureList)
+                        .compose(hashes -> Future.succeededFuture(hashes.list().stream().collect(Collectors.summingInt(e -> (int) e))));
+            } else {
+                // unknown Auth type
+                return tlsFuture;
+            }
+        }
+    }
+
+    private static Future<Integer> addSecretHash(SecretOperator secretOperations, String namespace, GenericSecretSource genericSecretSource) {
+        if (genericSecretSource != null) {
+            return secretOperations.getAsync(namespace, genericSecretSource.getSecretName())
+                    .compose(secret -> {
+                        if (secret == null) {
+                            return Future.failedFuture("Secret " + genericSecretSource.getSecretName() + " not found");
+                        } else {
+                            return Future.succeededFuture(secret.getData().get(genericSecretSource.getKey()).hashCode());
+                        }
+                    });
+        }
+        return Future.succeededFuture(0);
+    }
+
+    public static Future<MetricsAndLogging> metricsAndLogging(Reconciliation reconciliation,
+                                                              ConfigMapOperator configMapOperations,
                                                               String namespace,
                                                               Logging logging, MetricsConfig metricsConfigInCm) {
         List<Future> configMaps = new ArrayList<>(2);
@@ -508,7 +607,7 @@ public class Util {
         } else if (metricsConfigInCm == null) {
             configMaps.add(Future.succeededFuture(null));
         } else {
-            LOGGER.warn("Unknown metrics type {}", metricsConfigInCm.getType());
+            LOGGER.warnCr(reconciliation, "Unknown metrics type {}", metricsConfigInCm.getType());
             throw new InvalidResourceException("Unknown metrics type " + metricsConfigInCm.getType());
         }
 
@@ -540,5 +639,67 @@ public class Util {
         }
 
         return true;
+    }
+
+    public static void delete(Path key) {
+        if (key != null) {
+            try {
+                Files.deleteIfExists(key);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private static Future<String> getCertificateAsync(SecretOperator secretOperator, String namespace, CertSecretSource certSecretSource) {
+        return secretOperator.getAsync(namespace, certSecretSource.getSecretName())
+                .compose(secret -> secret == null ? Future.failedFuture("Secret " + certSecretSource.getSecretName() + " not found") : Future.succeededFuture(secret.getData().get(certSecretSource.getCertificate())));
+    }
+
+    private static Future<CertAndKey> getCertificateAndKeyAsync(SecretOperator secretOperator, String namespace, KafkaClientAuthenticationTls auth) {
+        return secretOperator.getAsync(namespace, auth.getCertificateAndKey().getSecretName())
+                .compose(secret -> secret == null ? Future.failedFuture("Secret " + auth.getCertificateAndKey().getSecretName() + " not found") :
+                        Future.succeededFuture(new CertAndKey(secret.getData().get(auth.getCertificateAndKey().getKey()).getBytes(StandardCharsets.UTF_8), secret.getData().get(auth.getCertificateAndKey().getCertificate()).getBytes(StandardCharsets.UTF_8))));
+    }
+
+    private static Future<String> getPasswordAsync(SecretOperator secretOperator, String namespace, KafkaClientAuthentication auth) {
+        if (auth instanceof KafkaClientAuthenticationPlain) {
+            return secretOperator.getAsync(namespace, ((KafkaClientAuthenticationPlain) auth).getPasswordSecret().getSecretName())
+                    .compose(secret -> secret == null ? Future.failedFuture("Secret " + ((KafkaClientAuthenticationPlain) auth).getPasswordSecret().getSecretName() + " not found") :
+                            Future.succeededFuture(secret.getData().get(((KafkaClientAuthenticationPlain) auth).getPasswordSecret().getPassword())));
+        }
+        if (auth instanceof KafkaClientAuthenticationScramSha512) {
+            return secretOperator.getAsync(namespace, ((KafkaClientAuthenticationScramSha512) auth).getPasswordSecret().getSecretName())
+                    .compose(secret -> secret == null ? Future.failedFuture("Secret " + ((KafkaClientAuthenticationScramSha512) auth).getPasswordSecret().getSecretName() + " not found") :
+                            Future.succeededFuture(secret.getData().get(((KafkaClientAuthenticationScramSha512) auth).getPasswordSecret().getPassword())));
+        } else {
+            return Future.failedFuture("Auth type " + auth.getType() + " does not have a password property");
+        }
+    }
+
+    /**
+     * Returns concatenated string of all public keys (all .crt records) from a secret
+     *
+     * @param secret    Kubernetes Secret with certificates
+     *
+     * @return          String secrets
+     */
+    public static String certsToPemString(Secret secret)  {
+        if (secret == null || secret.getData() == null) {
+            return "";
+        } else {
+            Base64.Decoder decoder = Base64.getDecoder();
+
+            return secret
+                    .getData()
+                    .entrySet()
+                    .stream()
+                    .filter(record -> record.getKey().endsWith(".crt"))
+                    .map(record -> {
+                        byte[] bytes = decoder.decode(record.getValue());
+                        return new String(bytes, StandardCharsets.US_ASCII);
+                    })
+                    .collect(Collectors.joining("\n"));
+        }
     }
 }

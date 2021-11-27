@@ -4,15 +4,18 @@
  */
 package io.strimzi.systemtest.utils.kafkaUtils;
 
+import io.strimzi.api.kafka.model.KafkaConnectResources;
 import io.strimzi.api.kafka.model.KafkaConnector;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.ResourceOperation;
 import io.strimzi.systemtest.resources.crd.KafkaConnectorResource;
 import io.strimzi.test.TestUtils;
+import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import static io.strimzi.systemtest.Constants.GLOBAL_RECONCILIATION_COUNT;
 import static io.strimzi.systemtest.enums.CustomResourceStatus.NotReady;
 import static io.strimzi.systemtest.enums.CustomResourceStatus.Ready;
 import static io.strimzi.test.k8s.KubeClusterResource.cmdKubeClient;
@@ -29,7 +32,7 @@ public class KafkaConnectorUtils {
      * WaitForStabilityConnector method, verifying stability of connector
      * @param namespaceName Namespace name
      * @param connectorName connector name
-     * @param connectPodName connects2i or connect pod name
+     * @param connectPodName Connect pod name
      */
     public static void waitForConnectorStability(String namespaceName, String connectorName, String connectPodName) {
         // alternative to sync hassling AtomicInteger one could use an integer array instead
@@ -87,21 +90,6 @@ public class KafkaConnectorUtils {
         ).out();
     }
 
-    public static String getCreatedConnectors(String connectPodName) {
-        return getCreatedConnectors(kubeClient().getNamespace(), connectPodName);
-    }
-
-    public static void waitForConnectorCreation(String namespaceName, String connectS2IPodName, String connectorName) {
-        TestUtils.waitFor(connectorName + " connector creation", Constants.GLOBAL_POLL_INTERVAL, READINESS_TIMEOUT, () -> {
-            String availableConnectors = getCreatedConnectors(namespaceName, connectS2IPodName);
-            return availableConnectors.contains(connectorName);
-        }, () -> ResourceManager.logCurrentResourceStatus(KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get()));
-    }
-
-    public static void waitForConnectorCreation(String connectS2IPodName, String connectorName) {
-        waitForConnectorCreation(kubeClient().getNamespace(), connectS2IPodName, connectorName);
-    }
-
     public static void waitForConnectorDeletion(String connectorName) {
         TestUtils.waitFor(connectorName + " connector deletion", Constants.GLOBAL_POLL_INTERVAL, READINESS_TIMEOUT, () -> {
             if (KafkaConnectorResource.kafkaConnectorClient().inNamespace(kubeClient().getNamespace()).withName(connectorName).get() == null) {
@@ -136,17 +124,9 @@ public class KafkaConnectorUtils {
         );
     }
 
-    public static void waitForConnectorsTaskMaxChange(String connectorName, int taskMax) {
-        waitForConnectorsTaskMaxChange(kubeClient().getNamespace(), connectorName, taskMax);
-    }
-
     public static String getConnectorSpecFromConnectAPI(String namespaceName, String podName, String connectorName) {
         return cmdKubeClient(namespaceName).execInPod(podName, "/bin/bash", "-c",
             "curl http://localhost:8083/connectors/" + connectorName).out();
-    }
-
-    public static String getConnectorSpecFromConnectAPI(String podName, String connectorName) {
-        return getConnectorSpecFromConnectAPI(kubeClient().getNamespace(), podName, connectorName);
     }
 
     public static String getConnectorConfig(String namespaceName, String podName, String connectorName, String apiUrl) {
@@ -154,19 +134,11 @@ public class KafkaConnectorUtils {
             connectorName + "/config").out();
     }
 
-    public static String getConnectorConfig(String podName, String connectorName, String apiUrl) {
-        return getConnectorConfig(kubeClient().getNamespace(), podName, connectorName, apiUrl);
-    }
-
     public static String waitForConnectorConfigUpdate(String namespaceName, String podName, String connectorName, String oldConfig, String apiUrl) {
         TestUtils.waitFor("Wait for KafkaConnector config will contain desired config", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS,
             ResourceOperation.getTimeoutForResourceReadiness(KafkaConnector.RESOURCE_KIND),
             () -> !oldConfig.equals(getConnectorConfig(namespaceName, podName, connectorName, apiUrl)));
         return getConnectorConfig(namespaceName, podName, connectorName, apiUrl);
-    }
-
-    public static String waitForConnectorConfigUpdate(String podName, String connectorName, String oldConfig, String apiUrl) {
-        return waitForConnectorConfigUpdate(kubeClient().getNamespace(), podName, connectorName, oldConfig, apiUrl);
     }
 
     /**
@@ -190,5 +162,42 @@ public class KafkaConnectorUtils {
             LOGGER.info("Connector's spec gonna be stable in {} polls", Constants.GLOBAL_STABILITY_OFFSET_COUNT - stableCounter[0]);
             return false;
         });
+    }
+
+    public static void waitForConnectorWorkerStatus(String namespaceName, String podName, String connectName, String connectorName, String state) {
+        LOGGER.info("Wait until KafkaConnector {}'s worker will be in {} state", connectorName, state);
+        TestUtils.waitFor(String.format("KafkaConnector %s's worker will be in %s state", connectorName, state), Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, Constants.GLOBAL_TIMEOUT,
+            () -> {
+                JsonObject connectorStatus = new JsonObject(
+                        cmdKubeClient().namespace(namespaceName).execInPod(podName,
+                        "curl", "GET",
+                        "http://" + KafkaConnectResources.serviceName(connectName) + ":8083/connectors/" + connectorName + "/status").out().trim()
+                );
+                return connectorStatus.getJsonObject("connector").getString("state").equals(state);
+            }
+        );
+    }
+
+    public static void loggerStabilityWait(String namespaceName, String connectClusterName, String podName, String desiredLogger, String connectorName) {
+        int[] counter = {0};
+        TestUtils.waitFor("Connector logger will be stable", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
+            () ->  {
+                String logger = cmdKubeClient().namespace(namespaceName).execInPod(podName, "curl",
+                    "http://" + KafkaConnectResources.serviceName(connectClusterName) + ":8083/admin/loggers/" + connectorName).out();
+                if (logger.contains(desiredLogger)) {
+                    counter[0]++;
+                    LOGGER.info("Logger level is {}. Remaining seconds for logger to be stable: {}", desiredLogger, GLOBAL_RECONCILIATION_COUNT - counter[0]);
+                } else {
+                    LOGGER.warn("Logger level has changed: {}. Reseting counter from {} to 0", logger, counter[0]);
+                    counter[0] = 0;
+                }
+
+                if (counter[0] == GLOBAL_RECONCILIATION_COUNT) {
+                    LOGGER.info("Logger for connector {} is stable", connectorName);
+                    return true;
+                }
+                return false;
+            }
+        );
     }
 }

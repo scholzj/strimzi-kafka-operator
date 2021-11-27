@@ -9,10 +9,11 @@ import io.fabric8.kubernetes.api.model.LocalObjectReferenceBuilder;
 import io.strimzi.operator.cluster.model.ImagePullPolicy;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.NoImageException;
+import io.strimzi.operator.cluster.model.UnsupportedVersionException;
 import io.strimzi.operator.common.InvalidConfigurationException;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.resource.AbstractWatchableResourceOperator;
+import io.strimzi.operator.common.operator.resource.AbstractResourceOperator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -32,11 +33,13 @@ import static java.util.Collections.unmodifiableSet;
  * Cluster Operator configuration
  */
 public class ClusterOperatorConfig {
-    private static final Logger log = LogManager.getLogger(ClusterOperatorConfig.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(ClusterOperatorConfig.class.getName());
+
 
     public static final String STRIMZI_NAMESPACE = "STRIMZI_NAMESPACE";
     public static final String STRIMZI_FULL_RECONCILIATION_INTERVAL_MS = "STRIMZI_FULL_RECONCILIATION_INTERVAL_MS";
     public static final String STRIMZI_OPERATION_TIMEOUT_MS = "STRIMZI_OPERATION_TIMEOUT_MS";
+    public static final String STRIMZI_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS = "STRIMZI_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS";
     public static final String STRIMZI_CONNECT_BUILD_TIMEOUT_MS = "STRIMZI_CONNECT_BUILD_TIMEOUT_MS";
     public static final String STRIMZI_IMAGE_PULL_POLICY = "STRIMZI_IMAGE_PULL_POLICY";
     public static final String STRIMZI_IMAGE_PULL_SECRETS = "STRIMZI_IMAGE_PULL_SECRETS";
@@ -44,17 +47,19 @@ public class ClusterOperatorConfig {
     public static final String STRIMZI_OPERATOR_NAMESPACE_LABELS = "STRIMZI_OPERATOR_NAMESPACE_LABELS";
     public static final String STRIMZI_CUSTOM_RESOURCE_SELECTOR = "STRIMZI_CUSTOM_RESOURCE_SELECTOR";
     public static final String STRIMZI_FEATURE_GATES = "STRIMZI_FEATURE_GATES";
+    public static final String STRIMZI_OPERATIONS_THREAD_POOL_SIZE = "STRIMZI_OPERATIONS_THREAD_POOL_SIZE";
 
     // Feature Flags
     public static final String STRIMZI_RBAC_SCOPE = "STRIMZI_RBAC_SCOPE";
     public static final RbacScope DEFAULT_STRIMZI_RBAC_SCOPE = RbacScope.CLUSTER;
     public static final String STRIMZI_CREATE_CLUSTER_ROLES = "STRIMZI_CREATE_CLUSTER_ROLES";
     public static final boolean DEFAULT_CREATE_CLUSTER_ROLES = false;
+    public static final String STRIMZI_NETWORK_POLICY_GENERATION = "STRIMZI_NETWORK_POLICY_GENERATION";
+    public static final boolean DEFAULT_NETWORK_POLICY_GENERATION = true;
 
     // Env vars for configuring images
     public static final String STRIMZI_KAFKA_IMAGES = "STRIMZI_KAFKA_IMAGES";
     public static final String STRIMZI_KAFKA_CONNECT_IMAGES = "STRIMZI_KAFKA_CONNECT_IMAGES";
-    public static final String STRIMZI_KAFKA_CONNECT_S2I_IMAGES = "STRIMZI_KAFKA_CONNECT_S2I_IMAGES";
     public static final String STRIMZI_KAFKA_MIRROR_MAKER_IMAGES = "STRIMZI_KAFKA_MIRROR_MAKER_IMAGES";
     public static final String STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES = "STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES";
     public static final String STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE = "STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE";
@@ -67,16 +72,21 @@ public class ClusterOperatorConfig {
     public static final String STRIMZI_DEFAULT_KAFKA_BRIDGE_IMAGE = "STRIMZI_DEFAULT_KAFKA_BRIDGE_IMAGE";
     public static final String STRIMZI_DEFAULT_CRUISE_CONTROL_IMAGE = "STRIMZI_DEFAULT_CRUISE_CONTROL_IMAGE";
     public static final String STRIMZI_DEFAULT_KANIKO_EXECUTOR_IMAGE = "STRIMZI_DEFAULT_KANIKO_EXECUTOR_IMAGE";
+    public static final String STRIMZI_DEFAULT_MAVEN_BUILDER = "STRIMZI_DEFAULT_MAVEN_BUILDER";
 
     public static final long DEFAULT_FULL_RECONCILIATION_INTERVAL_MS = 120_000;
     public static final long DEFAULT_OPERATION_TIMEOUT_MS = 300_000;
+    public static final int DEFAULT_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS = 10_000;
     public static final long DEFAULT_CONNECT_BUILD_TIMEOUT_MS = 300_000;
+    public static final int DEFAULT_STRIMZI_OPERATIONS_THREAD_POOL_SIZE = 10;
 
     private final Set<String> namespaces;
     private final long reconciliationIntervalMs;
     private final long operationTimeoutMs;
+    private final int zkAdminSessionTimeoutMs;
     private final long connectBuildTimeoutMs;
     private final boolean createClusterRoles;
+    private final boolean networkPolicyGeneration;
     private final KafkaVersion.Lookup versions;
     private final ImagePullPolicy imagePullPolicy;
     private final List<LocalObjectReference> imagePullSecrets;
@@ -85,6 +95,7 @@ public class ClusterOperatorConfig {
     private final RbacScope rbacScope;
     private final Labels customResourceSelector;
     private final FeatureGates featureGates;
+    private final int operationsThreadPoolSize;
 
     /**
      * Constructor
@@ -94,6 +105,7 @@ public class ClusterOperatorConfig {
      * @param operationTimeoutMs    timeout for internal operations specified in milliseconds
      * @param connectBuildTimeoutMs timeout used to wait for a Kafka Connect builds to finish
      * @param createClusterRoles true to create the ClusterRoles
+     * @param networkPolicyGeneration true to generate Network Policies
      * @param versions The configured Kafka versions
      * @param imagePullPolicy Image pull policy configured by the user
      * @param imagePullSecrets Set of secrets for pulling container images from secured repositories
@@ -102,13 +114,17 @@ public class ClusterOperatorConfig {
      * @param rbacScope true to use Roles where possible instead of ClusterRoles
      * @param customResourceSelector Labels used to filter the custom resources seen by the cluster operator
      * @param featureGates Configuration string with feature gates settings
+     * @param operationsThreadPoolSize The size of the thread pool used for various operations
+     * @param zkAdminSessionTimeoutMs Session timeout for the Zookeeper Admin client used in ZK scaling operations
      */
+    @SuppressWarnings("checkstyle:ParameterNumber")
     public ClusterOperatorConfig(
             Set<String> namespaces,
             long reconciliationIntervalMs,
             long operationTimeoutMs,
             long connectBuildTimeoutMs,
             boolean createClusterRoles,
+            boolean networkPolicyGeneration,
             KafkaVersion.Lookup versions,
             ImagePullPolicy imagePullPolicy,
             List<LocalObjectReference> imagePullSecrets,
@@ -116,12 +132,15 @@ public class ClusterOperatorConfig {
             Labels operatorNamespaceLabels,
             RbacScope rbacScope,
             Labels customResourceSelector,
-            String featureGates) {
+            String featureGates,
+            int operationsThreadPoolSize,
+            int zkAdminSessionTimeoutMs) {
         this.namespaces = unmodifiableSet(new HashSet<>(namespaces));
         this.reconciliationIntervalMs = reconciliationIntervalMs;
         this.operationTimeoutMs = operationTimeoutMs;
         this.connectBuildTimeoutMs = connectBuildTimeoutMs;
         this.createClusterRoles = createClusterRoles;
+        this.networkPolicyGeneration = networkPolicyGeneration;
         this.versions = versions;
         this.imagePullPolicy = imagePullPolicy;
         this.imagePullSecrets = imagePullSecrets;
@@ -130,6 +149,8 @@ public class ClusterOperatorConfig {
         this.rbacScope = rbacScope;
         this.customResourceSelector = customResourceSelector;
         this.featureGates = new FeatureGates(featureGates);
+        this.operationsThreadPoolSize = operationsThreadPoolSize;
+        this.zkAdminSessionTimeoutMs = zkAdminSessionTimeoutMs;
     }
 
     /**
@@ -140,7 +161,7 @@ public class ClusterOperatorConfig {
      */
     public static ClusterOperatorConfig fromMap(Map<String, String> map) {
         warningsForRemovedEndVars(map);
-        KafkaVersion.Lookup lookup = parseKafkaVersions(map.get(STRIMZI_KAFKA_IMAGES), map.get(STRIMZI_KAFKA_CONNECT_IMAGES), map.get(STRIMZI_KAFKA_CONNECT_S2I_IMAGES), map.get(STRIMZI_KAFKA_MIRROR_MAKER_IMAGES), map.get(STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES));
+        KafkaVersion.Lookup lookup = parseKafkaVersions(map.get(STRIMZI_KAFKA_IMAGES), map.get(STRIMZI_KAFKA_CONNECT_IMAGES), map.get(STRIMZI_KAFKA_MIRROR_MAKER_IMAGES), map.get(STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES));
         return fromMap(map, lookup);
     }
 
@@ -151,14 +172,14 @@ public class ClusterOperatorConfig {
      */
     private static void warningsForRemovedEndVars(Map<String, String> map) {
         if (map.containsKey(STRIMZI_DEFAULT_TLS_SIDECAR_KAFKA_IMAGE))    {
-            log.warn("Kafka TLS sidecar container has been removed and the environment variable {} is not used anymore. " +
+            LOGGER.warn("Kafka TLS sidecar container has been removed and the environment variable {} is not used anymore. " +
                     "You can remove it from the Strimzi Cluster Operator deployment.", STRIMZI_DEFAULT_TLS_SIDECAR_KAFKA_IMAGE);
         }
     }
 
     /**
      * Loads configuration parameters from a related map and custom KafkaVersion.Lookup instance.
-     * THis is used for testing.
+     * This is used for testing.
      *
      * @param map   map from which loading configuration parameters
      * @param lookup KafkaVersion.Lookup instance with the supported Kafka version information
@@ -170,6 +191,7 @@ public class ClusterOperatorConfig {
         long operationTimeout = parseTimeout(map.get(STRIMZI_OPERATION_TIMEOUT_MS), DEFAULT_OPERATION_TIMEOUT_MS);
         long connectBuildTimeout = parseTimeout(map.get(STRIMZI_CONNECT_BUILD_TIMEOUT_MS), DEFAULT_CONNECT_BUILD_TIMEOUT_MS);
         boolean createClusterRoles = parseCreateClusterRoles(map.get(STRIMZI_CREATE_CLUSTER_ROLES));
+        boolean networkPolicyGeneration = parseNetworkPolicyGeneration(map.get(STRIMZI_NETWORK_POLICY_GENERATION));
         ImagePullPolicy imagePullPolicy = parseImagePullPolicy(map.get(STRIMZI_IMAGE_PULL_POLICY));
         List<LocalObjectReference> imagePullSecrets = parseImagePullSecrets(map.get(STRIMZI_IMAGE_PULL_SECRETS));
         String operatorNamespace = map.get(STRIMZI_OPERATOR_NAMESPACE);
@@ -177,6 +199,8 @@ public class ClusterOperatorConfig {
         RbacScope rbacScope = parseRbacScope(map.get(STRIMZI_RBAC_SCOPE));
         Labels customResourceSelector = parseLabels(map, STRIMZI_CUSTOM_RESOURCE_SELECTOR);
         String featureGates = map.getOrDefault(STRIMZI_FEATURE_GATES, "");
+        int operationsThreadPoolSize = parseInt(map.get(STRIMZI_OPERATIONS_THREAD_POOL_SIZE), DEFAULT_STRIMZI_OPERATIONS_THREAD_POOL_SIZE);
+        int zkAdminSessionTimeout = parseInt(map.get(STRIMZI_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS), DEFAULT_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS);
 
         return new ClusterOperatorConfig(
                 namespaces,
@@ -184,6 +208,7 @@ public class ClusterOperatorConfig {
                 operationTimeout,
                 connectBuildTimeout,
                 createClusterRoles,
+                networkPolicyGeneration,
                 lookup,
                 imagePullPolicy,
                 imagePullSecrets,
@@ -191,22 +216,24 @@ public class ClusterOperatorConfig {
                 operatorNamespaceLabels,
                 rbacScope,
                 customResourceSelector,
-                featureGates);
+                featureGates,
+                operationsThreadPoolSize,
+                zkAdminSessionTimeout);
     }
 
     private static Set<String> parseNamespaceList(String namespacesList)   {
         Set<String> namespaces;
         if (namespacesList == null || namespacesList.isEmpty()) {
-            namespaces = Collections.singleton(AbstractWatchableResourceOperator.ANY_NAMESPACE);
+            namespaces = Collections.singleton(AbstractResourceOperator.ANY_NAMESPACE);
         } else {
-            if (namespacesList.trim().equals(AbstractWatchableResourceOperator.ANY_NAMESPACE)) {
-                namespaces = Collections.singleton(AbstractWatchableResourceOperator.ANY_NAMESPACE);
+            if (namespacesList.trim().equals(AbstractResourceOperator.ANY_NAMESPACE)) {
+                namespaces = Collections.singleton(AbstractResourceOperator.ANY_NAMESPACE);
             } else if (namespacesList.matches("(\\s*[a-z0-9.-]+\\s*,)*\\s*[a-z0-9.-]+\\s*")) {
                 namespaces = new HashSet<>(asList(namespacesList.trim().split("\\s*,+\\s*")));
             } else {
                 throw new InvalidConfigurationException(STRIMZI_NAMESPACE
                         + " is not a valid list of namespaces nor the 'any namespace' wildcard "
-                        + AbstractWatchableResourceOperator.ANY_NAMESPACE);
+                        + AbstractResourceOperator.ANY_NAMESPACE);
             }
         }
 
@@ -233,6 +260,16 @@ public class ClusterOperatorConfig {
         return timeout;
     }
 
+    private static int parseInt(String envVar, int defaultValue) {
+        int value = defaultValue;
+
+        if (envVar != null) {
+            value = Integer.parseInt(envVar);
+        }
+
+        return value;
+    }
+
     private static boolean parseCreateClusterRoles(String createClusterRolesEnvVar) {
         boolean createClusterRoles = DEFAULT_CREATE_CLUSTER_ROLES;
 
@@ -241,6 +278,16 @@ public class ClusterOperatorConfig {
         }
 
         return createClusterRoles;
+    }
+
+    private static boolean parseNetworkPolicyGeneration(String networkPolicyGenerationEnvVar) {
+        boolean networkPolicyGeneration = DEFAULT_NETWORK_POLICY_GENERATION;
+
+        if (networkPolicyGenerationEnvVar != null) {
+            networkPolicyGeneration = Boolean.parseBoolean(networkPolicyGenerationEnvVar);
+        }
+
+        return networkPolicyGeneration;
     }
 
     /**
@@ -298,11 +345,10 @@ public class ClusterOperatorConfig {
         return imagePullPolicy;
     }
 
-    private static KafkaVersion.Lookup parseKafkaVersions(String kafkaImages, String connectImages, String connectS2IImages, String mirrorMakerImages, String mirrorMaker2Images) {
+    private static KafkaVersion.Lookup parseKafkaVersions(String kafkaImages, String connectImages, String mirrorMakerImages, String mirrorMaker2Images) {
         KafkaVersion.Lookup lookup = new KafkaVersion.Lookup(
                 Util.parseMap(kafkaImages),
                 Util.parseMap(connectImages),
-                Util.parseMap(connectS2IImages),
                 Util.parseMap(mirrorMakerImages),
                 Util.parseMap(mirrorMaker2Images));
 
@@ -318,10 +364,6 @@ public class ClusterOperatorConfig {
             envVar = STRIMZI_KAFKA_CONNECT_IMAGES;
             lookup.validateKafkaConnectImages(lookup.supportedVersions());
 
-            image = "Kafka Connect S2I";
-            envVar = STRIMZI_KAFKA_CONNECT_S2I_IMAGES;
-            lookup.validateKafkaConnectS2IImages(lookup.supportedVersions());
-
             image = "Kafka Mirror Maker";
             envVar = STRIMZI_KAFKA_MIRROR_MAKER_IMAGES;
             lookup.validateKafkaMirrorMakerImages(lookup.supportedVersions());
@@ -329,7 +371,7 @@ public class ClusterOperatorConfig {
             image = "Kafka Mirror Maker 2";
             envVar = STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES;
             lookup.validateKafkaMirrorMaker2Images(lookup.supportedVersionsForFeature("kafkaMirrorMaker2"));
-        } catch (NoImageException e) {
+        } catch (NoImageException | UnsupportedVersionException e) {
             throw new InvalidConfigurationException("Failed to parse default container image configuration for " + image + " from environment variable " + envVar, e);
         }
         return lookup;
@@ -394,6 +436,13 @@ public class ClusterOperatorConfig {
     }
 
     /**
+     * @return  how many milliseconds should we wait for Zookeeper Admin Sessions to timeout
+     */
+    public int getZkAdminSessionTimeoutMs() {
+        return zkAdminSessionTimeoutMs;
+    }
+
+    /**
      * @return  How many milliseconds should we wait for Kafka Connect build to complete
      */
     public long getConnectBuildTimeoutMs() {
@@ -405,6 +454,13 @@ public class ClusterOperatorConfig {
      */
     public boolean isCreateClusterRoles() {
         return createClusterRoles;
+    }
+
+    /**
+     * @return  Indicates whether Network policies should be generated
+     */
+    public boolean isNetworkPolicyGeneration() {
+        return networkPolicyGeneration;
     }
 
     public KafkaVersion.Lookup versions() {
@@ -457,6 +513,13 @@ public class ClusterOperatorConfig {
         return featureGates;
     }
 
+    /**
+     * @return Thread Pool size to be used by the operator to do operations like reconciliation
+     */
+    public int getOperationsThreadPoolSize() {
+        return operationsThreadPoolSize;
+    }
+
     @Override
     public String toString() {
         return "ClusterOperatorConfig(" +
@@ -465,6 +528,7 @@ public class ClusterOperatorConfig {
                 ",operationTimeoutMs=" + operationTimeoutMs +
                 ",connectBuildTimeoutMs=" + connectBuildTimeoutMs +
                 ",createClusterRoles=" + createClusterRoles +
+                ",networkPolicyGeneration=" + networkPolicyGeneration +
                 ",versions=" + versions +
                 ",imagePullPolicy=" + imagePullPolicy +
                 ",imagePullSecrets=" + imagePullSecrets +
@@ -473,6 +537,7 @@ public class ClusterOperatorConfig {
                 ",rbacScope=" + rbacScope +
                 ",customResourceSelector=" + customResourceSelector +
                 ",featureGates=" + featureGates +
+                ",zkAdminSessionTimeoutMS=" + zkAdminSessionTimeoutMs +
                 ")";
     }
 }

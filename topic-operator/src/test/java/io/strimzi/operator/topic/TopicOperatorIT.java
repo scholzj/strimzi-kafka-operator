@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.topic;
 
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.util.HashMap;
 import java.util.Locale;
@@ -27,8 +28,13 @@ import kafka.server.KafkaConfig$;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.errors.InvalidRequestException;
+import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static java.util.Collections.emptyMap;
@@ -39,16 +45,38 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
 
 public class TopicOperatorIT extends TopicOperatorBaseIT {
-
     private static final Logger LOGGER = LogManager.getLogger(TopicOperatorIT.class);
+    protected static EmbeddedKafkaCluster kafkaCluster;
 
-    @Override
-    protected int numKafkaBrokers() {
+    @BeforeAll
+    public static void beforeAll() throws IOException {
+        kafkaCluster = new EmbeddedKafkaCluster(numKafkaBrokers(), kafkaClusterConfig());
+        kafkaCluster.start();
+
+        setupKubeCluster();
+    }
+
+    @AfterAll
+    public static void afterAll() {
+        teardownKubeCluster();
+        kafkaCluster.stop();
+    }
+
+    @BeforeEach
+    public void beforeEach() throws Exception {
+        setup(kafkaCluster);
+    }
+
+    @AfterEach
+    public void afterEach() throws InterruptedException, TimeoutException, ExecutionException {
+        teardown(true);
+    }
+
+    protected static int numKafkaBrokers() {
         return 1;
     }
 
-    @Override
-    protected Properties kafkaClusterConfig() {
+    protected static Properties kafkaClusterConfig() {
         Properties p = new Properties();
         p.setProperty(KafkaConfig$.MODULE$.AutoCreateTopicsEnableProp(), "false");
         return p;
@@ -151,28 +179,28 @@ public class TopicOperatorIT extends TopicOperatorBaseIT {
 
     @Test
     public void testKafkaTopicAddedWithMoreReplicasThanBrokers() throws InterruptedException, ExecutionException, TimeoutException {
-        createKafkaTopicResourceError("test-resource-created-with-more-replicas-than-brokers", emptyMap(), 42, "Replication factor: 42 larger than available brokers: 1.");
+        createKafkaTopicResourceError("test-resource-created-with-more-replicas-than-brokers", emptyMap(), 42, "org.apache.kafka.common.errors.InvalidReplicationFactorException: Replication factor: 42 larger than available brokers: 1.");
     }
 
     @Test
     public void testKafkaTopicAddedWithHigherMinIsrThanBrokers() throws InterruptedException, ExecutionException, TimeoutException {
         createKafkaTopicResourceError("test-resource-created-with-higher-min-isr-than-brokers",
                 singletonMap("min.insync.replicas", "42"), 42,
-               "Replication factor: 42 larger than available brokers: 1.");
+               "org.apache.kafka.common.errors.InvalidReplicationFactorException: Replication factor: 42 larger than available brokers: 1.");
     }
 
     @Test
     public void testKafkaTopicAddedWithUnknownConfig() throws InterruptedException, ExecutionException, TimeoutException {
         createKafkaTopicResourceError("test-resource-created-with-unknown-config",
                 singletonMap("aardvark", "zebra"), 1,
-               "Unknown topic config name: aardvark");
+               "org.apache.kafka.common.errors.InvalidConfigurationException: Unknown topic config name: aardvark");
     }
 
     @Test
     public void testKafkaTopicAddedWithInvalidConfig() throws InterruptedException, ExecutionException, TimeoutException {
         createKafkaTopicResourceError("test-resource-created-with-invalid-config",
                 singletonMap("message.format.version", "zebra"), 1,
-               "Invalid value zebra for configuration message.format.version: Version `zebra` is not a valid version");
+               "org.apache.kafka.common.errors.InvalidConfigurationException: Invalid value zebra for configuration message.format.version: Version `zebra` is not a valid version");
     }
 
     @Test
@@ -509,7 +537,7 @@ public class TopicOperatorIT extends TopicOperatorBaseIT {
         }
 
         // 4. Start TO
-        startTopicOperator();
+        startTopicOperator(kafkaCluster);
 
         // 5. Verify topics A, X and Y exist on both sides
         waitForTopicInKafka(topicNameA);

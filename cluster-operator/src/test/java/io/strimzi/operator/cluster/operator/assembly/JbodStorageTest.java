@@ -11,6 +11,7 @@ import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaList;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.api.kafka.model.storage.JbodStorage;
 import io.strimzi.api.kafka.model.storage.JbodStorageBuilder;
@@ -19,6 +20,7 @@ import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.FeatureGates;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.AbstractModel;
@@ -31,7 +33,6 @@ import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.MockCertManager;
-import io.strimzi.test.annotations.ParallelTest;
 import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
@@ -41,6 +42,7 @@ import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
@@ -97,14 +99,12 @@ public class JbodStorageTest {
                 .withNewSpec()
                     .withNewKafka()
                         .withReplicas(3)
-                        .withNewListeners()
-                            .addNewGenericKafkaListener()
+                        .withListeners(new GenericKafkaListenerBuilder()
                                 .withName("plain")
                                 .withPort(9092)
                                 .withType(KafkaListenerType.INTERNAL)
                                 .withTls(false)
-                            .endGenericKafkaListener()
-                        .endListeners()
+                                .build())
                         .withNewJbodStorage()
                             .withVolumes(volumes)
                         .endJbodStorage()
@@ -133,14 +133,14 @@ public class JbodStorageTest {
                 new ResourceOperatorSupplier(this.vertx, this.mockClient,
                         ResourceUtils.zookeeperLeaderFinder(this.vertx, this.mockClient),
                         ResourceUtils.adminClientProvider(), ResourceUtils.zookeeperScalerProvider(),
-                        ResourceUtils.metricsProvider(), pfa, 60_000L);
+                        ResourceUtils.metricsProvider(), pfa, FeatureGates.NONE, 60_000L);
 
         this.operator = new KafkaAssemblyOperator(this.vertx, pfa, new MockCertManager(),
                 new PasswordGenerator(10, "a", "a"), ros,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000));
     }
 
-    @ParallelTest
+    @Test
     public void testJbodStorageCreatesPersistentVolumeClaimsMatchingKafkaVolumes(VertxTestContext context) {
         Checkpoint async = context.checkpoint();
         operator.reconcile(new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, NAME))
@@ -174,7 +174,7 @@ public class JbodStorageTest {
             })));
     }
 
-    @ParallelTest
+    @Test
     public void testReconcileWithNewVolumeAddedToJbodStorage(VertxTestContext context) {
         Checkpoint async = context.checkpoint();
 
@@ -217,7 +217,7 @@ public class JbodStorageTest {
 
     }
 
-    @ParallelTest
+    @Test
     public void testReconcileWithVolumeRemovedFromJbodStorage(VertxTestContext context) {
         Checkpoint async = context.checkpoint();
 
@@ -255,7 +255,7 @@ public class JbodStorageTest {
             })));
     }
 
-    @ParallelTest
+    @Test
     public void testReconcileWithUpdateVolumeIdJbod(VertxTestContext context) {
         Checkpoint async = context.checkpoint();
 

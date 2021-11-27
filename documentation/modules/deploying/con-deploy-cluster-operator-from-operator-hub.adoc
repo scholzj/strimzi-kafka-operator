@@ -1,13 +1,30 @@
 // Module included in the following assemblies:
 //
-// deploying/assembly_deploy-cluster-operator.adoc
+// deploying.adoc
 
-[id='deploying-cluster-operator-from-operator-hub-{context}']
-= Deploying the Cluster Operator from OperatorHub.io
+[id='deploying-strimzi-from-operator-hub-{context}']
+= Deploying Strimzi from OperatorHub.io
 
-{OperatorHub} is a catalog of Kubernetes Operators sourced from multiple providers.
-It offers you an alternative way to install stable versions of Strimzi using the Strimzi Kafka Operator.
+[role="_abstract"]
+OperatorHub.io is a catalog of Kubernetes operators sourced from multiple providers.
+It offers you an alternative way to install a stable version of Strimzi.
 
-The {OperatorLifecycleManager} is used for the installation and management of all Operators published on {OperatorHub}.
+The {OperatorLifecycleManager} is used for the installation and management of all operators published on OperatorHub.io.
+{OperatorLifecycleManager} is a prerequisite for installing the Strimzi Kafka operator
 
-To install Strimzi from {OperatorHub}, locate the _Strimzi Kafka Operator_ and follow the instructions provided.
+To install Strimzi, locate _Strimzi_ from {OperatorHub}, and follow the instructions provided to deploy the Cluster Operator.
+After you have deployed the Cluster Operator, you can deploy Strimzi components using custom resources.
+For example, you can deploy the `Kafka` custom resource, and the installed Cluster Operator will create a Kafka cluster.
+
+Upgrades between versions might include manual steps.
+Always read the release notes before upgrading.
+
+For information on upgrades, see xref:con-upgrade-sequence-options-{context}[Cluster Operator upgrade options].
+
+WARNING: Make sure you use the appropriate update channel.
+Installing Strimzi from the default _stable_ channel is generally safe.
+However, we do not recommend enabling _automatic_ OLM updates on the stable channel.
+An automatic upgrade will skip any necessary steps prior to upgrade.
+For example, to upgrade from {ConvertAfterProductVersion} or earlier
+you must first xref:assembly-upgrade-resources-{context}[update custom resources to support the `v1beta2` API version].
+Use automatic upgrades only on version-specific channels.

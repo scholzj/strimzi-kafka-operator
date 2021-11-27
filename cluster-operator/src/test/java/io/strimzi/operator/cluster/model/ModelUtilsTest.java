@@ -10,6 +10,7 @@ import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.NodeSelectorTermBuilder;
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
@@ -38,6 +39,7 @@ import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplateBuilder;
 import io.strimzi.api.kafka.model.template.PodTemplate;
 import io.strimzi.api.kafka.model.template.PodTemplateBuilder;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.test.annotations.ParallelSuite;
 import io.strimzi.test.annotations.ParallelTest;
@@ -111,7 +113,7 @@ public class ModelUtilsTest {
                 .withMaxUnavailable(2)
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parsePodDisruptionBudgetTemplate(model, template);
         assertThat(model.templatePodDisruptionBudgetLabels, is(Collections.singletonMap("labelKey", "labelValue")));
@@ -128,7 +130,7 @@ public class ModelUtilsTest {
                 .endMetadata()
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parsePodDisruptionBudgetTemplate(model, null);
         assertThat(model.templatePodDisruptionBudgetLabels, is(nullValue()));
@@ -153,8 +155,8 @@ public class ModelUtilsTest {
                     .withNewRequiredDuringSchedulingIgnoredDuringExecution()
                         .withNodeSelectorTerms(new NodeSelectorTermBuilder()
                                 .addNewMatchExpression()
-                                    .withNewKey("key1")
-                                    .withNewOperator("In")
+                                    .withKey("key1")
+                                    .withOperator("In")
                                     .withValues("value1", "value2")
                                 .endMatchExpression()
                                 .build())
@@ -181,7 +183,7 @@ public class ModelUtilsTest {
                 .withTolerations(tolerations)
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parsePodTemplate(model, template);
         assertThat(model.templatePodLabels, is(Collections.singletonMap("labelKey", "labelValue")));
@@ -207,7 +209,7 @@ public class ModelUtilsTest {
                 .endMetadata()
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parsePodTemplate(model, null);
         assertThat(model.templatePodLabels, is(nullValue()));
@@ -234,7 +236,7 @@ public class ModelUtilsTest {
                 .withDeploymentStrategy(DeploymentStrategy.RECREATE)
                 .build();
 
-        Model model = new Model(connect);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, connect);
 
         ModelUtils.parseDeploymentTemplate(model, template);
         assertThat(model.templateDeploymentLabels, is(Collections.singletonMap("labelKey", "labelValue")));
@@ -251,7 +253,7 @@ public class ModelUtilsTest {
                 .endMetadata()
                 .build();
 
-        Model model = new Model(connect);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, connect);
 
         ModelUtils.parseDeploymentTemplate(model, null);
         assertThat(model.templateDeploymentAnnotations, is(nullValue()));
@@ -277,7 +279,7 @@ public class ModelUtilsTest {
                 .withIpFamilies(IpFamily.IPV6, IpFamily.IPV4)
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parseInternalServiceTemplate(model, template);
         assertThat(model.templateServiceLabels, is(Collections.singletonMap("labelKey", "labelValue")));
@@ -295,7 +297,7 @@ public class ModelUtilsTest {
                 .endMetadata()
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parseInternalServiceTemplate(model, null);
         assertThat(model.templateServiceLabels, is(nullValue()));
@@ -322,7 +324,7 @@ public class ModelUtilsTest {
                 .withIpFamilies(IpFamily.IPV6, IpFamily.IPV4)
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parseInternalHeadlessServiceTemplate(model, template);
         assertThat(model.templateHeadlessServiceLabels, is(Collections.singletonMap("labelKey", "labelValue")));
@@ -340,7 +342,7 @@ public class ModelUtilsTest {
                 .endMetadata()
                 .build();
 
-        Model model = new Model(kafka);
+        Model model = new Model(Reconciliation.DUMMY_RECONCILIATION, kafka);
 
         ModelUtils.parseInternalHeadlessServiceTemplate(model, null);
         assertThat(model.templateHeadlessServiceLabels, is(nullValue()));
@@ -350,8 +352,8 @@ public class ModelUtilsTest {
     }
 
     private class Model extends AbstractModel   {
-        public Model(HasMetadata resource) {
-            super(resource, "model-app");
+        public Model(Reconciliation reconciliation, HasMetadata resource) {
+            super(reconciliation, resource, "model-app");
         }
 
         @Override
@@ -503,39 +505,20 @@ public class ModelUtilsTest {
                         .withReplicas(3)
                         .withNewEphemeralStorage()
                         .endEphemeralStorage()
-                        .withNewListeners()
-                            .withGenericKafkaListeners(new GenericKafkaListenerBuilder().withType(KafkaListenerType.INTERNAL).withPort(9092).withName("plain").withTls(false).build())
-                        .endListeners()
+                        .withListeners(new GenericKafkaListenerBuilder()
+                                .withType(KafkaListenerType.INTERNAL)
+                                .withPort(9092)
+                                .withName("plain")
+                                .withTls(false)
+                                .build())
                     .endKafka()
                 .endSpec()
                 .build();
 
-        KafkaCluster model1 = KafkaCluster.fromCrd(kafka, KafkaVersionTestUtils.getKafkaVersionLookup());
-        /*AbstractModel model1 = new AbstractModel(kafka, "test") {
-            @Override
-            protected String getDefaultLogConfigFileName() {
-                return null;
-            }
-
-            @Override
-            protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
-                return null;
-            }
-        };*/
+        KafkaCluster model1 = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, KafkaVersionTestUtils.getKafkaVersionLookup());
         ModelUtils.parsePodTemplate(model1, pt1);
 
-        KafkaCluster model2 = KafkaCluster.fromCrd(kafka, KafkaVersionTestUtils.getKafkaVersionLookup());
-        /*AbstractModel model2 = new AbstractModel(kafka, "test") {
-            @Override
-            protected String getDefaultLogConfigFileName() {
-                return null;
-            }
-
-            @Override
-            protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
-                return null;
-            }
-        };*/
+        KafkaCluster model2 = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, KafkaVersionTestUtils.getKafkaVersionLookup());
         ModelUtils.parsePodTemplate(model2, pt2);
 
         assertThat(model1.getTolerations(), is(model2.getTolerations()));
@@ -564,5 +547,24 @@ public class ModelUtilsTest {
         Labels nsLabels = Labels.fromMap(singletonMap("labelKey", "labelValue"));
         ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(peer, "my-ns", "my-operator-ns", nsLabels);
         assertThat(peer.getNamespaceSelector().getMatchLabels(), is(nsLabels.toMap()));
+    }
+
+    @ParallelTest
+    public void testCreateOwnerReference()   {
+        Kafka owner = new KafkaBuilder()
+                .withNewMetadata()
+                    .withName("my-kafka")
+                    .withUid("some-uid")
+                .endMetadata()
+                .build();
+
+        OwnerReference ref = ModelUtils.createOwnerReference(owner);
+
+        assertThat(ref.getApiVersion(), is(owner.getApiVersion()));
+        assertThat(ref.getKind(), is(owner.getKind()));
+        assertThat(ref.getName(), is(owner.getMetadata().getName()));
+        assertThat(ref.getUid(), is(owner.getMetadata().getUid()));
+        assertThat(ref.getBlockOwnerDeletion(), is(false));
+        assertThat(ref.getController(), is(false));
     }
 }

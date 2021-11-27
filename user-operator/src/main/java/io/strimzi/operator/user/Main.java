@@ -18,9 +18,8 @@ import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.user.operator.KafkaUserOperator;
-import io.strimzi.operator.user.operator.KafkaUserQuotasOperator;
-import io.strimzi.operator.user.operator.ScramShaCredentials;
-import io.strimzi.operator.user.operator.ScramShaCredentialsOperator;
+import io.strimzi.operator.user.operator.QuotasOperator;
+import io.strimzi.operator.user.operator.ScramCredentialsOperator;
 import io.strimzi.operator.user.operator.SimpleAclOperator;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
@@ -36,21 +35,20 @@ import org.apache.logging.log4j.Logger;
 import java.security.Security;
 
 @SuppressFBWarnings("DM_EXIT")
-@SuppressWarnings("deprecation")
 public class Main {
-    private static final Logger log = LogManager.getLogger(Main.class.getName());
+    private final static Logger LOGGER = LogManager.getLogger(Main.class);
 
     static {
         try {
             Crds.registerCustomKinds();
         } catch (Error | RuntimeException t) {
-            log.error("Failed to register CRDs", t);
+            LOGGER.error("Failed to register CRDs", t);
             throw t;
         }
     }
 
     public static void main(String[] args) {
-        log.info("UserOperator {} is starting", Main.class.getPackage().getImplementationVersion());
+        LOGGER.info("UserOperator {} is starting", Main.class.getPackage().getImplementationVersion());
         UserOperatorConfig config = UserOperatorConfig.fromMap(System.getenv());
         //Setup Micrometer metrics options
         VertxOptions options = new VertxOptions().setMetricsOptions(
@@ -65,7 +63,7 @@ public class Main {
 
         run(vertx, client, adminClientProvider, config).onComplete(ar -> {
             if (ar.failed()) {
-                log.error("Unable to start operator", ar.cause());
+                LOGGER.error("Unable to start operator", ar.cause());
                 System.exit(1);
             }
         });
@@ -82,15 +80,11 @@ public class Main {
         return createAdminClient(adminClientProvider, config, secretOperations)
                 .compose(adminClient -> {
                     SimpleAclOperator aclOperations = new SimpleAclOperator(vertx, adminClient);
-                    ScramShaCredentials scramShaCredentials = new ScramShaCredentials(config.getZookeperConnect(), (int) config.getZookeeperSessionTimeoutMs());
-                    ScramShaCredentialsOperator scramShaCredentialsOperator = new ScramShaCredentialsOperator(vertx, scramShaCredentials);
-                    KafkaUserQuotasOperator quotasOperator = new KafkaUserQuotasOperator(vertx, adminClient);
+                    ScramCredentialsOperator scramCredentialsOperator = new ScramCredentialsOperator(vertx, adminClient);
+                    QuotasOperator quotasOperator = new QuotasOperator(vertx, adminClient);
 
-                    KafkaUserOperator kafkaUserOperations = new KafkaUserOperator(vertx,
-                            certManager, crdOperations,
-                            config.getLabels(),
-                            secretOperations, scramShaCredentialsOperator, quotasOperator, aclOperations, config.getCaCertSecretName(), config.getCaKeySecretName(), config.getCaNamespace(),
-                            config.getSecretPrefix());
+                    KafkaUserOperator kafkaUserOperations = new KafkaUserOperator(vertx, certManager, crdOperations,
+                            secretOperations, scramCredentialsOperator, quotasOperator, aclOperations, config);
 
                     Promise<String> promise = Promise.promise();
                     UserOperator operator = new UserOperator(config.getNamespace(),
@@ -100,9 +94,9 @@ public class Main {
                     vertx.deployVerticle(operator,
                         res -> {
                             if (res.succeeded()) {
-                                log.info("User Operator verticle started in namespace {}", config.getNamespace());
+                                LOGGER.info("User Operator verticle started in namespace {}", config.getNamespace());
                             } else {
-                                log.error("User Operator verticle in namespace {} failed to start", config.getNamespace(), res.cause());
+                                LOGGER.error("User Operator verticle in namespace {} failed to start", config.getNamespace(), res.cause());
                                 System.exit(1);
                             }
                             promise.handle(res);

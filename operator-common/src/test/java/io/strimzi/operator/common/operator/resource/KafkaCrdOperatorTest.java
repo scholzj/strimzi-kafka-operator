@@ -11,9 +11,10 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.KafkaList;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
-import io.strimzi.api.kafka.model.listener.KafkaListenersBuilder;
-import io.strimzi.api.kafka.model.listener.arraylistener.ArrayOrObjectKafkaListeners;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.api.kafka.model.status.ConditionBuilder;
+import io.strimzi.operator.common.Reconciliation;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
 import io.vertx.junit5.VertxTestContext;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.matches;
 import static org.mockito.Mockito.mock;
@@ -49,10 +51,12 @@ public class KafkaCrdOperatorTest extends AbstractResourceOperatorTest<Kubernete
                 .withNewSpec()
                     .withNewKafka()
                         .withReplicas(1)
-                        .withListeners(new ArrayOrObjectKafkaListeners(new KafkaListenersBuilder()
-                                .withNewPlain()
-                                .endPlain()
-                                .build()))
+                        .withListeners(new GenericKafkaListenerBuilder()
+                                .withName("plain")
+                                .withPort(9092)
+                                .withType(KafkaListenerType.INTERNAL)
+                                .withTls(false)
+                                .build())
                         .withNewEphemeralStorage()
                         .endEphemeralStorage()
                     .endKafka()
@@ -63,7 +67,7 @@ public class KafkaCrdOperatorTest extends AbstractResourceOperatorTest<Kubernete
                     .endZookeeper()
                 .endSpec()
                 .withNewStatus()
-                    .addToConditions(new ConditionBuilder().withNewStatus("Ready").withNewMessage("Kafka is ready").build())
+                    .addToConditions(new ConditionBuilder().withStatus("Ready").withMessage("Kafka is ready").build())
                 .endStatus()
                 .build();
     }
@@ -84,7 +88,7 @@ public class KafkaCrdOperatorTest extends AbstractResourceOperatorTest<Kubernete
 
     @Override
     protected void mocker(KubernetesClient mockClient, MixedOperation op) {
-        when(mockClient.customResources(any(), any())).thenReturn(op);
+        when(mockClient.resources(any(), any())).thenReturn(op);
     }
 
     @Override
@@ -110,7 +114,13 @@ public class KafkaCrdOperatorTest extends AbstractResourceOperatorTest<Kubernete
         Checkpoint async = context.checkpoint();
 
         createResourceOperations(vertx, mockClient)
-            .updateStatusAsync(resource())
+            .updateStatusAsync(Reconciliation.DUMMY_RECONCILIATION, resource())
             .onComplete(context.succeeding(kafka -> async.flag()));
+    }
+
+    @Override
+    @Test
+    public void testReconcileDeleteDoesNotTimeoutWhenResourceIsAlreadyDeleted(VertxTestContext context) {
+        assumeTrue(false, "CrdOperator does not use self-closing watch so this test should be skipped");
     }
 }

@@ -1,7 +1,96 @@
 # CHANGELOG
 
+## 0.27.0
+
+* Added the option to configure the Cluster Operator's Zookeeper admin client session timeout via an new env var: `STRIMZI_ZOOKEEPER_ADMIN_SESSION_TIMEOUT_MS`
+* The `ControlPlaneListener` and `ServiceAccountPatching` feature gates are now in the _beta_ phase and are enabled by default.
+* Allow setting any extra environment variables for the Cluster Operator container through Helm using a new `extraEnvs` value.
+
+### Changes, deprecations and removals
+
+* The `ControlPlaneListener` feature gate is now enabled by default.
+  When upgrading from Strimzi 0.22 or earlier, you have to disable the `ControlPlaneListener` feature gate when upgrading the cluster operator to make sure the Kafka cluster stays available during the upgrade.
+  When downgrading to Strimzi 0.22 or earlier, you have to disable the `ControlPlaneListener` feature gate before downgrading the cluster operator to make sure the Kafka cluster stays available during the downgrade.
+* Update to Cruise Control version 2.5.74
+
+## 0.26.0
+
+* Add support for Kafka 2.8.1 and 3.0.0; remove Kafka 2.7.0 and 2.7.1
+* Update the Open Policy Agent Authorizer to version [1.1.0](https://github.com/Bisnode/opa-kafka-plugin/releases/tag/v1.1.0)
+* Expose JMX port on Zookeeper nodes via a headless service.
+* Allow configuring labels and annotations for JMX authentication secrets
+* Enable Cruise Control anomaly.detection configurations
+* Add support for building connector images from the Maven coordinates
+* Allow Kafka Connect Build artifacts to be downloaded from insecure servers (#5542)
+* Add option to specify pull secret in Kafka Connect Build on OpenShift (#5631)
+* Configurable authentication, authorization, and SSL for Cruise Control API
+* Update to Cruise Control version 2.5.73
+* Allow to configure `/tmp` volume size via Pod template. By default `1Mi` is used.
+
+### Changes, deprecations and removals
+
+* imageRepositoryOverride,imageRegistryOverride and imageTagOverride are now removed from values.yaml. defaultImageRepository, defaultImageRegistry and defaultImageTag values are introduced in helm charts which sets the default registry, repository and tags for the images. Now the registry, repository and tag for a single image can be configured as per the requirement.
+* The OpenShift Templates were removed from the examples and are no longer supported (#5548)
+* Kafka MirrorMaker 1 has been deprecated in Apache Kafka 3.0.0 and will be removed in Apache Kafka 4.0.0.
+  As a result, the `KafkaMirrorMaker` custom resource which is used to deploy Kafka MirrorMaker 1 has been deprecated in Strimzi as well. (#5617)
+  The `KafkaMirrorMaker` resource will be removed from Strimzi when we adopt Apache Kafka 4.0.0.
+  As a replacement, use the `KafkaMirrorMaker2` custom resource with the [`IdentityReplicationPolicy`](https://strimzi.io/docs/operators/latest/using.html#unidirectional_replication_activepassive).
+
+## 0.25.0
+
+* Move from Scala 2.12 to Scala 2.13. (#5192)
+* Open Policy Agent authorizer updated to a new version supporting Scala 2.13. See the _Changes, deprecations and removals_ sections for more details. (#5192)
+* Allow a custom password to be set for SCRAM-SHA-512 users by referencing a secret in the `KafkaUser` resource
+* Add support for [EnvVar Configuration Provider for Apache Kafka](https://github.com/strimzi/kafka-env-var-config-provider)
+* Add support for `tls-external` authentication to User Operator to allow management of ACLs and Quotas for TLS users with user certificates generated externally (#5249) 
+* Support for disabling the automatic generation of network policies by the Cluster Operator. Set the Cluster Operator's `STRIMZI_NETWORK_POLICY_GENERATION` environment variable to `false` to disable network policies. (#5258)
+* Update User Operator to use Admin API for managing SCRAM-SHA-512 users
+* Configure fixed size limit for `emptyDir` volumes used for temporary files (#5340)
+* Update Strimzi Kafka Bridge to 0.20.2
+
+### Changes, deprecations and removals
+
+* The `KafkaConnectS2I` resource has been removed and is no longer supported by the operator.
+  Please use the [migration guide](https://strimzi.io/docs/operators/0.24.0/full/using.html#proc-migrating-kafka-connect-s2i-str) to migrate your `KafkaConnectS2I` deployments to [`KafkaConnect` Build](https://strimzi.io/docs/operators/latest/full/deploying.html#creating-new-image-using-kafka-connect-build-str) instead.
+* The Open Policy Agent authorizer has been updated to a new version that supports Scala 2.13.
+  The new release introduces a new format of the input data sent to the Open Policy Agent server.
+  For more information about the new format and how to migrate from the old version, see the [OPA Kafka plugin v1.0.0 release notes](https://github.com/Bisnode/opa-kafka-plugin/releases/tag/v1.0.0).
+* User Operator now uses Kafka Admin API to manage SCRAM-SHA-512 credentials.
+  All operations done by the User Operator now use Kafka Admin API and connect directly to Kafka instead of ZooKeeper.
+  As a result, the environment variables `STRIMZI_ZOOKEEPER_CONNECT` and `STRIMZI_ZOOKEEPER_SESSION_TIMEOUT_MS` were removed from the User Operator configuration.
+* All `emptyDir` volumes used by Strimzi for temporary files have now configured a fixed size limit.
+* Annotate Cluster Operator resource metrics with a namespace label
+
 ## 0.24.0
 
+* Add support for [Kubernetes Configuration Provider for Apache Kafka](https://github.com/strimzi/kafka-kubernetes-config-provider)
+* Use Red Hat UBI8 base image
+* Add support for Kafka 2.7.1 and remove support for 2.6.0, 2.6.1, and 2.6.2
+* Support for patching of service accounts and configuring their labels and annotations. The feature is disabled by default and enabled using the new `ServiceAccountPatching` feature gate.
+* Added support for configuring cluster-operator's worker thread pool size that is used for various sync and async tasks
+* Add Kafka Quotas plugin with produce, consume, and storage quotas
+* Support pausing reconciliation of KafkaTopic CR with annotation `strimzi.io/pause-reconciliation`
+* Update cruise control to 2.5.57
+* Update to Strimzi Kafka Bridge to 0.20.0
+* Support for broker load information added to the rebalance optimization proposal. Information on the load difference, before and after a rebalance is stored in a ConfigMap
+* Add support for selectively changing the verbosity of logging for individual CRs, using markers.
+* Added support for `controller_mutation_rate' quota. Creation/Deletion of topics and creation of partitions can be configured through this.
+* Use newer version of Kafka Exporter with different bugfixes 
+
+### Changes, deprecations and removals
+
+* The deprecated `KafkaConnectS2I` custom resource will be removed after the 0.24.0 release. 
+  Please use the [migration guide](https://strimzi.io/docs/operators/latest/full/using.html#proc-migrating-kafka-connect-s2i-str) to migrate your `KafkaConnectS2I` deployments to [`KafkaConnect` Build](https://strimzi.io/docs/operators/latest/full/deploying.html#creating-new-image-using-kafka-connect-build-str) instead.
+* The fields `topicsBlacklistPattern` and `groupsBlacklistPattern` in the `KafkaMirrorMaker2` resource are deprecated and will be removed in the future.
+  They are replaced by new fields `topicsExcludePattern` and `groupsExcludePattern`.
+* The field `whitelist` in the `KafkaMirrorMaker` resource is deprecated and will be removed in the future.
+  It is replaced with a new field `include`.
+* `bind-utils` removed from containers to improve security posture.
+* Kafka Connect Build now uses hashes to name downloaded artifact files. Previously, it was using the last segment of the download URL.
+  If your artifact requires a specific name, you can use the new `type: other` artifact and its `fileName` field.
+* The option `enableECDSA` of Kafka CR `authentication` of type `oauth` has been deprecated and is ignored. 
+  ECDSA token signature support is now always enabled without the need for Strimzi Cluster Operator installing the BouncyCastle JCE crypto provider. 
+  BouncyCastle library is no longer packaged with Strimzi Kafka images.
 
 ## 0.23.0
 
@@ -56,7 +145,7 @@
 * In the past, when no Ingress class was specified in the Ingress-type listener in the Kafka custom resource, the 
   `kubernetes.io/ingress.class` annotation was automatically set to `nginx`. Because of the support for the new 
   IngressClass resource and the new `ingressClassName` field in the Ingress resource, the default value will not be set 
-  anymore. Please use the `class` field in `.spec.kafka.listeners[].configuration` to specify the class name. 
+  anymore. Please use the `class` field in `.spec.kafka.listeners[].configuration` to specify the class name.
 * The `KafkaConnectS2I` custom resource is deprecated and will be removed in the future. You can use the new [`KafkaConnect` build feature](https://strimzi.io/docs/operators/latest/full/deploying.html#creating-new-image-using-kafka-connect-build-str) instead.
 * Removed support for Helm2 charts as that version is now unsupported. There is no longer the need for separate `helm2` and `helm3` binaries, only `helm` (version 3) is required.
 * The following annotations are deprecated for a long time and will be removed in 0.23.0:

@@ -10,12 +10,14 @@ import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.AffinityBuilder;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.NodeSelectorRequirement;
 import io.fabric8.kubernetes.api.model.NodeSelectorRequirementBuilder;
 import io.fabric8.kubernetes.api.model.NodeSelectorTerm;
 import io.fabric8.kubernetes.api.model.NodeSelectorTermBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.Toleration;
@@ -35,10 +37,10 @@ import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
 import io.strimzi.api.kafka.model.template.PodTemplate;
 import io.strimzi.certs.CertAndKey;
 import io.strimzi.operator.cluster.KafkaUpgradeException;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -52,6 +54,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static java.util.Collections.emptyMap;
+
 /**
  * ModelUtils is a utility class that holds generic static helper functions
  * These are generally to be used within the classes that extend the AbstractModel class
@@ -60,7 +64,7 @@ public class ModelUtils {
 
     private ModelUtils() {}
 
-    protected static final Logger log = LogManager.getLogger(ModelUtils.class.getName());
+    protected static final ReconciliationLogger LOGGER = ReconciliationLogger.create(ModelUtils.class.getName());
     public static final String TLS_SIDECAR_LOG_LEVEL = "TLS_SIDECAR_LOG_LEVEL";
 
     /**
@@ -128,8 +132,8 @@ public class ModelUtils {
                         tlsSidecar.getLogLevel() : TlsSidecarLogLevel.NOTICE).toValue());
     }
 
-    public static Secret buildSecret(ClusterCa clusterCa, Secret secret, String namespace, String secretName,
-            String commonName, String keyCertName, Labels labels, OwnerReference ownerReference, boolean isMaintenanceTimeWindowsSatisfied) {
+    public static Secret buildSecret(Reconciliation reconciliation, ClusterCa clusterCa, Secret secret, String namespace, String secretName,
+                                     String commonName, String keyCertName, Labels labels, OwnerReference ownerReference, boolean isMaintenanceTimeWindowsSatisfied) {
         Map<String, String> data = new HashMap<>(4);
         CertAndKey certAndKey = null;
         boolean shouldBeRegenerated = false;
@@ -146,15 +150,15 @@ public class ModelUtils {
         }
 
         if (shouldBeRegenerated) {
-            log.debug("Certificate for pod {} need to be regenerated because: {}", keyCertName, String.join(", ", reasons));
+            LOGGER.debugCr(reconciliation, "Certificate for pod {} need to be regenerated because: {}", keyCertName, String.join(", ", reasons));
 
             try {
                 certAndKey = clusterCa.generateSignedCert(commonName, Ca.IO_STRIMZI);
             } catch (IOException e) {
-                log.warn("Error while generating certificates", e);
+                LOGGER.warnCr(reconciliation, "Error while generating certificates", e);
             }
 
-            log.debug("End generating certificates");
+            LOGGER.debugCr(reconciliation, "End generating certificates");
         } else {
             if (secret.getData().get(keyCertName + ".p12") != null &&
                     !secret.getData().get(keyCertName + ".p12").isEmpty() &&
@@ -174,7 +178,7 @@ public class ModelUtils {
                             decodeFromSecret(secret, keyCertName + ".key"),
                             decodeFromSecret(secret, keyCertName + ".crt"));
                 } catch (IOException e) {
-                    log.error("Error generating the keystore for {}", keyCertName, e);
+                    LOGGER.errorCr(reconciliation, "Error generating the keystore for {}", keyCertName, e);
                 }
             }
         }
@@ -186,16 +190,18 @@ public class ModelUtils {
             data.put(keyCertName + ".password", certAndKey.storePasswordAsBase64String());
         }
 
-        return createSecret(secretName, namespace, labels, ownerReference, data);
+        return createSecret(secretName, namespace, labels, ownerReference, data, emptyMap(), emptyMap());
     }
 
-    public static Secret createSecret(String name, String namespace, Labels labels, OwnerReference ownerReference, Map<String, String> data) {
+    public static Secret createSecret(String name, String namespace, Labels labels, OwnerReference ownerReference,
+                                      Map<String, String> data, Map<String, String> customAnnotations, Map<String, String> customLabels) {
         if (ownerReference == null) {
             return new SecretBuilder()
                     .withNewMetadata()
                         .withName(name)
                         .withNamespace(namespace)
-                        .withLabels(labels.toMap())
+                        .withLabels(Util.mergeLabelsOrAnnotations(labels.toMap(), customLabels))
+                        .withAnnotations(customAnnotations)
                     .endMetadata()
                     .withType("Opaque")
                     .withData(data)
@@ -206,7 +212,8 @@ public class ModelUtils {
                         .withName(name)
                         .withOwnerReferences(ownerReference)
                         .withNamespace(namespace)
-                        .withLabels(labels.toMap())
+                        .withLabels(Util.mergeLabelsOrAnnotations(labels.toMap(), customLabels))
+                        .withAnnotations(customAnnotations)
                     .endMetadata()
                     .withType("Opaque")
                     .withData(data)
@@ -260,6 +267,7 @@ public class ModelUtils {
             model.templatePodHostAliases = pod.getHostAliases();
             model.templatePodTopologySpreadConstraints = pod.getTopologySpreadConstraints();
             model.templatePodEnableServiceLinks = pod.getEnableServiceLinks();
+            model.templateTmpDirSizeLimit = pod.getTmpDirSizeLimit();
         }
     }
 
@@ -464,8 +472,8 @@ public class ModelUtils {
     public static AffinityBuilder populateAffinityBuilderWithRackLabelSelector(AffinityBuilder builder, Affinity userAffinity, String topologyKey) {
         // We need to add node affinity to make sure the pods are scheduled only on nodes with the rack label
         NodeSelectorRequirement selector = new NodeSelectorRequirementBuilder()
-                .withNewOperator("Exists")
-                .withNewKey(topologyKey)
+                .withOperator("Exists")
+                .withKey(topologyKey)
                 .build();
 
         if (userAffinity != null
@@ -542,5 +550,23 @@ public class ModelUtils {
             model.setMetricsEnabled(true);
             model.setMetricsConfigInCm(resourceWithMetrics.getMetricsConfig());
         }
+    }
+
+    /**
+     * Creates the OwnerReference based on the resource passed as parameter
+     *
+     * @param owner     The resource which should be the owner
+     *
+     * @return          The new OwnerReference
+     */
+    public static OwnerReference createOwnerReference(HasMetadata owner)   {
+        return new OwnerReferenceBuilder()
+                .withApiVersion(owner.getApiVersion())
+                .withKind(owner.getKind())
+                .withName(owner.getMetadata().getName())
+                .withUid(owner.getMetadata().getUid())
+                .withBlockOwnerDeletion(false)
+                .withController(false)
+                .build();
     }
 }

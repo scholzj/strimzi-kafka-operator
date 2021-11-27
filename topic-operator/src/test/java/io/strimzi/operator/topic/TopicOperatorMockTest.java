@@ -4,14 +4,13 @@
  */
 package io.strimzi.operator.topic;
 
-import io.debezium.kafka.KafkaCluster;
-import io.debezium.kafka.ZookeeperServer;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaTopicList;
 import io.strimzi.api.kafka.model.KafkaTopic;
 import io.strimzi.api.kafka.model.KafkaTopicBuilder;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Future;
@@ -24,8 +23,8 @@ import io.vertx.micrometer.MicrometerMetricsOptions;
 import io.vertx.micrometer.VertxPrometheusOptions;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterAll;
@@ -35,29 +34,26 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.lang.reflect.Field;
-import java.nio.file.Files;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.CountDownLatch;
+import java.util.Objects;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 
 import static io.strimzi.test.TestUtils.waitFor;
-import static java.util.Arrays.asList;
+import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 
 @ExtendWith(VertxExtension.class)
 public class TopicOperatorMockTest {
-
     private static final Logger LOGGER = LogManager.getLogger(TopicOperatorMockTest.class);
 
     private KubernetesClient kubeClient;
     private Session session;
-    private KafkaCluster kafkaCluster;
+    private EmbeddedKafkaCluster cluster;
     private static Vertx vertx;
     private String deploymentId;
     private AdminClient adminClient;
@@ -69,7 +65,7 @@ public class TopicOperatorMockTest {
     // TODO this is all in common with TOIT, so factor out a common base class
 
     @BeforeAll
-    public static void before() {
+    public static void beforeAll() {
         VertxOptions options = new VertxOptions().setMetricsOptions(
                 new MicrometerMetricsOptions()
                         .setPrometheusOptions(new VertxPrometheusOptions().setEnabled(true))
@@ -78,40 +74,35 @@ public class TopicOperatorMockTest {
     }
 
     @AfterAll
-    public static void after() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-        vertx.close(closed -> {
-            latch.countDown();
-        });
-        latch.await(30, TimeUnit.SECONDS);
+    public static void afterAll() throws InterruptedException, ExecutionException {
+        vertx.close().toCompletionStage().toCompletableFuture().get();
     }
 
     @BeforeEach
-    public void createMockKube(VertxTestContext context) throws Exception {
+    public void setup(VertxTestContext context) throws Exception {
+        //Create cluster in @BeforeEach instead of @BeforeAll as once the checkpoints causing premature success were fixed,
+        //tests were failing due to topic "my-topic" already existing, and trying to delete the topics at the end of the test was timing out occasionally.
+        //So works best when the cluster is recreated for each test to avoid shared state
+        cluster = new EmbeddedKafkaCluster(1);
+        cluster.start();
+
         MockKube mockKube = new MockKube();
         mockKube.withCustomResourceDefinition(Crds.kafkaTopic(),
                         KafkaTopic.class, KafkaTopicList.class, KafkaTopic::getStatus, KafkaTopic::setStatus);
+
         kubeClient = mockKube.build();
+        adminClient = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, cluster.bootstrapServers()));
 
-        kafkaCluster = new KafkaCluster();
-        kafkaCluster.addBrokers(1);
-        kafkaCluster.deleteDataPriorToStartup(true);
-        kafkaCluster.deleteDataUponShutdown(true);
-        kafkaCluster.usingDirectory(Files.createTempDirectory("operator-integration-test").toFile());
-        kafkaCluster.startup();
+        Config topicConfig = new Config(Map.of(
+            Config.KAFKA_BOOTSTRAP_SERVERS.key, cluster.bootstrapServers(),
+            Config.ZOOKEEPER_CONNECT.key, cluster.zKConnectString(),
+            Config.ZOOKEEPER_CONNECTION_TIMEOUT_MS.key, "30000",
+            Config.NAMESPACE.key, "myproject",
+            Config.CLIENT_ID.key, "myproject-client-id",
+            Config.FULL_RECONCILIATION_INTERVAL_MS.key, "10000"
+        ));
 
-        Properties p = new Properties();
-        p.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaCluster.brokerList());
-        adminClient = AdminClient.create(p);
-
-        Map<String, String> m = new HashMap();
-        m.put(io.strimzi.operator.topic.Config.KAFKA_BOOTSTRAP_SERVERS.key, kafkaCluster.brokerList());
-        m.put(io.strimzi.operator.topic.Config.ZOOKEEPER_CONNECT.key, "localhost:" + zkPort(kafkaCluster));
-        m.put(io.strimzi.operator.topic.Config.ZOOKEEPER_CONNECTION_TIMEOUT_MS.key, "30000");
-        m.put(io.strimzi.operator.topic.Config.NAMESPACE.key, "myproject");
-        m.put(io.strimzi.operator.topic.Config.CLIENT_ID.key, "myproject-client-id");
-        m.put(io.strimzi.operator.topic.Config.FULL_RECONCILIATION_INTERVAL_MS.key, "10000");
-        session = new Session(kubeClient, new io.strimzi.operator.topic.Config(m));
+        session = new Session(kubeClient, topicConfig);
 
         Checkpoint async = context.checkpoint();
         vertx.deployVerticle(session, ar -> {
@@ -121,9 +112,7 @@ public class TopicOperatorMockTest {
                 topicWatcher = session.topicWatcher;
                 topicsWatcher = session.topicsWatcher;
                 metrics = session.metricsRegistry;
-                metrics.forEachMeter(meter -> {
-                    metrics.remove(meter);
-                });
+                metrics.forEachMeter(meter -> metrics.remove(meter));
                 async.flag();
             } else {
                 ar.cause().printStackTrace();
@@ -142,13 +131,10 @@ public class TopicOperatorMockTest {
             () -> this.topicsConfigWatcher.started());
         waitFor("Topic watcher not started", 1_000, timeout,
             () -> this.topicsWatcher.started());
-        //waitFor(context, () -> this.topicsConfigWatcher.started(), timeout, "Topic configs watcher not started");
-        //waitFor(context, () -> this.topicWatcher.started(), timeout, "Topic watcher not started");
     }
 
     @AfterEach
-    public void tearDown(VertxTestContext context) throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
+    public void tearDown(VertxTestContext context) {
         if (vertx != null && deploymentId != null) {
             vertx.undeploy(deploymentId, undeployResult -> {
                 topicWatcher.stop();
@@ -166,26 +152,13 @@ public class TopicOperatorMockTest {
                 if (adminClient != null) {
                     adminClient.close();
                 }
-                if (kafkaCluster != null) {
-                    kafkaCluster.shutdown();
-                    waitFor("stop kafka cluster", 1_000, 30_000, () -> !kafkaCluster.isRunning());
-                }
-                latch.countDown();
-            });
-        }
-        latch.await(30, TimeUnit.SECONDS);
-        context.completeNow();
-    }
 
-    private static int zkPort(KafkaCluster cluster) {
-        // TODO Method was added in DBZ-540, so no need for reflection once
-        // dependency gets upgraded
-        try {
-            Field zkServerField = KafkaCluster.class.getDeclaredField("zkServer");
-            zkServerField.setAccessible(true);
-            return ((ZookeeperServer) zkServerField.get(cluster)).getPort();
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
+                cluster.stop();
+                
+                context.completeNow();
+            });
+        } else {
+            context.completeNow();
         }
     }
 
@@ -199,7 +172,7 @@ public class TopicOperatorMockTest {
     }
 
     @Test
-    public void testCreatedWithoutTopicNameInKube(VertxTestContext context) throws InterruptedException {
+    public void testCreatedWithoutTopicNameInKube(VertxTestContext context) throws InterruptedException, ExecutionException {
         LOGGER.info("Test started");
 
         int retention = 100_000_000;
@@ -219,7 +192,7 @@ public class TopicOperatorMockTest {
         testCreatedInKube(context, kt);
     }
 
-    void testCreatedInKube(VertxTestContext context, KafkaTopic kt) throws InterruptedException {
+    void testCreatedInKube(VertxTestContext context, KafkaTopic kt) throws InterruptedException, ExecutionException {
         String kubeName = kt.getMetadata().getName();
         String kafkaName = kt.getSpec().getTopicName() != null ? kt.getSpec().getTopicName() : kubeName;
         int retention = (Integer) kt.getSpec().getConfig().get("retention.bytes");
@@ -229,13 +202,13 @@ public class TopicOperatorMockTest {
         // Check created in Kafka
         waitUntilTopicExistsInKafka(kafkaName);
         LOGGER.info("Topic has been created");
-        Topic fromKafka = getFromKafka(context, kafkaName);
+        Topic fromKafka = getFromKafka(kafkaName);
         context.verify(() -> assertThat(fromKafka.getTopicName().toString(), is(kafkaName)));
-        //context.assertEquals(kubeName, fromKafka.getResourceName().toString());
+
         // Reconcile after no changes
         reconcile(context);
         // Check things still the same
-        context.verify(() -> assertThat(fromKafka, is(getFromKafka(context, kafkaName))));
+        context.verify(() -> assertThat(fromKafka, is(getFromKafka(kafkaName))));
 
         // Config change + reconcile
         updateInKube(new KafkaTopicBuilder(kt).editSpec().addToConfig("retention.bytes", retention + 1).endSpec().build());
@@ -244,79 +217,48 @@ public class TopicOperatorMockTest {
         reconcile(context);
 
         // Check things still the same
-        context.verify(() -> assertThat(getFromKafka(context, kafkaName), is(new Topic.Builder(fromKafka)
-                .withConfigEntry("retention.bytes", Integer.toString(retention + 1))
-                .build())));
-
-        // Reconcile after change #partitions change
-        // Check things still the same
-        // Try to add a matching spec.topicName
-        // Check things still the same
-        // Try to change spec.topicName
-        // Check error
-        // Try to change spec.topicName back
-        // Check things still the same (recover from error)
-        // Try to remove spec.topicName
-        // Check things still the same
-    }
-
-    Topic getFromKafka(VertxTestContext context, String topicName) throws InterruptedException {
-        AtomicReference<Topic> ref = new AtomicReference<>();
-        Checkpoint async = context.checkpoint();
-        Future<TopicMetadata> kafkaMetadata = session.kafka.topicMetadata(new TopicName(topicName));
-        kafkaMetadata.map(metadata -> TopicSerialization.fromTopicMetadata(metadata)).onComplete(fromKafka -> {
-            if (fromKafka.succeeded()) {
-                ref.set(fromKafka.result());
-            } else {
-                context.failNow(fromKafka.cause());
-            }
-            async.flag();
+        context.verify(() -> {
+            assertThat(getFromKafka(kafkaName), is(new Topic.Builder(fromKafka)
+                    .withConfigEntry("retention.bytes", Integer.toString(retention + 1))
+                    .build()));
+            context.completeNow();
         });
-        if (!context.awaitCompletion(60, TimeUnit.SECONDS)) {
-            context.failNow(new Throwable("Test timeout"));
-        }
-        return ref.get();
     }
 
-    private Config waitUntilTopicExistsInKafka(String topicName) {
-        return waitUntilTopicInKafka(topicName, desc -> desc != null);
+    Topic getFromKafka(String topicName) throws InterruptedException, ExecutionException {
+        Future<TopicMetadata> kafkaMetadata = session.kafka.topicMetadata(Reconciliation.DUMMY_RECONCILIATION, new TopicName(topicName));
+        return kafkaMetadata.map(TopicSerialization::fromTopicMetadata).toCompletionStage().toCompletableFuture().get();
     }
 
-    private Config waitUntilTopicInKafka(String topicName, Predicate<Config> p) {
+    private void waitUntilTopicExistsInKafka(String topicName) {
+        waitUntilTopicInKafka(topicName, Objects::nonNull);
+    }
+
+    private void waitUntilTopicInKafka(String topicName, Predicate<org.apache.kafka.clients.admin.Config> p) {
         ConfigResource configResource = new ConfigResource(ConfigResource.Type.TOPIC, topicName);
-        AtomicReference<Config> ref = new AtomicReference<>();
         waitFor("Creation of topic " + topicName, 1_000, 60_000, () -> {
             try {
-                Map<ConfigResource, Config> descriptionMap = adminClient.describeConfigs(asList(configResource)).all().get();
-                Config desc = descriptionMap.get(configResource);
-                if (p.test(desc)) {
-                    ref.set(desc);
-                    return true;
-                }
-                return false;
+                var descriptionMap = adminClient.describeConfigs(List.of(configResource)).all().get();
+                var desc = descriptionMap.get(configResource);
+                return p.test(desc);
             } catch (Exception e) {
                 return false;
             }
         });
-        return ref.get();
     }
 
-    void reconcile(VertxTestContext context) throws InterruptedException {
-        Checkpoint async = context.checkpoint();
+    void reconcile(VertxTestContext context) throws InterruptedException, ExecutionException {
+        //Block on Java future.get() to ensure blocking behaviour that appears required
         session.topicOperator.reconcileAllTopics("test").onComplete(ar -> {
             if (!ar.succeeded()) {
                 context.failNow(ar.cause());
             }
-            async.flag();
-        });
-        if (!context.awaitCompletion(60, TimeUnit.SECONDS)) {
-            context.failNow(new Throwable("Test timeout"));
-        }
+        }).toCompletionStage().toCompletableFuture().get();
     }
 
 
     @Test
-    public void testCreatedWithSameTopicNameInKube(VertxTestContext context) throws InterruptedException {
+    public void testCreatedWithSameTopicNameInKube(VertxTestContext context) throws InterruptedException, ExecutionException {
 
         int retention = 100_000_000;
         KafkaTopic kt = new KafkaTopicBuilder()
@@ -336,7 +278,7 @@ public class TopicOperatorMockTest {
     }
 
     @Test
-    public void testCreatedWithDifferentTopicNameInKube(VertxTestContext context) throws InterruptedException {
+    public void testCreatedWithDifferentTopicNameInKube(VertxTestContext context) throws InterruptedException, ExecutionException {
         int retention = 100_000_000;
         KafkaTopic kt = new KafkaTopicBuilder()
                 .withNewMetadata()
@@ -355,7 +297,7 @@ public class TopicOperatorMockTest {
     }
 
     @Test
-    public void testCreatedWithDefaultsInKube(VertxTestContext context) throws InterruptedException {
+    public void testCreatedWithDefaultsInKube(VertxTestContext context) throws InterruptedException, ExecutionException {
         int retention = 100_000_000;
         KafkaTopic kt = new KafkaTopicBuilder()
                 .withNewMetadata()
@@ -368,6 +310,57 @@ public class TopicOperatorMockTest {
                 .endSpec().build();
     
         testCreatedInKube(context, kt);
+    }
+
+    @Test
+    public void testReconciliationPaused(VertxTestContext context) throws InterruptedException, ExecutionException {
+        LOGGER.info("Test started");
+
+        int retention = 100_000_000;
+        KafkaTopic kt = new KafkaTopicBuilder()
+                .withNewMetadata()
+                    .withName("my-topic")
+                    .withNamespace("myproject")
+                    .addToLabels(Labels.STRIMZI_KIND_LABEL, "topic")
+                    .addToLabels(Labels.KUBERNETES_NAME_LABEL, "topic-operator")
+                    .withAnnotations(singletonMap("strimzi.io/pause-reconciliation", "true"))
+                .endMetadata()
+                .withNewSpec()
+                    .withPartitions(1)
+                    .withReplicas(1)
+                    .addToConfig("retention.bytes", retention)
+                .endSpec()
+                .build();
+
+        testNotCreatedInKube(context, kt);
+    }
+
+    void testNotCreatedInKube(VertxTestContext context, KafkaTopic kt) throws InterruptedException, ExecutionException {
+        String kubeName = kt.getMetadata().getName();
+        String kafkaName = kt.getSpec().getTopicName() != null ? kt.getSpec().getTopicName() : kubeName;
+        int retention = (Integer) kt.getSpec().getConfig().get("retention.bytes");
+
+        createInKube(kt);
+
+        Thread.sleep(2000);
+        LOGGER.info("Topic has not been created");
+        Topic fromKafka = getFromKafka(kafkaName);
+        context.verify(() -> assertThat(fromKafka, is(nullValue())));
+        // Reconcile after no changes
+        reconcile(context);
+        // Check things still the same
+        context.verify(() -> assertThat(fromKafka, is(nullValue())));
+
+        // Config change + reconcile
+        updateInKube(new KafkaTopicBuilder(kt).editSpec().addToConfig("retention.bytes", retention + 1).endSpec().build());
+        // Another reconciliation
+        reconcile(context);
+
+        // Check things still the same
+        context.verify(() -> {
+            assertThat(getFromKafka(kafkaName), is(nullValue()));
+            context.completeNow();
+        });
     }
 
 }

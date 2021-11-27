@@ -31,8 +31,8 @@ import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressList;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyList;
-import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
-import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudgetList;
+import io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget;
+import io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudgetList;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBindingList;
 import io.fabric8.kubernetes.api.model.rbac.Role;
@@ -55,6 +55,7 @@ import io.fabric8.kubernetes.client.dsl.PolicyAPIGroupDSL;
 import io.fabric8.kubernetes.client.dsl.RbacAPIGroupDSL;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.kubernetes.client.dsl.RollableScalableResource;
+import io.fabric8.kubernetes.client.dsl.V1beta1PolicyAPIGroupDSL;
 import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import io.fabric8.openshift.api.model.Route;
 import io.fabric8.openshift.api.model.Build;
@@ -335,15 +336,17 @@ public class MockKube {
 
         // Policy group
         PolicyAPIGroupDSL policy = mock(PolicyAPIGroupDSL.class);
+        V1beta1PolicyAPIGroupDSL v1beta1policy = mock(V1beta1PolicyAPIGroupDSL.class);
         when(mockClient.policy()).thenReturn(policy);
-        podDisruptionBudgedMockBuilder.build2(mockClient.policy()::podDisruptionBudget);
+        when(policy.v1beta1()).thenReturn(v1beta1policy);
+        podDisruptionBudgedMockBuilder.build2(mockClient.policy().v1beta1()::podDisruptionBudget);
 
         // RBAC group
         RbacAPIGroupDSL rbac = mock(RbacAPIGroupDSL.class);
         when(mockClient.rbac()).thenReturn(rbac);
         roleBindingMockBuilder.build2(mockClient.rbac()::roleBindings);
         roleMockBuilder.build2(mockClient.rbac()::roles);
-        clusterRoleBindingMockBuilder.build2(mockClient.rbac()::clusterRoleBindings);
+        clusterRoleBindingMockBuilder.buildNns(mockClient.rbac()::clusterRoleBindings);
 
         // Openshift group
         OpenShiftClient mockOpenShiftClient = mock(OpenShiftClient.class);
@@ -388,6 +391,17 @@ public class MockKube {
                 });
 
         when(mockClient.customResources(any(Class.class), any(Class.class)))
+                .thenAnswer(invocation -> {
+                    Class<CustomResource> crClass = invocation.getArgument(0);
+                    String key = crdKey(crClass);
+                    CreateOrReplaceable createOrReplaceable = crdMixedOps.get(key);
+                    if (createOrReplaceable == null) {
+                        throw new RuntimeException("Unknown CRD " + key);
+                    }
+                    return createOrReplaceable;
+                });
+
+        when(mockClient.resources(any(Class.class), any(Class.class)))
                 .thenAnswer(invocation -> {
                     Class<CustomResource> crClass = invocation.getArgument(0);
                     String key = crdKey(crClass);

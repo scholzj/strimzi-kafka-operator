@@ -4,14 +4,15 @@
  */
 package io.strimzi.systemtest.resources;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodCondition;
-import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.admissionregistration.v1.ValidatingWebhookConfiguration;
+import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinition;
+import io.fabric8.kubernetes.api.model.rbac.ClusterRole;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.client.CustomResource;
 import io.fabric8.kubernetes.client.CustomResourceList;
@@ -24,12 +25,13 @@ import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.api.kafka.model.Spec;
 import io.strimzi.api.kafka.model.status.Condition;
 import io.strimzi.api.kafka.model.status.Status;
+import io.strimzi.systemtest.BeforeAllOnce;
 import io.strimzi.systemtest.Constants;
+import io.strimzi.systemtest.Environment;
 import io.strimzi.systemtest.enums.DeploymentTypes;
 import io.strimzi.systemtest.resources.crd.KafkaBridgeResource;
 import io.strimzi.systemtest.resources.crd.KafkaClientsResource;
 import io.strimzi.systemtest.resources.crd.KafkaConnectResource;
-import io.strimzi.systemtest.resources.crd.KafkaConnectS2IResource;
 import io.strimzi.systemtest.resources.crd.KafkaConnectorResource;
 import io.strimzi.systemtest.resources.crd.KafkaMirrorMaker2Resource;
 import io.strimzi.systemtest.resources.crd.KafkaMirrorMakerResource;
@@ -37,12 +39,20 @@ import io.strimzi.systemtest.resources.crd.KafkaRebalanceResource;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
 import io.strimzi.systemtest.resources.crd.KafkaTopicResource;
 import io.strimzi.systemtest.resources.crd.KafkaUserResource;
+import io.strimzi.systemtest.resources.draincleaner.DrainCleanerResource;
+import io.strimzi.systemtest.resources.kubernetes.ClusterOperatorCustomResourceDefinition;
 import io.strimzi.systemtest.resources.kubernetes.ClusterRoleBindingResource;
+import io.strimzi.systemtest.resources.kubernetes.ClusterRoleResource;
+import io.strimzi.systemtest.resources.kubernetes.ConfigMapResource;
 import io.strimzi.systemtest.resources.kubernetes.DeploymentResource;
 import io.strimzi.systemtest.resources.kubernetes.JobResource;
 import io.strimzi.systemtest.resources.kubernetes.NetworkPolicyResource;
 import io.strimzi.systemtest.resources.kubernetes.RoleBindingResource;
+import io.strimzi.systemtest.resources.kubernetes.RoleResource;
+import io.strimzi.systemtest.resources.kubernetes.SecretResource;
+import io.strimzi.systemtest.resources.kubernetes.ServiceAccountResource;
 import io.strimzi.systemtest.resources.kubernetes.ServiceResource;
+import io.strimzi.systemtest.resources.kubernetes.ValidatingWebhookConfigurationResource;
 import io.strimzi.systemtest.resources.operator.BundleResource;
 import io.strimzi.systemtest.utils.StUtils;
 import io.strimzi.test.TestUtils;
@@ -61,6 +71,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static java.util.Arrays.asList;
@@ -75,7 +86,6 @@ public class ResourceManager {
 
     private static final Logger LOGGER = LogManager.getLogger(ResourceManager.class);
 
-    public static final String STRIMZI_PATH_TO_CO_CONFIG = TestUtils.USER_PATH + "/../packaging/install/cluster-operator/060-Deployment-strimzi-cluster-operator.yaml";
     public static final long CR_CREATION_TIMEOUT = ResourceOperation.getTimeoutForResourceReadiness();
 
     public static final Map<String, Stack<ResourceItem>> STORED_RESOURCES = new LinkedHashMap<>();
@@ -107,7 +117,6 @@ public class ResourceManager {
         new KafkaClientsResource(),
         new KafkaConnectorResource(),
         new KafkaConnectResource(),
-        new KafkaConnectS2IResource(),
         new KafkaMirrorMaker2Resource(),
         new KafkaMirrorMakerResource(),
         new KafkaRebalanceResource(),
@@ -120,7 +129,14 @@ public class ResourceManager {
         new JobResource(),
         new NetworkPolicyResource(),
         new RoleBindingResource(),
-        new ServiceResource()
+        new ServiceResource(),
+        new ConfigMapResource(),
+        new ServiceAccountResource(),
+        new RoleResource(),
+        new ClusterRoleResource(),
+        new ClusterOperatorCustomResourceDefinition(),
+        new SecretResource(),
+        new ValidatingWebhookConfigurationResource()
     };
 
     @SafeVarargs
@@ -135,11 +151,16 @@ public class ResourceManager {
             LOGGER.info("Create/Update of {} {} in namespace {}",
                 resource.getKind(), resource.getMetadata().getName(), resource.getMetadata().getNamespace() == null ? "(not set)" : resource.getMetadata().getNamespace());
 
-            // if it is parallel namespace test we are gonna replace resource a namespace
-            if (StUtils.isParallelNamespaceTest(testContext)) {
-                final String namespace = testContext.getStore(ExtensionContext.Namespace.GLOBAL).get(Constants.NAMESPACE_KEY).toString();
-                LOGGER.info("Using namespace: {}", namespace);
-                resource.getMetadata().setNamespace(namespace);
+            // ignore test context of shared Cluster Operator
+            if (testContext != BeforeAllOnce.getSharedExtensionContext()) {
+                // if it is parallel namespace test we are gonna replace resource a namespace
+                if (StUtils.isParallelNamespaceTest(testContext)) {
+                    if (!Environment.isNamespaceRbacScope()) {
+                        final String namespace = testContext.getStore(ExtensionContext.Namespace.GLOBAL).get(Constants.NAMESPACE_KEY).toString();
+                        LOGGER.info("Using namespace: {}", namespace);
+                        resource.getMetadata().setNamespace(namespace);
+                    }
+                }
             }
 
             type.create(resource);
@@ -185,8 +206,8 @@ public class ResourceManager {
         assertNotNull(resource.getMetadata());
         assertNotNull(resource.getMetadata().getName());
 
-        // cluster role binding does not need namespace...
-        if (!(resource instanceof ClusterRoleBinding)) {
+        // cluster role binding and custom resource definition does not need namespace...
+        if (!(resource instanceof ClusterRoleBinding || resource instanceof CustomResourceDefinition || resource instanceof ClusterRole || resource instanceof ValidatingWebhookConfiguration)) {
             assertNotNull(resource.getMetadata().getNamespace());
         }
 
@@ -219,6 +240,9 @@ public class ResourceManager {
 
         // sync all resources
         for (ResourceItem resource : resources) {
+            if (resource.getResource() == null) {
+                continue;
+            }
             ResourceType<T> type = findResourceType((T) resource.getResource());
 
             waitResourceCondition((T) resource.getResource(), ResourceCondition.readiness(type));
@@ -226,18 +250,6 @@ public class ResourceManager {
     }
 
     private static final ObjectMapper MAPPER = new ObjectMapper(new YAMLFactory());
-
-    public static <T extends HasMetadata> String resourceToString(T resource) {
-        if (resource == null) {
-            return "null";
-        }
-        try {
-            return MAPPER.writeValueAsString(resource);
-        } catch (JsonProcessingException e) {
-            LOGGER.error("Resource {} is not convertible to YAML: {}", resource.getMetadata().getName(), e.getMessage());
-            return "unknown";
-        }
-    }
 
     public static <T extends CustomResource, L extends CustomResourceList<T>> void replaceCrdResource(Class<T> crdClass, Class<L> listClass, String resourceName, Consumer<T> editor, String namespace) {
         Resource<T> namedResource = Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(namespace).withName(resourceName);
@@ -260,8 +272,24 @@ public class ResourceManager {
         if (!STORED_RESOURCES.containsKey(testContext.getDisplayName()) || STORED_RESOURCES.get(testContext.getDisplayName()).isEmpty()) {
             LOGGER.info("In context {} is everything deleted.", testContext.getDisplayName());
         }
-        while (STORED_RESOURCES.containsKey(testContext.getDisplayName()) && !STORED_RESOURCES.get(testContext.getDisplayName()).isEmpty()) {
-            STORED_RESOURCES.get(testContext.getDisplayName()).pop().getThrowableRunner().run();
+
+
+        // if stack is created for specific test suite or test case
+        AtomicInteger numberOfResources = STORED_RESOURCES.get(testContext.getDisplayName()) != null ?
+            new AtomicInteger(STORED_RESOURCES.get(testContext.getDisplayName()).size()) :
+            // stack has no elements
+            new AtomicInteger(0);
+        while (STORED_RESOURCES.containsKey(testContext.getDisplayName()) && numberOfResources.get() > 0) {
+            STORED_RESOURCES.get(testContext.getDisplayName()).parallelStream().parallel().forEach(
+                resourceItem -> {
+                    try {
+                        resourceItem.getThrowableRunner().run();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                    numberOfResources.decrementAndGet();
+                }
+            );
         }
         LOGGER.info(String.join("", Collections.nCopies(76, "#")));
         STORED_RESOURCES.remove(testContext.getDisplayName());
@@ -345,10 +373,6 @@ public class ResourceManager {
         return waitForResourceStatus(operation, resource, status, resourceTimeout);
     }
 
-    private static Deployment getDeploymentFromYaml(String yamlPath) {
-        return TestUtils.configFromYaml(yamlPath, Deployment.class);
-    }
-
     public static String getCoDeploymentName() {
         return coDeploymentName;
     }
@@ -376,14 +400,13 @@ public class ResourceManager {
 
             switch (deploymentTypes) {
                 case BundleClusterOperator:
-                    // new BundleResource()
-                    return (ResourceType<T>) resourceTypes[11];
+                    return (ResourceType<T>) new BundleResource();
                 case KafkaClients:
-                   // new KafkaClientsResource(),
-                    return (ResourceType<T>) resourceTypes[1];
+                    return (ResourceType<T>) new KafkaClientsResource();
+                case DrainCleaner:
+                    return (ResourceType<T>) new DrainCleanerResource();
                 default:
-                    // new DeploymentResource()
-                    return (ResourceType<T>) resourceTypes[13];
+                    return (ResourceType<T>) new DeploymentResource();
             }
         }
 

@@ -6,6 +6,8 @@ package io.strimzi.operator.cluster.operator.resource;
 
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.api.kafka.model.status.Condition;
 import io.strimzi.api.kafka.model.storage.EphemeralStorage;
 import io.strimzi.api.kafka.model.storage.EphemeralStorageBuilder;
@@ -16,6 +18,7 @@ import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.KafkaConfiguration;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.common.Reconciliation;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -38,14 +41,21 @@ public class KafkaSpecCheckerTest {
 
     private KafkaSpecChecker generateChecker(Kafka kafka) {
         KafkaVersion.Lookup versions = KafkaVersionTestUtils.getKafkaVersionLookup();
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(kafka, versions);
-        ZookeeperCluster zkCluster = ZookeeperCluster.fromCrd(kafka, versions);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, versions);
+        ZookeeperCluster zkCluster = ZookeeperCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafka, versions);
         return new KafkaSpecChecker(kafka.getSpec(), versions, kafkaCluster, zkCluster);
     }
 
     @Test
     public void checkEmptyWarnings() {
-        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT);
+        Map<String, Object> kafkaOptions = new HashMap<>();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+                new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
         KafkaSpecChecker checker = generateChecker(kafka);
         assertThat(checker.run(), empty());
     }
@@ -53,7 +63,7 @@ public class KafkaSpecCheckerTest {
     @Test
     public void checkKafkaStorage() {
         Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 1, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, emptyMap(), emptyMap(),
+                null, emptyMap(), emptyMap(),
             new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
                 .editSpec()
                     .editZookeeper()
@@ -61,6 +71,7 @@ public class KafkaSpecCheckerTest {
                     .endZookeeper()
                 .endSpec()
             .build();
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(1));
@@ -73,7 +84,7 @@ public class KafkaSpecCheckerTest {
     @Test
     public void checkKafkaJbodStorage() {
         Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 1, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, emptyMap(), emptyMap(),
+                null, emptyMap(), emptyMap(),
             new JbodStorageBuilder().withVolumes(new EphemeralStorageBuilder().withId(1).build(),
                                                  new EphemeralStorageBuilder().withId(2).build()).build(),
             new EphemeralStorage(), null, null, null, null))
@@ -83,6 +94,7 @@ public class KafkaSpecCheckerTest {
                     .endZookeeper()
                 .endSpec()
             .build();
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(1));
@@ -94,8 +106,12 @@ public class KafkaSpecCheckerTest {
 
     @Test
     public void checkZookeeperStorage() {
+        Map<String, Object> kafkaOptions = new HashMap<>();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
         Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, emptyMap(), emptyMap(),
+                null, kafkaOptions, emptyMap(),
             new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
                 .editSpec()
                     .editZookeeper()
@@ -103,6 +119,7 @@ public class KafkaSpecCheckerTest {
                     .endZookeeper()
                 .endSpec()
             .build();
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(1));
@@ -114,7 +131,14 @@ public class KafkaSpecCheckerTest {
 
     @Test
     public void checkZookeeperReplicas() {
-        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 2, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT);
+        Map<String, Object> kafkaOptions = new HashMap<>();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 2);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 1);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 2, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+                new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(1));
@@ -126,7 +150,14 @@ public class KafkaSpecCheckerTest {
 
     @Test
     public void checkZookeeperEvenReplicas() {
-        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 4, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT);
+        Map<String, Object> kafkaOptions = new HashMap<>();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 4, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+                new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(1));
@@ -140,8 +171,11 @@ public class KafkaSpecCheckerTest {
     public void checkLogMessageFormatVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.LOG_MESSAGE_FORMAT_VERSION, KafkaVersionTestUtils.PREVIOUS_FORMAT_VERSION);
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
         Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
+                null, kafkaOptions, emptyMap(),
             new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
                 .editSpec()
                     .editKafka()
@@ -149,6 +183,7 @@ public class KafkaSpecCheckerTest {
                     .endKafka()
                 .endSpec()
             .build();
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(1));
@@ -162,10 +197,12 @@ public class KafkaSpecCheckerTest {
     public void checkLogMessageFormatWithoutVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.LOG_MESSAGE_FORMAT_VERSION, KafkaVersionTestUtils.PREVIOUS_FORMAT_VERSION);
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
-            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
-                .build();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
 
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
@@ -180,10 +217,12 @@ public class KafkaSpecCheckerTest {
     public void checkLogMessageFormatWithRightVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.LOG_MESSAGE_FORMAT_VERSION, KafkaVersionTestUtils.LATEST_FORMAT_VERSION);
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
-            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
-                .build();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
 
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
@@ -194,10 +233,12 @@ public class KafkaSpecCheckerTest {
     public void checkLogMessageFormatWithRightLongVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.LOG_MESSAGE_FORMAT_VERSION, KafkaVersionTestUtils.LATEST_FORMAT_VERSION + "-IV0");
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
-            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
-                .build();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
 
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
@@ -208,15 +249,20 @@ public class KafkaSpecCheckerTest {
     public void checkInterBrokerProtocolVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.INTERBROKER_PROTOCOL_VERSION, KafkaVersionTestUtils.PREVIOUS_PROTOCOL_VERSION);
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
         Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
+                null, kafkaOptions, emptyMap(),
             new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
                 .editSpec()
                     .editKafka()
                         .withVersion(KafkaVersionTestUtils.LATEST_KAFKA_VERSION)
+                        .withListeners(new GenericKafkaListenerBuilder().withName("plain").withPort(9092).withTls(false).withType(KafkaListenerType.INTERNAL).build())
                     .endKafka()
                 .endSpec()
             .build();
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(1));
@@ -230,10 +276,12 @@ public class KafkaSpecCheckerTest {
     public void checkInterBrokerProtocolWithoutVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.INTERBROKER_PROTOCOL_VERSION, KafkaVersionTestUtils.PREVIOUS_PROTOCOL_VERSION);
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
-            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
-                .build();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
 
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
@@ -248,10 +296,12 @@ public class KafkaSpecCheckerTest {
     public void checkInterBrokerProtocolWithCorrectVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.INTERBROKER_PROTOCOL_VERSION, KafkaVersionTestUtils.LATEST_PROTOCOL_VERSION);
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
-            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
-                .build();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
 
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
@@ -262,10 +312,12 @@ public class KafkaSpecCheckerTest {
     public void checkInterBrokerProtocolWithCorrectLongVersion() {
         Map<String, Object> kafkaOptions = new HashMap<>();
         kafkaOptions.put(KafkaConfiguration.INTERBROKER_PROTOCOL_VERSION, KafkaVersionTestUtils.LATEST_PROTOCOL_VERSION + "-IV0");
-        Kafka kafka = new KafkaBuilder(ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-            emptyMap(), null, kafkaOptions, emptyMap(),
-            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null))
-                .build();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+            new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
 
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
@@ -274,11 +326,69 @@ public class KafkaSpecCheckerTest {
 
     @Test
     public void checkMultipleWarnings() {
-        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 1, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
-                emptyMap(), null, emptyMap(), emptyMap(),
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, emptyMap(), emptyMap(),
                 new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
         KafkaSpecChecker checker = generateChecker(kafka);
         List<Condition> warnings = checker.run();
         assertThat(warnings, hasSize(2));
+    }
+
+    @Test
+    public void checkReplicationFactorAndMinInsyncReplicasSet() {
+        Map<String, Object> kafkaOptions = new HashMap<>();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 3);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 2);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+                new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
+        KafkaSpecChecker checker = generateChecker(kafka);
+        List<Condition> warnings = checker.run();
+        assertThat(warnings, hasSize(0));
+    }
+
+    @Test
+    public void checkReplicationFactorAndMinInsyncReplicasSetToOne() {
+        Map<String, Object> kafkaOptions = new HashMap<>();
+        kafkaOptions.put(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR, 1);
+        kafkaOptions.put(KafkaConfiguration.MIN_INSYNC_REPLICAS, 1);
+
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, kafkaOptions, emptyMap(),
+                new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
+        KafkaSpecChecker checker = generateChecker(kafka);
+        List<Condition> warnings = checker.run();
+        assertThat(warnings, hasSize(0));
+    }
+
+    @Test
+    public void checkReplicationFactorAndMinInsyncReplicasUnsetOnSingleNode() {
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 1, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, emptyMap(), emptyMap(),
+                new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
+        KafkaSpecChecker checker = generateChecker(kafka);
+        List<Condition> warnings = checker.run();
+        // Two warnings are generated, but they are not the ones we are testing here
+        assertThat(warnings, hasSize(2));
+        assertThat(warnings.stream().anyMatch(w -> w.getMessage().contains(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR)), is(false));
+        assertThat(warnings.stream().anyMatch(w -> w.getMessage().contains(KafkaConfiguration.MIN_INSYNC_REPLICAS)), is(false));
+    }
+
+    @Test
+    public void checkReplicationFactorAndMinInsyncReplicasNotSet() {
+        Kafka kafka = ResourceUtils.createKafka(NAMESPACE, NAME, 3, IMAGE, HEALTH_DELAY, HEALTH_TIMEOUT,
+                null, emptyMap(), emptyMap(),
+                new EphemeralStorage(), new EphemeralStorage(), null, null, null, null);
+
+        KafkaSpecChecker checker = generateChecker(kafka);
+        List<Condition> warnings = checker.run();
+        assertThat(warnings, hasSize(2));
+        assertThat(warnings.stream().anyMatch(w -> w.getMessage().contains(KafkaConfiguration.DEFAULT_REPLICATION_FACTOR)), is(true));
+        assertThat(warnings.stream().anyMatch(w -> w.getMessage().contains(KafkaConfiguration.MIN_INSYNC_REPLICAS)), is(true));
     }
 }

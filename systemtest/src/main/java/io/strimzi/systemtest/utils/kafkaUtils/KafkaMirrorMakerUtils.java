@@ -22,6 +22,8 @@ public class KafkaMirrorMakerUtils {
      * @param clusterName name of KafkaMirrorMaker cluster
      * @param state desired state - like Ready
      */
+    // Deprecation is suppressed because of KafkaMirrorMaker
+    @SuppressWarnings("deprecation")
     public static boolean waitForKafkaMirrorMakerStatus(String namespaceName, String clusterName, Enum<?>  state) {
         KafkaMirrorMaker kafkaMirrorMaker = KafkaMirrorMakerResource.kafkaMirrorMakerClient().inNamespace(namespaceName).withName(clusterName).get();
         return ResourceManager.waitForResourceStatus(KafkaMirrorMakerResource.kafkaMirrorMakerClient(), kafkaMirrorMaker, state);
@@ -37,9 +39,5 @@ public class KafkaMirrorMakerUtils {
 
     public static boolean waitForKafkaMirrorMakerNotReady(String clusterName) {
         return waitForKafkaMirrorMakerStatus(kubeClient().getNamespace(), clusterName, NotReady);
-    }
-
-    public static boolean waitForKafkaMirrorMakerNotReady(String namespaceName, String clusterName) {
-        return waitForKafkaMirrorMakerStatus(namespaceName, clusterName, NotReady);
     }
 }

@@ -5,10 +5,6 @@
 package io.strimzi.operator.cluster.model;
 
 import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationOAuthBuilder;
-import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationScramSha512;
-import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
-import io.strimzi.api.kafka.model.listener.KafkaListeners;
-import io.strimzi.api.kafka.model.listener.KafkaListenersBuilder;
 import io.strimzi.api.kafka.model.listener.NodeAddressType;
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListener;
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
@@ -17,10 +13,10 @@ import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerCon
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerConfigurationBrokerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerConfigurationBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
-import io.strimzi.api.kafka.model.listener.arraylistener.ListenersConvertor;
 import io.strimzi.api.kafka.model.template.ExternalTrafficPolicy;
 import io.strimzi.api.kafka.model.template.IpFamily;
 import io.strimzi.api.kafka.model.template.IpFamilyPolicy;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.annotations.ParallelSuite;
 import io.strimzi.test.annotations.ParallelTest;
 
@@ -41,25 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @ParallelSuite
 public class ListenersValidatorTest {
     @ParallelTest
-    public void testValidateOldListener() {
-        KafkaListeners oldListeners = new KafkaListenersBuilder()
-                .withNewPlain()
-                    .withAuth(new KafkaListenerAuthenticationScramSha512())
-                .endPlain()
-                .withNewTls()
-                    .withAuth(new KafkaListenerAuthenticationTls())
-                .endTls()
-                .withNewKafkaListenerExternalRoute()
-                    .withAuth(new KafkaListenerAuthenticationTls())
-                .endKafkaListenerExternalRoute()
-                .build();
-
-        List<GenericKafkaListener> newListeners = ListenersConvertor.convertToNewFormat(oldListeners);
-        ListenersValidator.validate(3, newListeners);
-    }
-
-    @ParallelTest
-    public void testValidateNewListeners() {
+    public void testValidateListeners() {
         GenericKafkaListener listener1 = new GenericKafkaListenerBuilder()
                 .withName("listener1")
                 .withPort(9900)
@@ -73,7 +51,7 @@ public class ListenersValidatorTest {
                 .build();
 
         List<GenericKafkaListener> listeners = asList(listener1, listener2);
-        ListenersValidator.validate(3, listeners);
+        ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners);
     }
 
     @ParallelTest
@@ -92,7 +70,7 @@ public class ListenersValidatorTest {
 
         List<GenericKafkaListener> listeners = asList(listener1, listener2);
 
-        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners));
+        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners));
         assertThat(exception.getMessage(), containsString("every listener needs to have a unique port number"));
     }
 
@@ -677,7 +655,7 @@ public class ListenersValidatorTest {
 
         List<GenericKafkaListener> listeners = asList(listener1);
 
-        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners));
+        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners));
         assertThat(exception.getMessage(), allOf(
                 containsString("listener listener1: Introspection endpoint URI or JWKS endpoint URI has to be specified"),
                 containsString("listener listener1: Valid Issuer URI has to be specified or 'checkIssuer' set to 'false'")));
@@ -699,7 +677,7 @@ public class ListenersValidatorTest {
 
         List<GenericKafkaListener> listeners = asList(listener1);
 
-        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners));
+        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners));
         assertThat(exception.getMessage(), allOf(
                 containsString("listener 'listener1' cannot have an empty secret name in the brokerCertChainAndKey"),
                 containsString("listener 'listener1' cannot have an empty key in the brokerCertChainAndKey"),
@@ -778,7 +756,7 @@ public class ListenersValidatorTest {
 
         List<GenericKafkaListener> listeners = asList(listener);
 
-        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners));
+        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners));
         assertThat(exception.getMessage(), allOf(
                 containsString("listener listener1: At least one of 'enablePlain', 'enableOauthBearer' has to be set to 'true'")));
 
@@ -788,7 +766,7 @@ public class ListenersValidatorTest {
                 .build();
         List<GenericKafkaListener> listeners2 = asList(listener);
 
-        exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners2));
+        exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners2));
         assertThat(exception.getMessage(), allOf(
                 containsString("listener listener1: Introspection endpoint URI or JWKS endpoint URI has to be specified")));
 
@@ -798,7 +776,7 @@ public class ListenersValidatorTest {
                 .build();
         List<GenericKafkaListener> listeners3 = asList(listener);
 
-        assertDoesNotThrow(() -> ListenersValidator.validate(3, listeners3));
+        assertDoesNotThrow(() -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners3));
     }
 
     @ParallelTest
@@ -817,7 +795,7 @@ public class ListenersValidatorTest {
 
         List<GenericKafkaListener> listeners = asList(listener);
 
-        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners));
+        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners));
         assertThat(exception.getMessage(), allOf(
                 containsString("listener listener1: 'clientId' has to be configured when 'checkAudience' is 'true'")));
 
@@ -828,7 +806,7 @@ public class ListenersValidatorTest {
                 .build();
         List<GenericKafkaListener> listeners2 = asList(listener);
 
-        exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners2));
+        exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners2));
         assertThat(exception.getMessage(), allOf(
                 not(containsString("listener listener1: 'clientId' has to be configured when 'checkAudience' is 'true'"))));
     }
@@ -849,7 +827,7 @@ public class ListenersValidatorTest {
 
         List<GenericKafkaListener> listeners = asList(listener);
 
-        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners));
+        Exception exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners));
         assertThat(exception.getMessage(), allOf(
                 containsString("listener listener1: 'customClaimCheck' value not a valid JsonPath filter query - Failed to parse filter query: \"invalid\"")));
 
@@ -860,7 +838,7 @@ public class ListenersValidatorTest {
                 .build();
         List<GenericKafkaListener> listeners2 = asList(listener);
 
-        exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(3, listeners2));
+        exception = assertThrows(InvalidResourceException.class, () -> ListenersValidator.validate(Reconciliation.DUMMY_RECONCILIATION, 3, listeners2));
         assertThat(exception.getMessage(), allOf(
                 not(containsString("listener listener1: 'customClaimCheck' value not a valid JsonPath filter query - Failed to parse query: \"invalid\" at position: 0"))));
     }

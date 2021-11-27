@@ -4,15 +4,16 @@
  */
 package io.strimzi.systemtest.operators;
 
+import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRole;
 import io.strimzi.systemtest.AbstractST;
+import io.strimzi.systemtest.BeforeAllOnce;
 import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.annotations.IsolatedSuite;
+import io.strimzi.systemtest.resources.operator.SetupClusterOperator;
 import io.strimzi.systemtest.annotations.IsolatedTest;
-import io.strimzi.systemtest.resources.operator.BundleResource;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaUtils;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
@@ -21,25 +22,30 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
 import static io.strimzi.systemtest.Constants.REGRESSION;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 @Tag(REGRESSION)
+@IsolatedSuite
 class NamespaceRbacScopeOperatorST extends AbstractST {
-
-    static final String NAMESPACE = "roles-only-cluster-test";
-
-    private static final Logger LOGGER = LogManager.getLogger(NamespaceRbacScopeOperatorST.class);
 
     @IsolatedTest("This test case needs own Cluster Operator")
     void testNamespacedRbacScopeDeploysRoles(ExtensionContext extensionContext) {
+        assumeFalse(Environment.isOlmInstall() || Environment.isHelmInstall());
+
         String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
 
-        assumeTrue(Environment.isNamespaceRbacScope());
-        prepareEnvironment(extensionContext);
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .withExtraEnvVars(Collections.singletonList(new EnvVar(Environment.STRIMZI_RBAC_SCOPE_ENV, Environment.STRIMZI_RBAC_SCOPE_NAMESPACE, null)))
+            .createInstallation()
+            .runInstallation();
 
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3, 3)
             .editMetadata()
@@ -59,12 +65,5 @@ class NamespaceRbacScopeOperatorST extends AbstractST {
             })
             .collect(Collectors.toList());
         assertThat(strimziClusterRoles, is(Collections.emptyList()));
-    }
-
-    private void prepareEnvironment(ExtensionContext extensionContext) {
-        prepareEnvForOperator(extensionContext, NAMESPACE);
-        applyBindings(extensionContext, NAMESPACE);
-        // 060-Deployment
-        resourceManager.createResource(extensionContext, BundleResource.clusterOperator(NAMESPACE).build());
     }
 }

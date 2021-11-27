@@ -15,9 +15,11 @@ import io.strimzi.api.kafka.KafkaList;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.FeatureGates;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.Ca;
@@ -29,7 +31,6 @@ import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.operator.MockCertManager;
-import io.strimzi.test.annotations.ParallelTest;
 import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
@@ -40,6 +41,7 @@ import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Collections;
@@ -99,26 +101,23 @@ public class PartialRollingUpdateTest {
                 .withNewSpec()
                     .withNewKafka()
                         .withReplicas(5)
-                        .withNewListeners()
-                            .addNewGenericKafkaListener()
-                                .withName("plain")
-                                .withPort(9092)
-                                .withType(KafkaListenerType.INTERNAL)
-                                .withTls(false)
-                            .endGenericKafkaListener()
-                            .addNewGenericKafkaListener()
-                                .withName("tls")
-                                .withPort(9093)
-                                .withType(KafkaListenerType.INTERNAL)
-                                .withTls(true)
-                            .endGenericKafkaListener()
-                        .endListeners()
+                        .withListeners(new GenericKafkaListenerBuilder()
+                                    .withName("plain")
+                                    .withPort(9092)
+                                    .withType(KafkaListenerType.INTERNAL)
+                                    .withTls(false)
+                                    .build(),
+                                new GenericKafkaListenerBuilder()
+                                    .withName("tls")
+                                    .withPort(9093)
+                                    .withType(KafkaListenerType.INTERNAL)
+                                    .withTls(true)
+                                    .build())
                         .withNewPersistentClaimStorage()
                             .withSize("123")
                             .withStorageClass("foo")
                             .withDeleteClaim(true)
                         .endPersistentClaimStorage()
-                        .withMetrics(Collections.emptyMap())
                     .endKafka()
                     .withNewZookeeper()
                         .withReplicas(3)
@@ -127,10 +126,7 @@ public class PartialRollingUpdateTest {
                             .withStorageClass("foo")
                             .withDeleteClaim(true)
                         .endPersistentClaimStorage()
-                        .withMetrics(Collections.emptyMap())
                     .endZookeeper()
-                    .withNewTopicOperator()
-                    .endTopicOperator()
                 .endSpec()
                 .build();
 
@@ -180,7 +176,7 @@ public class PartialRollingUpdateTest {
                 ResourceUtils.zookeeperLeaderFinder(vertx, bootstrapClient),
                 ResourceUtils.adminClientProvider(), ResourceUtils.zookeeperScalerProvider(),
                 ResourceUtils.metricsProvider(), new PlatformFeaturesAvailability(true, KubernetesVersion.V1_16),
-                60_000L);
+                FeatureGates.NONE, 60_000L);
     }
 
     private void startKube() {
@@ -202,7 +198,7 @@ public class PartialRollingUpdateTest {
         LOGGER.info("Started test KafkaAssemblyOperator");
     }
 
-    @ParallelTest
+    @Test
     public void testReconcileOfPartiallyRolledKafkaCluster(VertxTestContext context) {
         kafkaSts.getSpec().getTemplate().getMetadata().getAnnotations().put(StatefulSetOperator.ANNO_STRIMZI_IO_GENERATION, "3");
         kafkaPod0.getMetadata().getAnnotations().put(StatefulSetOperator.ANNO_STRIMZI_IO_GENERATION, "3");
@@ -228,7 +224,7 @@ public class PartialRollingUpdateTest {
         });
     }
 
-    @ParallelTest
+    @Test
     public void testReconcileOfPartiallyRolledZookeeperCluster(VertxTestContext context) {
         zkSts.getSpec().getTemplate().getMetadata().getAnnotations().put(StatefulSetOperator.ANNO_STRIMZI_IO_GENERATION, "3");
         zkPod0.getMetadata().getAnnotations().put(StatefulSetOperator.ANNO_STRIMZI_IO_GENERATION, "3");
@@ -253,7 +249,7 @@ public class PartialRollingUpdateTest {
         });
     }
 
-    @ParallelTest
+    @Test
     public void testReconcileOfPartiallyRolledClusterForClusterCaCertificate(VertxTestContext context) {
         clusterCaCert.getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION, "3");
         zkPod0.getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, "3");
@@ -289,7 +285,7 @@ public class PartialRollingUpdateTest {
         });
     }
 
-    @ParallelTest
+    @Test
     public void testReconcileOfPartiallyRolledClusterForClientsCaCertificate(VertxTestContext context) {
         clientsCaCert.getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION, "3");
         kafkaPod0.getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION, "3");

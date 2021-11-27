@@ -5,6 +5,7 @@
 package io.strimzi.operator.cluster.operator.assembly;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import io.fabric8.kubernetes.client.CustomResource;
@@ -20,6 +22,7 @@ import io.strimzi.api.kafka.model.KafkaMirrorMaker2Spec;
 import io.strimzi.api.kafka.model.status.Condition;
 import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.common.Annotations;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.ReconciliationException;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
@@ -27,8 +30,6 @@ import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.SslConfigs;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
@@ -71,6 +72,7 @@ import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_RESTART_CON
 import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_RESTART_CONNECTOR_TASK_PATTERN;
 import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_RESTART_CONNECTOR_TASK_PATTERN_CONNECTOR;
 import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_RESTART_CONNECTOR_TASK_PATTERN_TASK;
+import static java.util.Collections.emptyMap;
 
 /**
  * <p>Assembly operator for a "Kafka MirrorMaker 2.0" assembly, which manages:</p>
@@ -80,7 +82,8 @@ import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_RESTART_CON
  * </ul>
  */
 public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<KubernetesClient, KafkaMirrorMaker2, KafkaMirrorMaker2List, Resource<KafkaMirrorMaker2>, KafkaMirrorMaker2Spec, KafkaMirrorMaker2Status> {
-    private static final Logger log = LogManager.getLogger(KafkaMirrorMaker2AssemblyOperator.class.getName());
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaMirrorMaker2AssemblyOperator.class.getName());
+    private final boolean isNetworkPolicyGeneration;
     private final DeploymentOperator deploymentOperations;
     private final NetworkPolicyOperator networkPolicyOperator;
     private final KafkaVersion.Lookup versions;
@@ -99,7 +102,7 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
 
     public static final String TARGET_CLUSTER_PREFIX = "target.cluster.";
     public static final String SOURCE_CLUSTER_PREFIX = "source.cluster.";
-    
+
     private static final String STORE_LOCATION_ROOT = "/tmp/kafka/clusters/";
     private static final String TRUSTSTORE_SUFFIX = ".truststore.p12";
     private static final String KEYSTORE_SUFFIX = ".keystore.p12";
@@ -122,6 +125,7 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
                                         ClusterOperatorConfig config,
                                         Function<Vertx, KafkaConnectApi> connectClientProvider) {
         super(vertx, pfa, KafkaMirrorMaker2.RESOURCE_KIND, supplier.mirrorMaker2Operator, supplier, config, connectClientProvider, KafkaConnectCluster.REST_API_PORT);
+        this.isNetworkPolicyGeneration = config.isNetworkPolicyGeneration();
         this.deploymentOperations = supplier.deploymentOperations;
         this.networkPolicyOperator = supplier.networkPolicyOperator;
         this.versions = config.versions();
@@ -132,8 +136,9 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
         KafkaMirrorMaker2Cluster mirrorMaker2Cluster;
         KafkaMirrorMaker2Status kafkaMirrorMaker2Status = new KafkaMirrorMaker2Status();
         try {
-            mirrorMaker2Cluster = KafkaMirrorMaker2Cluster.fromCrd(kafkaMirrorMaker2, versions);
+            mirrorMaker2Cluster = KafkaMirrorMaker2Cluster.fromCrd(reconciliation, kafkaMirrorMaker2, versions);
         } catch (Exception e) {
+            LOGGER.warnCr(reconciliation, e);
             StatusUtils.setStatusConditionAndObservedGeneration(kafkaMirrorMaker2, kafkaMirrorMaker2Status, Future.failedFuture(e));
             return Future.failedFuture(new ReconciliationException(kafkaMirrorMaker2Status, e));
         }
@@ -146,25 +151,39 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
 
         boolean mirrorMaker2HasZeroReplicas = mirrorMaker2Cluster.getReplicas() == 0;
 
-        log.debug("{}: Updating Kafka MirrorMaker 2.0 cluster", reconciliation);
-        mirrorMaker2ServiceAccount(namespace, mirrorMaker2Cluster)
-                .compose(i -> networkPolicyOperator.reconcile(namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.generateNetworkPolicy(true, operatorNamespace, operatorNamespaceLabels)))
-                .compose(i -> deploymentOperations.scaleDown(namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.getReplicas()))
-                .compose(scale -> serviceOperations.reconcile(namespace, mirrorMaker2Cluster.getServiceName(), mirrorMaker2Cluster.generateService()))
-                .compose(i -> Util.metricsAndLogging(configMapOperations, namespace, mirrorMaker2Cluster.getLogging(), mirrorMaker2Cluster.getMetricsConfigInCm()))
+        LOGGER.debugCr(reconciliation, "Updating Kafka MirrorMaker 2.0 cluster");
+        mirrorMaker2ServiceAccount(reconciliation, namespace, mirrorMaker2Cluster)
+                .compose(i -> {
+                    if (isNetworkPolicyGeneration) {
+                        return networkPolicyOperator.reconcile(reconciliation, namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.generateNetworkPolicy(true, operatorNamespace, operatorNamespaceLabels));
+                    } else {
+                        return Future.succeededFuture();
+                    }
+                })
+                .compose(i -> deploymentOperations.scaleDown(reconciliation, namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.getReplicas()))
+                .compose(scale -> serviceOperations.reconcile(reconciliation, namespace, mirrorMaker2Cluster.getServiceName(), mirrorMaker2Cluster.generateService()))
+                .compose(i -> Util.metricsAndLogging(reconciliation, configMapOperations, namespace, mirrorMaker2Cluster.getLogging(), mirrorMaker2Cluster.getMetricsConfigInCm()))
                 .compose(metricsAndLoggingCm -> {
                     ConfigMap logAndMetricsConfigMap = mirrorMaker2Cluster.generateMetricsAndLogConfigMap(metricsAndLoggingCm);
                     annotations.put(Annotations.ANNO_STRIMZI_LOGGING_DYNAMICALLY_UNCHANGEABLE_HASH,
                             Util.stringHash(Util.getLoggingDynamicallyUnmodifiableEntries(logAndMetricsConfigMap.getData().get(AbstractModel.ANCILLARY_CM_KEY_LOG_CONFIG))));
                     desiredLogging.set(logAndMetricsConfigMap.getData().get(AbstractModel.ANCILLARY_CM_KEY_LOG_CONFIG));
-                    return configMapOperations.reconcile(namespace, mirrorMaker2Cluster.getAncillaryConfigMapName(), logAndMetricsConfigMap);
+                    return configMapOperations.reconcile(reconciliation, namespace, mirrorMaker2Cluster.getAncillaryConfigMapName(), logAndMetricsConfigMap);
                 })
-                .compose(i -> kafkaConnectJmxSecret(namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster))
-                .compose(i -> podDisruptionBudgetOperator.reconcile(namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.generatePodDisruptionBudget()))
-                .compose(i -> deploymentOperations.reconcile(namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.generateDeployment(annotations, pfa.isOpenshift(), imagePullPolicy, imagePullSecrets)))
-                .compose(i -> deploymentOperations.scaleUp(namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.getReplicas()))
-                .compose(i -> deploymentOperations.waitForObserved(namespace, mirrorMaker2Cluster.getName(), 1_000, operationTimeoutMs))
-                .compose(i -> mirrorMaker2HasZeroReplicas ? Future.succeededFuture() : deploymentOperations.readiness(namespace, mirrorMaker2Cluster.getName(), 1_000, operationTimeoutMs))
+                .compose(i -> kafkaConnectJmxSecret(reconciliation, namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster))
+                .compose(i -> podDisruptionBudgetOperator.reconcile(reconciliation, namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.generatePodDisruptionBudget()))
+                .compose(i -> kafkaMirrorMaker2.getSpec().getClusters() == null ? Future.succeededFuture() : CompositeFuture.join(kafkaMirrorMaker2.getSpec().getClusters().stream().map(cluster ->
+                    Util.authTlsHash(secretOperations, namespace, cluster.getAuthentication(), cluster.getTls() == null ? Collections.emptyList() : cluster.getTls().getTrustedCertificates())).collect(Collectors.toList())))
+                .compose(hashesFut -> {
+                    if (hashesFut != null) {
+                        annotations.put(Annotations.ANNO_STRIMZI_AUTH_HASH, Integer.toString(IntStream.range(0, hashesFut.size()).map(j -> (int) hashesFut.resultAt(j)).sum()));
+                    }
+                    return Future.succeededFuture();
+                })
+                .compose(i -> deploymentOperations.reconcile(reconciliation, namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.generateDeployment(annotations, pfa.isOpenshift(), imagePullPolicy, imagePullSecrets)))
+                .compose(i -> deploymentOperations.scaleUp(reconciliation, namespace, mirrorMaker2Cluster.getName(), mirrorMaker2Cluster.getReplicas()))
+                .compose(i -> deploymentOperations.waitForObserved(reconciliation, namespace, mirrorMaker2Cluster.getName(), 1_000, operationTimeoutMs))
+                .compose(i -> mirrorMaker2HasZeroReplicas ? Future.succeededFuture() : deploymentOperations.readiness(reconciliation, namespace, mirrorMaker2Cluster.getName(), 1_000, operationTimeoutMs))
                 .compose(i -> mirrorMaker2HasZeroReplicas ? Future.succeededFuture() : reconcileConnectors(reconciliation, kafkaMirrorMaker2, mirrorMaker2Cluster, kafkaMirrorMaker2Status, desiredLogging.get()))
                 .map((Void) null)
                 .onComplete(reconciliationResult -> {
@@ -194,8 +213,8 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
         return new KafkaMirrorMaker2Status();
     }
 
-    private Future<ReconcileResult<ServiceAccount>> mirrorMaker2ServiceAccount(String namespace, KafkaMirrorMaker2Cluster mirrorMaker2Cluster) {
-        return serviceAccountOperations.reconcile(namespace,
+    private Future<ReconcileResult<ServiceAccount>> mirrorMaker2ServiceAccount(Reconciliation reconciliation, String namespace, KafkaMirrorMaker2Cluster mirrorMaker2Cluster) {
+        return serviceAccountOperations.reconcile(reconciliation, namespace,
                 KafkaMirrorMaker2Resources.serviceAccountName(mirrorMaker2Cluster.getCluster()),
                 mirrorMaker2Cluster.generateServiceAccount());
     }
@@ -223,9 +242,9 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
                         .map(mirror -> mirror.getSourceCluster() + "->" + mirror.getTargetCluster() + connectorEntry.getKey())
                         .collect(Collectors.toSet()));
             }
-            log.debug("{}: delete MirrorMaker 2.0 connectors: {}", reconciliation, deleteMirrorMaker2ConnectorNames);
+            LOGGER.debugCr(reconciliation, "delete MirrorMaker 2.0 connectors: {}", deleteMirrorMaker2ConnectorNames);
             Stream<Future<Void>> deletionFutures = deleteMirrorMaker2ConnectorNames.stream()
-                    .map(connectorName -> apiClient.delete(host, KafkaConnectCluster.REST_API_PORT, connectorName));
+                    .map(connectorName -> apiClient.delete(reconciliation, host, KafkaConnectCluster.REST_API_PORT, connectorName));
             Stream<Future<Void>> createUpdateFutures = mirrors.stream()
                     .map(mirror -> reconcileMirrorMaker2Connectors(reconciliation, host, apiClient, kafkaMirrorMaker2, mirror, mirrorMaker2Cluster, mirrorMaker2Status, desiredLogging));
             return CompositeFuture.join(Stream.concat(deletionFutures, createUpdateFutures).collect(Collectors.toList())).map((Void) null);
@@ -254,13 +273,13 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
             return maybeUpdateMirrorMaker2Status(reconciliation, mirrorMaker2,
                     new InvalidResourceException("sourceCluster with alias " + mirror.getSourceCluster() + " cannot be found in the list of clusters at spec.clusters"));
         }
-        
+
         return CompositeFuture.join(MIRRORMAKER2_CONNECTORS.entrySet().stream()
                     .filter(entry -> entry.getValue().apply(mirror) != null) // filter out non-existent connectors
                     .map(entry -> {
                         String connectorName = sourceClusterAlias + "->" + targetClusterAlias + entry.getKey();
                         String className = MIRRORMAKER2_CONNECTOR_PACKAGE + entry.getKey();
-                        
+
                         KafkaMirrorMaker2ConnectorSpec mm2ConnectorSpec = entry.getValue().apply(mirror);
                         KafkaConnectorSpec connectorSpec = new KafkaConnectorSpecBuilder()
                                 .withClassName(className)
@@ -269,15 +288,30 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
                                 .withTasksMax(mm2ConnectorSpec.getTasksMax())
                                 .build();                      
 
-                        prepareMirrorMaker2ConnectorConfig(mirror, clusterMap.get(sourceClusterAlias), clusterMap.get(targetClusterAlias), connectorSpec, mirrorMaker2Cluster);
-                        log.debug("{}: creating/updating connector {} config: {}", reconciliation, connectorName, asJson(connectorSpec).toString());
+                        prepareMirrorMaker2ConnectorConfig(reconciliation, mirror, clusterMap.get(sourceClusterAlias), clusterMap.get(targetClusterAlias), connectorSpec, mirrorMaker2Cluster);
+                        LOGGER.debugCr(reconciliation, "creating/updating connector {} config: {}", connectorName, asJson(reconciliation, connectorSpec).toString());
                         return reconcileMirrorMaker2Connector(reconciliation, mirrorMaker2, apiClient, host, connectorName, connectorSpec, mirrorMaker2Status);
-                    })                            
+                    })
                     .collect(Collectors.toList()))
-                    .map((Void) null).compose(i -> apiClient.updateConnectLoggers(host, KafkaConnectCluster.REST_API_PORT, desiredLogging, mirrorMaker2Cluster.getDefaultLogConfig()));
+                    .map((Void) null)
+                    .compose(i -> apiClient.updateConnectLoggers(reconciliation, host, KafkaConnectCluster.REST_API_PORT, desiredLogging, mirrorMaker2Cluster.getDefaultLogConfig()))
+                    .compose(i -> {
+                        boolean failedConnector = mirrorMaker2Status.getConnectors().stream()
+                                .anyMatch(connector -> {
+                                    Object state = ((Map) connector.getOrDefault("connector", emptyMap())).get("state");
+                                    return "FAILED".equalsIgnoreCase(state.toString());
+                                });
+                        if (failedConnector) {
+                            return Future.failedFuture("One or more connectors are in FAILED state");
+                        } else {
+                            return Future.succeededFuture();
+                        }
+                    })
+                    .map((Void) null);
     }
 
-    private static void prepareMirrorMaker2ConnectorConfig(KafkaMirrorMaker2MirrorSpec mirror, KafkaMirrorMaker2ClusterSpec sourceCluster, KafkaMirrorMaker2ClusterSpec targetCluster, KafkaConnectorSpec connectorSpec, KafkaMirrorMaker2Cluster mirrorMaker2Cluster) {
+    @SuppressWarnings("deprecation")
+    private static void prepareMirrorMaker2ConnectorConfig(Reconciliation reconciliation, KafkaMirrorMaker2MirrorSpec mirror, KafkaMirrorMaker2ClusterSpec sourceCluster, KafkaMirrorMaker2ClusterSpec targetCluster, KafkaConnectorSpec connectorSpec, KafkaMirrorMaker2Cluster mirrorMaker2Cluster) {
         Map<String, Object> config = connectorSpec.getConfig();
         addClusterToMirrorMaker2ConnectorConfig(config, targetCluster, TARGET_CLUSTER_PREFIX);
         addClusterToMirrorMaker2ConnectorConfig(config, sourceCluster, SOURCE_CLUSTER_PREFIX);
@@ -285,14 +319,29 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
         if (mirror.getTopicsPattern() != null) {
             config.put("topics", mirror.getTopicsPattern());
         }
-        if (mirror.getTopicsBlacklistPattern() != null) {
-            config.put("topics.blacklist", mirror.getTopicsBlacklistPattern());
+
+        String topicsExcludePattern = mirror.getTopicsExcludePattern();
+        String topicsBlacklistPattern = mirror.getTopicsBlacklistPattern();
+        if (topicsExcludePattern != null && topicsBlacklistPattern != null) {
+            LOGGER.warnCr(reconciliation, "Both topicsExcludePattern and topicsBlacklistPattern mirror properties are present, ignoring topicsBlacklistPattern as it is deprecated");
         }
+        String topicsExclude = topicsExcludePattern != null ? topicsExcludePattern : topicsBlacklistPattern;
+        if (topicsExclude != null) {
+            config.put("topics.exclude", topicsExclude);
+        }
+        
         if (mirror.getGroupsPattern() != null) {
             config.put("groups", mirror.getGroupsPattern());
         }
-        if (mirror.getGroupsBlacklistPattern() != null) {
-            config.put("groups.blacklist", mirror.getGroupsBlacklistPattern());
+        
+        String groupsExcludePattern = mirror.getGroupsExcludePattern();
+        String groupsBlacklistPattern = mirror.getGroupsBlacklistPattern();
+        if (groupsExcludePattern != null && groupsBlacklistPattern != null) {
+            LOGGER.warnCr(reconciliation, "Both groupsExcludePattern and groupsBlacklistPattern mirror properties are present, ignoring groupsBlacklistPattern as it is deprecated");
+        }
+        String groupsExclude = groupsExcludePattern != null ? groupsExcludePattern :  groupsBlacklistPattern;
+        if (groupsExclude != null) {
+            config.put("groups.exclude", groupsExclude);
         }
 
         if (mirrorMaker2Cluster.getTracing() != null)   {
@@ -330,7 +379,7 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
             String clientAuthType = authProperties.get(AuthenticationUtils.SASL_MECHANISM);
             if (KafkaClientAuthenticationPlain.TYPE_PLAIN.equals(clientAuthType)) {
                 saslMechanism = "PLAIN";
-                jaasConfig = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"" + authProperties.get(AuthenticationUtils.SASL_USERNAME) + "\" password=\"${file:" + CONNECTORS_CONFIG_FILE + ":" + cluster.getAlias() + ".sasl.password}\";";                    
+                jaasConfig = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"" + authProperties.get(AuthenticationUtils.SASL_USERNAME) + "\" password=\"${file:" + CONNECTORS_CONFIG_FILE + ":" + cluster.getAlias() + ".sasl.password}\";";        
             } else if (KafkaClientAuthenticationScramSha512.TYPE_SCRAM_SHA_512.equals(clientAuthType)) {
                 saslMechanism = "SCRAM-SHA-512";
                 jaasConfig = "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"" + authProperties.get(AuthenticationUtils.SASL_USERNAME) + "\" password=\"${file:" + CONNECTORS_CONFIG_FILE + ":" + cluster.getAlias() + ".sasl.password}\";";
@@ -413,7 +462,7 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
     private Future<Void> maybeUpdateMirrorMaker2Status(Reconciliation reconciliation, KafkaMirrorMaker2 mirrorMaker2, Throwable error) {
         KafkaMirrorMaker2Status status = new KafkaMirrorMaker2Status();
         if (error != null) {
-            log.warn("{}: Error reconciling MirrorMaker 2.0 {}", reconciliation, mirrorMaker2.getMetadata().getName(), error);
+            LOGGER.warnCr(reconciliation, "Error reconciling MirrorMaker 2.0 {}", mirrorMaker2.getMetadata().getName(), error);
         }
         StatusUtils.setStatusConditionAndObservedGeneration(mirrorMaker2, status, error != null ? Future.failedFuture(error) : Future.succeededFuture());
         return maybeUpdateStatusCommon(resourceOperator, mirrorMaker2, reconciliation, status,
@@ -491,13 +540,13 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
      * Patches the KafkaMirrorMaker2 CR to remove the supplied annotation
      */
     protected Future<Void> removeAnnotation(Reconciliation reconciliation, KafkaMirrorMaker2 resource, String annotationKey) {
-        log.debug("{}: Removing annotation {}", reconciliation, annotationKey);
+        LOGGER.debugCr(reconciliation, "Removing annotation {}", annotationKey);
         KafkaMirrorMaker2 patchedKafkaMirrorMaker2 = new KafkaMirrorMaker2Builder(resource)
             .editMetadata()
             .removeFromAnnotations(annotationKey)
             .endMetadata()
             .build();
-        return resourceOperator.patchAsync(patchedKafkaMirrorMaker2)
+        return resourceOperator.patchAsync(reconciliation, patchedKafkaMirrorMaker2)
             .compose(ignored -> Future.succeededFuture());
     }
 

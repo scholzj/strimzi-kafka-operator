@@ -10,26 +10,28 @@ import io.fabric8.kubernetes.api.model.Namespace;
 import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeerBuilder;
-import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.strimzi.api.kafka.model.KafkaUser;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.systemtest.AbstractST;
+import io.strimzi.systemtest.BeforeAllOnce;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.annotations.IsolatedSuite;
+import io.strimzi.systemtest.resources.operator.SetupClusterOperator;
 import io.strimzi.systemtest.annotations.IsolatedTest;
 import io.strimzi.systemtest.kafkaclients.internalClients.InternalKafkaClient;
+import io.strimzi.systemtest.metrics.MetricsCollector;
+import io.strimzi.systemtest.resources.ComponentType;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
-import io.strimzi.systemtest.resources.kubernetes.ClusterRoleBindingResource;
 import io.strimzi.systemtest.resources.kubernetes.NetworkPolicyResource;
-import io.strimzi.systemtest.resources.operator.BundleResource;
 import io.strimzi.systemtest.templates.crd.KafkaClientsTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaConnectTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaUserTemplates;
-import io.strimzi.systemtest.templates.kubernetes.ClusterRoleBindingTemplates;
 import io.strimzi.systemtest.utils.ClientUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaUtils;
-import io.strimzi.systemtest.utils.specific.MetricsUtils;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -38,10 +40,13 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
 import static io.strimzi.systemtest.Constants.INTERNAL_CLIENTS_USED;
 import static io.strimzi.systemtest.Constants.NETWORKPOLICIES_SUPPORTED;
 import static io.strimzi.systemtest.Constants.REGRESSION;
@@ -55,15 +60,21 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @Tag(NETWORKPOLICIES_SUPPORTED)
 @Tag(REGRESSION)
+@IsolatedSuite
 public class NetworkPoliciesST extends AbstractST {
-    public static final String NAMESPACE = "np-cluster-test";
     private static final Logger LOGGER = LogManager.getLogger(NetworkPoliciesST.class);
 
     @IsolatedTest("Specific cluster operator for test case")
     @Tag(INTERNAL_CLIENTS_USED)
     void testNetworkPoliciesWithPlainListener(ExtensionContext extensionContext) {
         String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
-        installClusterOperator(extensionContext, NAMESPACE, Constants.CO_OPERATION_TIMEOUT_DEFAULT);
+
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .createInstallation()
+            .runInstallation();
 
         String allowedKafkaClientsName = clusterName + "-" + Constants.KAFKA_CLIENTS + "-allow";
         String deniedKafkaClientsName = clusterName + "-" + Constants.KAFKA_CLIENTS + "-deny";
@@ -73,8 +84,7 @@ public class NetworkPoliciesST extends AbstractST {
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 1, 1)
             .editSpec()
                 .editKafka()
-                    .withNewListeners()
-                        .addNewGenericKafkaListener()
+                    .withListeners(new GenericKafkaListenerBuilder()
                             .withName(Constants.PLAIN_LISTENER_DEFAULT_NAME)
                             .withPort(9092)
                             .withType(KafkaListenerType.INTERNAL)
@@ -87,8 +97,7 @@ public class NetworkPoliciesST extends AbstractST {
                                     .withMatchLabels(matchLabelForPlain)
                                     .endPodSelector()
                                     .build())
-                        .endGenericKafkaListener()
-                    .endListeners()
+                            .build())
                 .endKafka()
                 .withNewKafkaExporter()
                 .endKafkaExporter()
@@ -115,7 +124,7 @@ public class NetworkPoliciesST extends AbstractST {
         InternalKafkaClient internalKafkaClient = new InternalKafkaClient.Builder()
             .withUsingPodName(allowedKafkaClientsPodName)
             .withTopicName(topic0)
-            .withNamespaceName(NAMESPACE)
+            .withNamespaceName(INFRA_NAMESPACE)
             .withClusterName(clusterName)
             .withMessageCount(MESSAGE_COUNT)
             .withKafkaUsername(userName)
@@ -146,7 +155,14 @@ public class NetworkPoliciesST extends AbstractST {
         });
 
         LOGGER.info("Check metrics exported by Kafka Exporter");
-        Map<String, String> kafkaExporterMetricsData = MetricsUtils.collectKafkaExporterPodsMetrics(allowedKafkaClientsPodName, clusterName);
+
+        MetricsCollector metricsCollector = new MetricsCollector.Builder()
+            .withScraperPodName(allowedKafkaClientsPodName)
+            .withComponentName(clusterName)
+            .withComponentType(ComponentType.KafkaExporter)
+            .build();
+
+        Map<String, String> kafkaExporterMetricsData = metricsCollector.collectMetricsFromPods();
         assertThat("Kafka Exporter metrics should be non-empty", kafkaExporterMetricsData.size() > 0);
         for (Map.Entry<String, String> entry : kafkaExporterMetricsData.entrySet()) {
             assertThat("Value from collected metric should be non-empty", !entry.getValue().isEmpty());
@@ -161,7 +177,12 @@ public class NetworkPoliciesST extends AbstractST {
     void testNetworkPoliciesWithTlsListener(ExtensionContext extensionContext) {
         String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
 
-        installClusterOperator(extensionContext, NAMESPACE, Constants.CO_OPERATION_TIMEOUT_DEFAULT);
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .createInstallation()
+            .runInstallation();
 
         String allowedKafkaClientsName = clusterName + "-" + Constants.KAFKA_CLIENTS + "-allow";
         String deniedKafkaClientsName = clusterName + "-" + Constants.KAFKA_CLIENTS + "-deny";
@@ -171,8 +192,7 @@ public class NetworkPoliciesST extends AbstractST {
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 1, 1)
             .editSpec()
                 .editKafka()
-                    .withNewListeners()
-                        .addNewGenericKafkaListener()
+                    .withListeners(new GenericKafkaListenerBuilder()
                             .withName(Constants.TLS_LISTENER_DEFAULT_NAME)
                             .withPort(9093)
                             .withType(KafkaListenerType.INTERNAL)
@@ -185,8 +205,7 @@ public class NetworkPoliciesST extends AbstractST {
                                     .withMatchLabels(matchLabelsForTls)
                                     .endPodSelector()
                                     .build())
-                        .endGenericKafkaListener()
-                    .endListeners()
+                            .build())
                 .endKafka()
             .endSpec()
             .build());
@@ -210,7 +229,7 @@ public class NetworkPoliciesST extends AbstractST {
         InternalKafkaClient internalKafkaClient = new InternalKafkaClient.Builder()
             .withUsingPodName(allowedKafkaClientsPodName)
             .withTopicName(topic0)
-            .withNamespaceName(NAMESPACE)
+            .withNamespaceName(INFRA_NAMESPACE)
             .withClusterName(clusterName)
             .withMessageCount(MESSAGE_COUNT)
             .withKafkaUsername(userName)
@@ -248,12 +267,16 @@ public class NetworkPoliciesST extends AbstractST {
 
         String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
 
-        installClusterOperator(extensionContext, NAMESPACE, Constants.CO_OPERATION_TIMEOUT_DEFAULT);
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .createInstallation()
+            .runInstallation();
 
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3).build());
 
-        checkNetworkPoliciesInNamespace(clusterName, NAMESPACE);
-        changeKafkaConfigurationAndCheckObservedGeneration(clusterName, NAMESPACE);
+        checkNetworkPoliciesInNamespace(clusterName, INFRA_NAMESPACE);
+        changeKafkaConfigurationAndCheckObservedGeneration(clusterName, INFRA_NAMESPACE);
     }
 
     @IsolatedTest("Specific cluster operator for test case")
@@ -261,42 +284,28 @@ public class NetworkPoliciesST extends AbstractST {
         assumeTrue(!Environment.isHelmInstall() && !Environment.isOlmInstall());
 
         String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
-        String secondNamespace = "second-" + NAMESPACE;
+        String secondNamespace = "second-" + INFRA_NAMESPACE;
 
         Map<String, String> labels = new HashMap<>();
         labels.put("my-label", "my-value");
 
         EnvVar operatorLabelsEnv = new EnvVarBuilder()
-            .withName("STRIMZI_OPERATOR_NAMESPACE_LABELS")
-            .withValue(labels.toString().replaceAll("\\{|}", ""))
-            .build();
+                .withName("STRIMZI_OPERATOR_NAMESPACE_LABELS")
+                .withValue(labels.toString().replaceAll("\\{|}", ""))
+                .build();
 
-        cluster.createNamespace(secondNamespace);
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .withWatchingNamespaces(Constants.WATCH_ALL_NAMESPACES)
+            .withBindingsNamespaces(Arrays.asList(INFRA_NAMESPACE, secondNamespace))
+            .withExtraEnvVars(Collections.singletonList(operatorLabelsEnv))
+            .createInstallation()
+            .runInstallation();
 
-        prepareEnvForOperator(extensionContext, NAMESPACE, Arrays.asList(NAMESPACE, secondNamespace));
-
-        // Apply rolebindings in CO namespace
-        applyBindings(extensionContext, NAMESPACE);
-
-        // Create ClusterRoleBindings that grant cluster-wide access to all OpenShift projects
-        List<ClusterRoleBinding> clusterRoleBindingList = ClusterRoleBindingTemplates.clusterRoleBindingsForAllNamespaces(NAMESPACE);
-        clusterRoleBindingList.forEach(clusterRoleBinding ->
-            ClusterRoleBindingResource.clusterRoleBinding(extensionContext, clusterRoleBinding));
-        // 060-Deployment
-        resourceManager.createResource(extensionContext, BundleResource.clusterOperator(NAMESPACE, "*", Constants.CO_OPERATION_TIMEOUT_DEFAULT)
-            .editOrNewSpec()
-                .editOrNewTemplate()
-                    .editOrNewSpec()
-                        .editContainer(0)
-                            .addToEnv(operatorLabelsEnv)
-                        .endContainer()
-                    .endSpec()
-                .endTemplate()
-            .endSpec()
-            .build());
-
-        Namespace actualNamespace = kubeClient().getClient().namespaces().withName(NAMESPACE).get();
-        kubeClient().getClient().namespaces().withName(NAMESPACE).edit(ns -> new NamespaceBuilder(actualNamespace)
+        Namespace actualNamespace = kubeClient().getClient().namespaces().withName(INFRA_NAMESPACE).get();
+        kubeClient().getClient().namespaces().withName(INFRA_NAMESPACE).edit(ns -> new NamespaceBuilder(actualNamespace)
             .editOrNewMetadata()
                 .addToLabels(labels)
             .endMetadata()
@@ -313,6 +322,40 @@ public class NetworkPoliciesST extends AbstractST {
         checkNetworkPoliciesInNamespace(clusterName, secondNamespace);
 
         changeKafkaConfigurationAndCheckObservedGeneration(clusterName, secondNamespace);
+    }
+
+    @IsolatedTest("Specific cluster operator for test case")
+    void testNPGenerationEnvironmentVariable(ExtensionContext extensionContext) {
+        assumeTrue(!Environment.isHelmInstall() && !Environment.isOlmInstall());
+
+        final String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
+        final String kafkaClientsName = mapWithKafkaClientNames.get(extensionContext.getDisplayName());
+
+        EnvVar networkPolicyGenerationEnv = new EnvVarBuilder()
+            .withName("STRIMZI_NETWORK_POLICY_GENERATION")
+            .withValue("false")
+            .build();
+
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(extensionContext)
+            .withNamespace(INFRA_NAMESPACE)
+            .withExtraEnvVars(Collections.singletonList(networkPolicyGenerationEnv))
+            .createInstallation()
+            .runInstallation();
+
+        resourceManager.createResource(extensionContext, KafkaTemplates.kafkaWithCruiseControl(clusterName, 3, 3)
+            .build());
+
+        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(false, kafkaClientsName).build());
+        resourceManager.createResource(extensionContext, KafkaConnectTemplates.kafkaConnect(extensionContext, clusterName, 1)
+                .build());
+
+        List<NetworkPolicy> networkPolicyList = kubeClient().getClient().network().networkPolicies().list().getItems().stream()
+            .filter(item -> item.getMetadata().getLabels() != null && item.getMetadata().getLabels().containsKey("strimzi.io/name"))
+            .collect(Collectors.toList());
+
+        assertThat("List of NetworkPolicies generated by Strimzi is not empty.", networkPolicyList, is(Collections.EMPTY_LIST));
     }
 
     void checkNetworkPoliciesInNamespace(String clusterName, String namespace) {

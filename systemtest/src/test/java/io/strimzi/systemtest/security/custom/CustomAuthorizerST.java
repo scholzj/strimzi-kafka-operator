@@ -9,6 +9,7 @@ import io.strimzi.api.kafka.model.AclOperation;
 import io.strimzi.api.kafka.model.KafkaAuthorizationSimple;
 import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.Constants;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
+import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
 import static io.strimzi.systemtest.Constants.REGRESSION;
 import static io.strimzi.systemtest.Constants.INTERNAL_CLIENTS_USED;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
@@ -34,7 +36,6 @@ import static org.hamcrest.Matchers.is;
 
 @Tag(REGRESSION)
 public class CustomAuthorizerST extends AbstractST {
-    static final String NAMESPACE = "custom-authorizer-namespace";
     static final String CLUSTER_NAME = "custom-authorizer";
     static final String ADMIN = "sre-admin";
     private static final Logger LOGGER = LogManager.getLogger(CustomAuthorizerST.class);
@@ -49,9 +50,9 @@ public class CustomAuthorizerST extends AbstractST {
         final String consumerGroupName = "consumer-group-name-1";
         final String kafkaClientsName = mapWithKafkaClientNames.get(extensionContext.getDisplayName());
 
-        resourceManager.createResource(extensionContext, KafkaTopicTemplates.topic(CLUSTER_NAME, topicName).build());
+        resourceManager.createResource(extensionContext, KafkaTopicTemplates.topic(CLUSTER_NAME, topicName, INFRA_NAMESPACE).build());
 
-        KafkaUser writeUser = KafkaUserTemplates.tlsUser(CLUSTER_NAME, kafkaUserWrite)
+        KafkaUser writeUser = KafkaUserTemplates.tlsUser(INFRA_NAMESPACE, CLUSTER_NAME, kafkaUserWrite)
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
@@ -70,7 +71,7 @@ public class CustomAuthorizerST extends AbstractST {
             .endSpec()
             .build();
 
-        KafkaUser readUser = KafkaUserTemplates.tlsUser(CLUSTER_NAME, kafkaUserRead)
+        KafkaUser readUser = KafkaUserTemplates.tlsUser(INFRA_NAMESPACE, CLUSTER_NAME, kafkaUserRead)
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
@@ -100,13 +101,13 @@ public class CustomAuthorizerST extends AbstractST {
 
         LOGGER.info("Checking KafkaUser {} that is able to send messages to topic '{}'", kafkaUserWrite, topicName);
 
-        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(true, kafkaClientsName, writeUser, readUser).build());
+        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(INFRA_NAMESPACE, true, kafkaClientsName, writeUser, readUser).build());
 
-        String kafkaClientsPodName = kubeClient().listPodsByPrefixInName(kafkaClientsName).get(0).getMetadata().getName();
+        String kafkaClientsPodName = kubeClient(INFRA_NAMESPACE).listPodsByPrefixInName(INFRA_NAMESPACE, kafkaClientsName).get(0).getMetadata().getName();
 
         InternalKafkaClient writeKafkaClient = new InternalKafkaClient.Builder()
             .withTopicName(topicName)
-            .withNamespaceName(NAMESPACE)
+            .withNamespaceName(INFRA_NAMESPACE)
             .withClusterName(CLUSTER_NAME)
             .withKafkaUsername(kafkaUserWrite)
             .withMessageCount(numberOfMessages)
@@ -119,7 +120,7 @@ public class CustomAuthorizerST extends AbstractST {
 
         InternalKafkaClient readKafkaClient = new InternalKafkaClient.Builder()
                 .withTopicName(topicName)
-                .withNamespaceName(NAMESPACE)
+                .withNamespaceName(INFRA_NAMESPACE)
                 .withClusterName(CLUSTER_NAME)
                 .withKafkaUsername(kafkaUserRead)
                 .withMessageCount(numberOfMessages)
@@ -140,9 +141,9 @@ public class CustomAuthorizerST extends AbstractST {
         final String topicName = mapWithTestTopics.get(extensionContext.getDisplayName());
         final String kafkaClientsName = mapWithKafkaClientNames.get(extensionContext.getDisplayName());
 
-        resourceManager.createResource(extensionContext, KafkaTopicTemplates.topic(CLUSTER_NAME, topicName).build());
+        resourceManager.createResource(extensionContext, KafkaTopicTemplates.topic(CLUSTER_NAME, topicName, INFRA_NAMESPACE).build());
 
-        KafkaUser adminUser = KafkaUserTemplates.tlsUser(CLUSTER_NAME, ADMIN)
+        KafkaUser adminUser = KafkaUserTemplates.tlsUser(INFRA_NAMESPACE, CLUSTER_NAME, ADMIN)
             .editSpec()
                 .withNewKafkaUserAuthorizationSimple()
                     .addNewAcl()
@@ -162,15 +163,15 @@ public class CustomAuthorizerST extends AbstractST {
             .build();
 
         resourceManager.createResource(extensionContext, adminUser);
-        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(true, kafkaClientsName, adminUser).build());
+        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(INFRA_NAMESPACE, true, kafkaClientsName, adminUser).build());
 
-        String kafkaClientsPodName = kubeClient().listPodsByPrefixInName(kafkaClientsName).get(0).getMetadata().getName();
+        String kafkaClientsPodName = kubeClient(INFRA_NAMESPACE).listPodsByPrefixInName(INFRA_NAMESPACE, kafkaClientsName).get(0).getMetadata().getName();
 
         LOGGER.info("Checking kafka super user:{} that is able to send messages to topic:{}", ADMIN, topicName);
 
         InternalKafkaClient internalKafkaClient = new InternalKafkaClient.Builder()
             .withTopicName(topicName)
-            .withNamespaceName(NAMESPACE)
+            .withNamespaceName(INFRA_NAMESPACE)
             .withClusterName(CLUSTER_NAME)
             .withKafkaUsername(ADMIN)
             .withMessageCount(MESSAGE_COUNT)
@@ -188,24 +189,24 @@ public class CustomAuthorizerST extends AbstractST {
 
     @BeforeAll
     public void setup(ExtensionContext extensionContext) {
-        installClusterOperator(extensionContext, NAMESPACE);
-
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaPersistent(CLUSTER_NAME, 1, 1)
+            .editMetadata()
+                .withNamespace(INFRA_NAMESPACE)
+            .endMetadata()
             .editSpec()
                 .editKafka()
                     .withNewKafkaAuthorizationCustom()
                         .withAuthorizerClass(KafkaAuthorizationSimple.AUTHORIZER_CLASS_NAME)
+                        .withSupportsAdminApi(true)
                         .withSuperUsers("CN=" + ADMIN)
                     .endKafkaAuthorizationCustom()
-                    .withNewListeners()
-                        .addNewGenericKafkaListener()
+                    .withListeners(new GenericKafkaListenerBuilder()
                             .withName(Constants.TLS_LISTENER_DEFAULT_NAME)
                             .withPort(9093)
                             .withType(KafkaListenerType.INTERNAL)
                             .withTls(true)
                             .withAuth(new KafkaListenerAuthenticationTls())
-                        .endGenericKafkaListener()
-                    .endListeners()
+                            .build())
                 .endKafka()
             .endSpec()
             .build());

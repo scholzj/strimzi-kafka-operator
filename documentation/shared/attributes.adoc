@@ -13,48 +13,54 @@
 :toclevels: 3
 
 //Latest Strimzi version
-:ProductVersion: 0.23.0
+:ProductVersion: 0.27.0
+//Strimzi versions used in upgrades sections for API conversions
+:ConvertAfterProductVersion: 0.22
+:ConvertBeforeProductVersion: 0.23
+:LastReleaseWithCRDUpgrade: 0.24
+:UpgradeGuide: link:https://strimzi.io/docs/operators/0.24.0/deploying.html#assembly-upgrade-resources-str[Strimzi 0.24.0 upgrade documentation^]
 
 // Kubernetes and OpenShift versions
 :OpenShiftVersion: 4.3 and later
 :KubernetesVersion: 1.16 and later
 
 // Kafka upgrade attributes used in kafka upgrades section
-:DefaultKafkaVersion: 2.7.0
-:KafkaVersionLower: 2.6.1
-:KafkaVersionHigher: 2.7.0
+:DefaultKafkaVersion: 3.0.0
+:KafkaVersionLower: 2.8.0
+:KafkaVersionHigher: 3.0.0
 :ExampleImageTagUpgrades: quay.io/strimzi/kafka:{ProductVersion}-kafka-{KafkaVersionHigher}
 
 //log message format version and inter-broker protocol version
-:LogMsgVersLower: 2.6
-:LogMsgVersHigher: 2.7
-:InterBrokVersLower: 2.6
-:InterBrokVersHigher: 2.7
+:LogMsgVersLower: 2.8
+:LogMsgVersHigher: 3.0
+:InterBrokVersLower: 2.8
+:InterBrokVersHigher: 3.0
 
 // Source and download links
 :ReleaseDownload: https://github.com/strimzi/strimzi-kafka-operator/releases[GitHub^]
+:supported-configurations: https://strimzi.io/downloads/
 
 //Monitoring links
 :GrafanaHome: link:https://grafana.com/[Grafana Labs^]
 :JMXExporter: link:https://github.com/prometheus/jmx_exporter[JMX Exporter documentation^]
 :PrometheusHome: link:https://github.com/prometheus[Prometheus^]
-:PrometheusConfig: link:https://prometheus.io/docs/prometheus/latest/configuration/configuration[Configuration^]
+:PrometheusConfig: link:https://prometheus.io/docs/prometheus/latest/configuration/configuration[Prometheus configuration^]
 :kafka-exporter-project: link:https://github.com/danielqsj/kafka_exporter[Kafka Exporter^]
 
 //OAuth attributes and links
 :oauth2-site: link:https://oauth.net/2/[OAuth 2.0 site^]
-:oauth-version: 0.7.2
 :keycloak-server-doc: link:https://www.keycloak.org/documentation.html[Keycloak documentation^]
-:keycloak-authorization-services: link:https://www.keycloak.org/docs/latest/authorization_services/index.html[Authorization Services^]
+:keycloak-server-install-doc: link:https://www.keycloak.org/docs/latest/server_installation/index.html#_operator[Installing the Keycloak Operator^]
+:keycloak-authorization-services: link:https://www.keycloak.org/docs/latest/authorization_services/index.html[Keycloak Authorization Services^]
 :oauth-blog: link:https://strimzi.io/2019/10/25/kafka-authentication-using-oauth-2.0.html[Kafka authentication using OAuth 2.0^]
-:oauth-demo-keycloak: link:https://github.com/strimzi/strimzi-kafka-oauth/tree/{oauth-version}/examples[Using Keycloak as the OAuth 2.0 authorization server^]
-:oauth-demo-hydra: link:https://github.com/strimzi/strimzi-kafka-oauth/tree/{oauth-version}/examples/docker[Using Hydra as the OAuth 2.0 authorization server^]
-:oauth-kubernetes-examples-link: link:https://github.com/strimzi/strimzi-kafka-oauth/tree/{oauth-version}/examples/kubernetes[https://github.com/strimzi/strimzi-kafka-oauth/tree/{oauth-version}/examples/kubernetes]
+:OAuthVersion: 0.9.0
+:oauth-demo-keycloak: link:https://github.com/strimzi/strimzi-kafka-oauth/tree/{OAuthVersion}/examples[Using Keycloak as the OAuth 2.0 authorization server^]
+:oauth-demo-hydra: link:https://github.com/strimzi/strimzi-kafka-oauth/tree/{OAuthVersion}/examples/docker#running-with-hydra-using-ssl-and-opaque-tokens[Using Hydra as the OAuth 2.0 authorization server^]
 
 // External links
 :aws-ebs: link:https://aws.amazon.com/ebs/[Amazon Elastic Block Store (EBS)^]
+:kubernetes-docs: link:https://kubernetes.io/docs/home/
 :docs-okd: link:https://docs.okd.io/3.11/dev_guide/builds/index.html[builds^]
-:docs-okd-s2i: link:https://docs.okd.io/3.11/creating_images/s2i.html[Source-to-Image (S2I)^]
 :kafkaDoc: link:https://kafka.apache.org/documentation/[Apache Kafka documentation^]
 :KafkaRacks: link:https://kafka.apache.org/documentation/#basic_ops_racks[Kafka racks documentation^]
 :K8sAffinity: link:https://kubernetes.io/docs/concepts/configuration/assign-pod-node/[Kubernetes node and pod affinity documentation^]
@@ -81,6 +87,7 @@
 :K8sServiceDiscovery: https://kubernetes.io/docs/concepts/services-networking/service/#discovering-services[Discovering services^]
 :K8sWellKnownLabelsAnnotationsAndTaints: link:https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints/[Well-Known Labels, Annotations and Taints^]
 :K8sDockerSecret: link:https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#registry-secret-existing-credentials[Create a Secret based on existing Docker credentials^]
+:MavenCentral: https://mvnrepository.com/repos/central[Maven Central repository^]
 :Minikube: link:https://kubernetes.io/docs/tasks/tools/install-minikube/[Install and start Minikube]
 :NginxIngressController: link:https://github.com/kubernetes/ingress-nginx[NGINX Ingress Controller for Kubernetes^]
 :NginxIngressControllerTLSPassthrough: link:https://kubernetes.github.io/ingress-nginx/user-guide/tls/#ssl-passthrough[TLS passthrough documentation]
@@ -98,16 +105,19 @@
 :JMXExporter: link:https://github.com/prometheus/jmx_exporter[JMX Exporter documentation^]
 :CronExpression: link:http://www.quartz-scheduler.org/documentation/quartz-2.3.0/tutorials/tutorial-lesson-06.html[cron expression^]
 :ExternalListeners: link:https://strimzi.io/2019/04/17/accessing-kafka-part-1.html[Accessing Apache Kafka in Strimzi^]
-:OperatorHub: link:https://operatorhub.io/[OperatorHub.io^]
+:OperatorHub: link:https://operatorhub.io/operator/strimzi-kafka-operator[OperatorHub.io^]
 :OperatorLifecycleManager: link:https://github.com/operator-framework/operator-lifecycle-manager[Operator Lifecycle Manager^]
 :OLMOperatorDocs: link:https://olm.operatorframework.io/docs/[Operator Lifecycle Manager documentation^]
 :OpenTracingHome: link:https://opentracing.io/[OpenTracing^]
 :OpenTelemetryHome: link:https://opentelemetry.io/[OpenTelemetry^]
 :JaegerHome: link:https://www.jaegertracing.io/[Jaeger^]
 :JaegerArch: link:https://www.jaegertracing.io/docs/1.18/architecture/[Jaeger architecure^]
+:JaegerArch: link:https://www.jaegertracing.io/docs/1.18/architecture/[Jaeger architecure^]
 :OpenTracingDocs: link:https://opentracing.io/docs/overview/[OpenTracing documentation^]
+:BisnodeOPAAuthorizer: link:https://github.com/Bisnode/opa-kafka-plugin[Open Policy Agent plugin for Kafka authorization^]
 :LatestBridgeAPIDocs: link:https://strimzi.io/docs/bridge/latest/[Kafka Bridge API reference^]
 :external-cors-link: https://www.w3.org/TR/cors/
+:HelmCustomResourceDefinitions: link:https://helm.sh/docs/chart_best_practices/custom_resource_definitions/[Custom Resource Definitions for Helm^]
 
 // Container image names and repositories
 :DockerOrg: quay.io/strimzi
@@ -119,7 +129,6 @@
 :DockerKafkaImagePrevious: quay.io/strimzi/kafka:{DockerTag}-kafka-{KafkaVersionLower}
 :DockerKafka: quay.io/strimzi/kafka:{DockerTag}-kafka-{DefaultKafkaVersion}
 :DockerKafkaConnect: quay.io/strimzi/kafka:{DockerTag}-kafka-{DefaultKafkaVersion}
-:DockerKafkaConnectS2I: quay.io/strimzi/kafka:{DockerTag}-kafka-{DefaultKafkaVersion}
 :DockerClusterOperator: quay.io/strimzi/operator:{DockerTag}
 :DockerKafkaInit: quay.io/strimzi/operator:{DockerTag}
 :DockerJmxtrans: quay.io/strimzi/jmxtrans:{DockerTag}
@@ -133,7 +142,6 @@
 :ApiVersion: v1beta2
 :KafkaApiVersion: kafka.strimzi.io/v1beta2
 :KafkaConnectApiVersion: kafka.strimzi.io/v1beta2
-:KafkaConnectS2IApiVersion: kafka.strimzi.io/v1beta2
 :KafkaConnectorApiVersion: kafka.strimzi.io/v1beta2
 :KafkaTopicApiVersion: kafka.strimzi.io/v1beta2
 :KafkaUserApiVersion: kafka.strimzi.io/v1beta2
@@ -145,7 +153,6 @@
 // API Versions previous
 :KafkaApiVersionPrev: kafka.strimzi.io/v1beta1
 :KafkaConnectApiVersionPrev: kafka.strimzi.io/v1beta1
-:KafkaConnectS2IApiVersionPrev: kafka.strimzi.io/v1beta1
 :KafkaTopicApiVersionPrev: kafka.strimzi.io/v1beta1
 :KafkaUserApiVersionPrev: kafka.strimzi.io/v1beta1
 :KafkaMirrorMakerApiVersionPrev: kafka.strimzi.io/v1beta1
@@ -178,3 +185,7 @@
 :BookURLDeploying: ./deploying.html
 :BookURLUsing: ./using.html
 :BookURLUsingPrevious: https://strimzi.io/docs/operators/0.19.0/using.html
+
+// Link to resource on https://github.com/strimzi/strimzi-kafka-operator
+// Default `main`, specific version overriden when building the docs by `make`
+:GithubVersion: main

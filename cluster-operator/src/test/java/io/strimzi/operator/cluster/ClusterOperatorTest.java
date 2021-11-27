@@ -4,18 +4,12 @@
  */
 package io.strimzi.operator.cluster;
 
-import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinition;
-import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinitionList;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.FilterWatchListMultiDeletable;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
-import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
-import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.openshift.client.OpenShiftClient;
-import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.model.KafkaConnectS2I;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.vertx.core.Vertx;
@@ -54,7 +48,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(VertxExtension.class)
 public class ClusterOperatorTest {
     private static Vertx vertx;
-    private static final Logger log = LogManager.getLogger(ClusterOperatorTest.class);
+    private static final Logger LOGGER = LogManager.getLogger(ClusterOperatorTest.class);
 
     private static Map<String, String> buildEnv(String namespaces) {
         Map<String, String> env = new HashMap<>();
@@ -62,7 +56,6 @@ public class ClusterOperatorTest {
         env.put(ClusterOperatorConfig.STRIMZI_FULL_RECONCILIATION_INTERVAL_MS, "120000");
         env.put(ClusterOperatorConfig.STRIMZI_KAFKA_IMAGES, KafkaVersionTestUtils.getKafkaImagesEnvVarString());
         env.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_IMAGES, KafkaVersionTestUtils.getKafkaConnectImagesEnvVarString());
-        env.put(ClusterOperatorConfig.STRIMZI_KAFKA_CONNECT_S2I_IMAGES, KafkaVersionTestUtils.getKafkaConnectS2iImagesEnvVarString());
         env.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         env.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
         return env;
@@ -114,6 +107,7 @@ public class ClusterOperatorTest {
 
     /**
      * Asserts that Cluster Operator starts and then stops a verticle in each namespace
+     *
      * @param context test context passed in for assertions
      * @param namespaces namespaces the operator should be watching and operating on
      */
@@ -137,15 +131,7 @@ public class ClusterOperatorTest {
             throw new RuntimeException(e);
         }
         MixedOperation mockCms = mock(MixedOperation.class);
-        NonNamespaceOperation<CustomResourceDefinition, CustomResourceDefinitionList, Resource<CustomResourceDefinition>> mockCrds = mock(NonNamespaceOperation.class);
-        Resource<CustomResourceDefinition> mockResource = mock(Resource.class);
-        if (openShift) {
-            when(mockResource.get()).thenReturn(Crds.kafkaConnectS2I());
-        } else {
-            when(mockResource.get()).thenReturn(null);
-        }
-        when(mockCrds.withName(KafkaConnectS2I.CRD_NAME)).thenReturn(mockResource);
-        when(client.customResources(any(), any())).thenReturn(mockCms);
+        when(client.resources(any(), any())).thenReturn(mockCms);
 
         List<String> namespaceList = asList(namespaces.split(" *,+ *"));
         for (String namespace: namespaceList) {
@@ -176,14 +162,14 @@ public class ClusterOperatorTest {
                 for (String deploymentId: vertx.deploymentIDs()) {
                     vertx.undeploy(deploymentId, asyncResult -> {
                         if (asyncResult.failed()) {
-                            log.error("Failed to undeploy {}", deploymentId);
+                            LOGGER.error("Failed to undeploy {}", deploymentId);
                             context.failNow(asyncResult.cause());
                         }
                         latch.countDown();
                     });
                 }
 
-                int maximumExpectedNumberOfWatchers = (openShift ? 9 : 7) * namespaceList.size(); // we do not have connectS2I on k8s
+                int maximumExpectedNumberOfWatchers = 7 * namespaceList.size();
                 assertThat("Looks like there were more watchers than namespaces",
                         numWatchers.get(), lessThanOrEqualTo(maximumExpectedNumberOfWatchers));
                 latch.countDown();
@@ -194,6 +180,7 @@ public class ClusterOperatorTest {
 
     /**
      * Asserts that Cluster Operator starts and then stops a verticle in every namespace using the namespace wildcard (*)
+     *
      * @param context test context passed in for assertions
      * @param namespaces namespaces the operator should be watching and operating on
      */
@@ -217,16 +204,7 @@ public class ClusterOperatorTest {
         }
 
         MixedOperation mockCms = mock(MixedOperation.class);
-        NonNamespaceOperation<CustomResourceDefinition, CustomResourceDefinitionList,
-                Resource<CustomResourceDefinition>> mockCrds = mock(NonNamespaceOperation.class);
-        Resource<CustomResourceDefinition> mockResource = mock(Resource.class);
-        if (openShift) {
-            when(mockResource.get()).thenReturn(Crds.kafkaConnectS2I());
-        } else {
-            when(mockResource.get()).thenReturn(null);
-        }
-        when(mockCrds.withName(KafkaConnectS2I.CRD_NAME)).thenReturn(mockResource);
-        when(client.customResources(any(), any())).thenReturn(mockCms);
+        when(client.resources(any(), any())).thenReturn(mockCms);
 
         FilterWatchListMultiDeletable mockFilteredCms = mock(FilterWatchListMultiDeletable.class);
         when(mockFilteredCms.withLabels(any())).thenReturn(mockFilteredCms);
@@ -251,14 +229,14 @@ public class ClusterOperatorTest {
                 for (String deploymentId: vertx.deploymentIDs()) {
                     vertx.undeploy(deploymentId, asyncResult -> {
                         if (asyncResult.failed()) {
-                            log.error("Failed to undeploy {}", deploymentId);
+                            LOGGER.error("Failed to undeploy {}", deploymentId);
                             context.failNow(asyncResult.cause());
                         }
                         latch.countDown();
                     });
                 }
 
-                int maximumExpectedNumberOfWatchers = openShift ? 9 : 7; // we do not have connectS2I on k8s
+                int maximumExpectedNumberOfWatchers = 7;
                 assertThat("Looks like there were more watchers than namespaces", numWatchers.get(), lessThanOrEqualTo(maximumExpectedNumberOfWatchers));
                 latch.countDown();
             })));

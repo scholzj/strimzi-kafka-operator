@@ -21,10 +21,10 @@ import java.util.Map;
         include = JsonTypeInfo.As.EXISTING_PROPERTY,
         property = "type")
 @JsonSubTypes({
-        @JsonSubTypes.Type(name = KafkaAuthorizationSimple.TYPE_SIMPLE, value = KafkaAuthorizationSimple.class),
-        @JsonSubTypes.Type(name = KafkaAuthorizationOpa.TYPE_OPA, value = KafkaAuthorizationOpa.class),
-        @JsonSubTypes.Type(name = KafkaAuthorizationKeycloak.TYPE_KEYCLOAK, value = KafkaAuthorizationKeycloak.class),
-        @JsonSubTypes.Type(name = KafkaAuthorizationCustom.TYPE_CUSTOM, value = KafkaAuthorizationCustom.class)
+    @JsonSubTypes.Type(name = KafkaAuthorizationSimple.TYPE_SIMPLE, value = KafkaAuthorizationSimple.class),
+    @JsonSubTypes.Type(name = KafkaAuthorizationOpa.TYPE_OPA, value = KafkaAuthorizationOpa.class),
+    @JsonSubTypes.Type(name = KafkaAuthorizationKeycloak.TYPE_KEYCLOAK, value = KafkaAuthorizationKeycloak.class),
+    @JsonSubTypes.Type(name = KafkaAuthorizationCustom.TYPE_CUSTOM, value = KafkaAuthorizationCustom.class)
 })
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @EqualsAndHashCode
@@ -40,6 +40,13 @@ public abstract class KafkaAuthorization implements UnknownPropertyPreserving, S
             "`opa` authorization type uses Open Policy Agent based authorization." +
             "`custom` authorization type uses user-provided implementation for authorization.")
     public abstract String getType();
+
+    /**
+     * Indicates whether the Authorizer supports the Kafka Admin API to manage ACLs or not.
+     *
+     * @return True if ACLs can be managed using Kafka Admin API. False otherwise.
+     */
+    public abstract boolean supportsAdminApi();
 
     @Override
     public Map<String, Object> getAdditionalProperties() {

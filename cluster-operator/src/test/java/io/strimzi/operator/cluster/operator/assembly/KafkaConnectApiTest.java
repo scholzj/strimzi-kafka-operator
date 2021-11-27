@@ -4,9 +4,17 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
-import io.debezium.kafka.KafkaCluster;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+
 import io.strimzi.api.kafka.model.connect.ConnectorPlugin;
 import io.strimzi.operator.common.BackOff;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.OrderedProperties;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.annotations.IsolatedTest;
@@ -20,19 +28,12 @@ import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.apache.kafka.connect.cli.ConnectDistributed;
 import org.apache.kafka.connect.runtime.Connect;
+import org.apache.kafka.streams.integration.utils.EmbeddedKafkaCluster;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CountDownLatch;
 
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
@@ -44,27 +45,18 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
-import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @ExtendWith(VertxExtension.class)
 public class KafkaConnectApiTest {
-
-    private KafkaCluster cluster;
+    private static EmbeddedKafkaCluster cluster;
     private static Vertx vertx;
     private Connect connect;
     private static final int PORT = 18083;
 
     @BeforeEach
     public void beforeEach() throws IOException, InterruptedException {
-        // Start a 3 node Kafka cluster
-        cluster = new KafkaCluster();
-        cluster.addBrokers(3);
-        cluster.deleteDataPriorToStartup(true);
-        cluster.deleteDataUponShutdown(true);
-        cluster.usingDirectory(Files.createTempDirectory("operator-integration-test").toFile());
-        cluster.startup();
-
         // Start a N node connect cluster
         Map<String, String> workerProps = new HashMap<>();
         workerProps.put("listeners", "http://localhost:" + PORT);
@@ -78,7 +70,7 @@ public class KafkaConnectApiTest {
         workerProps.put("offset.storage.topic", getClass().getSimpleName() + "-offsets");
         workerProps.put("config.storage.topic", getClass().getSimpleName() + "-config");
         workerProps.put("status.storage.topic", getClass().getSimpleName() + "-status");
-        workerProps.put("bootstrap.servers", cluster.brokerList());
+        workerProps.put("bootstrap.servers", cluster.bootstrapServers());
         //DistributedConfig config = new DistributedConfig(workerProps);
         //RestServer rest = new RestServer(config);
         //rest.initializeServer();
@@ -100,16 +92,19 @@ public class KafkaConnectApiTest {
             connect.stop();
             connect.awaitStop();
         }
-        cluster.shutdown();
     }
 
     @BeforeAll
-    public static void before() {
+    public static void before() throws IOException {
         vertx = Vertx.vertx();
+
+        cluster = new EmbeddedKafkaCluster(3);
+        cluster.start();
     }
 
     @AfterAll
     public static void after() {
+        cluster.stop();
         vertx.close();
     }
 
@@ -118,7 +113,7 @@ public class KafkaConnectApiTest {
     public void test(VertxTestContext context) {
         KafkaConnectApi client = new KafkaConnectApiImpl(vertx);
         Checkpoint async = context.checkpoint();
-        client.listConnectorPlugins("localhost", PORT)
+        client.listConnectorPlugins(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT)
             .onComplete(context.succeeding(connectorPlugins -> context.verify(() -> {
                 assertThat(connectorPlugins.size(), greaterThanOrEqualTo(2));
 
@@ -144,7 +139,7 @@ public class KafkaConnectApiTest {
                     .put("tasks.max", "1")
                     .put("file", "/dev/null")
                     .put("topic", "my-topic");
-                return client.createOrUpdatePutRequest("localhost", PORT, "test", o);
+                return client.createOrUpdatePutRequest(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, "test", o);
             })
             .onComplete(context.succeeding())
             .compose(created -> {
@@ -154,7 +149,7 @@ public class KafkaConnectApiTest {
                 Handler<Long> handler = new Handler<Long>() {
                     @Override
                     public void handle(Long timerId) {
-                        client.status("localhost", PORT, "test").onComplete(result -> {
+                        client.status(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, "test").onComplete(result -> {
                             if (result.succeeded()) {
                                 Map<String, Object> status = result.result();
                                 if ("RUNNING".equals(((Map) status.getOrDefault("connector", emptyMap())).get("state"))) {
@@ -186,7 +181,7 @@ public class KafkaConnectApiTest {
                     assertThat(an.get("worker_id"), is("localhost:18083"));
                 }
             })))
-            .compose(status -> client.getConnectorConfig(new BackOff(10), "localhost", PORT, "test"))
+            .compose(status -> client.getConnectorConfig(Reconciliation.DUMMY_RECONCILIATION, new BackOff(10), "localhost", PORT, "test"))
             .onComplete(context.succeeding(config -> context.verify(() -> {
                 assertThat(config, is(TestUtils.map("connector.class", "FileStreamSource",
                         "file", "/dev/null",
@@ -194,7 +189,7 @@ public class KafkaConnectApiTest {
                         "name", "test",
                         "topic", "my-topic")));
             })))
-            .compose(config -> client.getConnectorConfig(new BackOff(10), "localhost", PORT, "does-not-exist"))
+            .compose(config -> client.getConnectorConfig(Reconciliation.DUMMY_RECONCILIATION, new BackOff(10), "localhost", PORT, "does-not-exist"))
             .onComplete(context.failing(error -> context.verify(() -> {
                 assertThat(error, instanceOf(ConnectRestException.class));
                 assertThat(((ConnectRestException) error).getStatusCode(), is(404));
@@ -219,7 +214,7 @@ public class KafkaConnectApiTest {
                         .put("tasks.max", "1")
                         .put("file", "/dev/null")
                         .put("topic", "my-topic");
-                return client.createOrUpdatePutRequest("localhost", PORT, "broken", o);
+                return client.createOrUpdatePutRequest(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, "broken", o);
             })
             .onComplete(context.failing(error -> context.verify(() -> {
                 assertThat(error, instanceOf(ConnectRestException.class));
@@ -234,7 +229,7 @@ public class KafkaConnectApiTest {
                         .put("tasks.max", "dog")
                         .put("file", "/dev/null")
                         .put("topic", "my-topic");
-                return client.createOrUpdatePutRequest("localhost", PORT, "broken2", o);
+                return client.createOrUpdatePutRequest(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, "broken2", o);
             })
             .onComplete(context.failing(error -> context.verify(() -> {
                 assertThat(error, instanceOf(ConnectRestException.class));
@@ -245,11 +240,11 @@ public class KafkaConnectApiTest {
             .compose(createResponse -> client.list("localhost", PORT))
             .onComplete(context.succeeding(connectorNames -> context.verify(() ->
                     assertThat(connectorNames, is(singletonList("test"))))))
-            .compose(connectorNames -> client.delete("localhost", PORT, "test"))
+            .compose(connectorNames -> client.delete(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, "test"))
             .onComplete(context.succeeding())
             .compose(deletedConnector -> client.list("localhost", PORT))
             .onComplete(context.succeeding(connectorNames -> assertThat(connectorNames, is(empty()))))
-            .compose(connectorNames -> client.delete("localhost", PORT, "never-existed"))
+            .compose(connectorNames -> client.delete(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, "never-existed"))
             .onComplete(context.failing(error -> {
                 assertThat(error, instanceOf(ConnectRestException.class));
                 assertThat(error.getMessage(),
@@ -264,7 +259,10 @@ public class KafkaConnectApiTest {
                 "log4j.logger.org.apache.zookeeper=WARN\n" +
                 "log4j.logger.org.I0Itec.zkclient=INFO\n" +
                 "log4j.logger.org.reflections.Reflection=INFO\n" +
-                "log4j.logger.org.reflections=FATAL";
+                "log4j.logger.org.reflections=FATAL\n" +
+                "log4j.logger.foo=WARN\n" +
+                "log4j.logger.foo.bar=TRACE\n" +
+                "log4j.logger.foo.bar.quux=DEBUG";
 
         KafkaConnectApi client = new KafkaConnectApiImpl(vertx);
         Checkpoint async = context.checkpoint();
@@ -272,18 +270,49 @@ public class KafkaConnectApiTest {
         OrderedProperties ops = new OrderedProperties();
         ops.addStringPairs(desired);
 
-        client.updateConnectLoggers("localhost", PORT, desired, ops)
-                .onComplete(context.succeeding())
-                .compose(a -> client.listConnectLoggers("localhost", PORT)
+        client.updateConnectLoggers(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, desired, ops)
+                .onComplete(context.succeeding(wasChanged -> context.verify(() -> assertEquals(true, wasChanged))))
+                .compose(a -> client.listConnectLoggers(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT)
                         .onComplete(context.succeeding(map -> context.verify(() -> {
-                            assertThat(map.get("org.apache.zookeeper").get("level"), is("WARN"));
-                            assertThat(map.get("org.I0Itec.zkclient").get("level"), is("INFO"));
-                            assertThat(map.get("org.reflections").get("level"), is("FATAL"));
-                            assertThat(map.get("org.reflections.Reflection").get("level"), is("INFO"));
-                            assertThat(map.get("root").get("level"), is("TRACE"));
-                            assertThat(map.get("io.debezium").get("level"), is("TRACE"));
-                            assertThat(map.get("unknown"), is(nullValue()));
+                            assertThat(map.get("root"), is("TRACE"));
+                            assertThat(map.get("org.apache.zookeeper"), is("WARN"));
+                            assertThat(map.get("org.I0Itec.zkclient"), is("INFO"));
+                            assertThat(map.get("org.reflections"), is("FATAL"));
+                            assertThat(map.get("org.reflections.Reflection"), is("INFO"));
+                            assertThat(map.get("org.reflections.Reflection"), is("INFO"));
+                            assertThat(map.get("foo"), is("WARN"));
+                            assertThat(map.get("foo.bar"), is("TRACE"));
+                            assertThat(map.get("foo.bar.quux"), is("DEBUG"));
+
+                        }))))
+                .compose(a -> client.updateConnectLoggers(Reconciliation.DUMMY_RECONCILIATION, "localhost", PORT, desired, ops)
+                        .onComplete(context.succeeding(wasChanged -> context.verify(() -> {
+                            assertEquals(false, wasChanged);
                             async.flag();
                         }))));
+    }
+
+    @IsolatedTest
+    public void testHierarchy() {
+        String rootLevel = "TRACE";
+        String desired = "log4j.rootLogger=" + rootLevel + ", CONSOLE\n" +
+                "log4j.logger.oorg.apache.zookeeper=WARN\n" +
+                "log4j.logger.oorg.I0Itec.zkclient=INFO\n" +
+                "log4j.logger.oorg.reflections.Reflection=INFO\n" +
+                "log4j.logger.oorg.reflections=FATAL\n" +
+                "log4j.logger.foo=WARN\n" +
+                "log4j.logger.foo.bar=TRACE\n" +
+                "log4j.logger.oorg.eclipse.jetty.util=DEBUG\n" +
+                "log4j.logger.foo.bar.quux=DEBUG";
+
+        KafkaConnectApiImpl client = new KafkaConnectApiImpl(vertx);
+        OrderedProperties ops = new OrderedProperties();
+        ops.addStringPairs(desired);
+        assertEquals("TRACE", client.getEffectiveLevel("foo.bar", ops.asMap()));
+        assertEquals("WARN", client.getEffectiveLevel("foo.lala", ops.asMap()));
+        assertEquals(rootLevel, client.getEffectiveLevel("bar.faa", ops.asMap()));
+        assertEquals("TRACE", client.getEffectiveLevel("org", ops.asMap()));
+        assertEquals("DEBUG", client.getEffectiveLevel("oorg.eclipse.jetty.util.thread.strategy.EatWhatYouKill", ops.asMap()));
+        assertEquals(rootLevel, client.getEffectiveLevel("oorg.eclipse.group.art", ops.asMap()));
     }
 }

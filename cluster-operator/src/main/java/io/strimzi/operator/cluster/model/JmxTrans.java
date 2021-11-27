@@ -34,6 +34,8 @@ import io.strimzi.operator.cluster.model.components.JmxTransOutputWriter;
 import io.strimzi.operator.cluster.model.components.JmxTransQueries;
 import io.strimzi.operator.cluster.model.components.JmxTransServer;
 import io.strimzi.operator.cluster.model.components.JmxTransServers;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.Util;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -66,6 +68,7 @@ public class JmxTrans extends AbstractModel {
 
     protected static final String ENV_VAR_JMXTRANS_LOGGING_LEVEL = "JMXTRANS_LOGGING_LEVEL";
 
+    protected static final String CO_ENV_VAR_CUSTOM_JMX_TRANS_POD_LABELS = "STRIMZI_CUSTOM_JMX_TRANS_LABELS";
 
     private boolean isDeployed;
     private boolean isJmxAuthenticated;
@@ -76,13 +79,22 @@ public class JmxTrans extends AbstractModel {
     protected List<ContainerEnvVar> templateContainerEnvVars;
     protected SecurityContext templateContainerSecurityContext;
 
+    private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
+    static {
+        String value = System.getenv(CO_ENV_VAR_CUSTOM_JMX_TRANS_POD_LABELS);
+        if (value != null) {
+            DEFAULT_POD_LABELS.putAll(Util.parseMap(value));
+        }
+    }
+
     /**
      * Constructor
      *
+     * @param reconciliation The reconciliation
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
-    protected JmxTrans(HasMetadata resource) {
-        super(resource, APPLICATION_NAME);
+    protected JmxTrans(Reconciliation reconciliation, HasMetadata resource) {
+        super(reconciliation, resource, APPLICATION_NAME);
         this.name = JmxTransResources.deploymentName(cluster);
         this.clusterName = cluster;
         this.replicas = 1;
@@ -99,7 +111,7 @@ public class JmxTrans extends AbstractModel {
         this.isMetricsEnabled = true;
     }
 
-    public static JmxTrans fromCrd(Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
+    public static JmxTrans fromCrd(Reconciliation reconciliation, Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
         JmxTrans result = null;
         JmxTransSpec spec = kafkaAssembly.getSpec().getJmxTrans();
         if (spec != null) {
@@ -107,10 +119,10 @@ public class JmxTrans extends AbstractModel {
                 String error = String.format("Can't start up JmxTrans '%s' in '%s' as Kafka spec.kafka.jmxOptions is not specified",
                         JmxTransResources.deploymentName(kafkaAssembly.getMetadata().getName()),
                         kafkaAssembly.getMetadata().getNamespace());
-                log.warn(error);
+                LOGGER.warnCr(reconciliation, error);
                 throw new InvalidResourceException(error);
             }
-            result = new JmxTrans(kafkaAssembly);
+            result = new JmxTrans(reconciliation, kafkaAssembly);
             result.isDeployed = true;
 
             if (kafkaAssembly.getSpec().getKafka().getJmxOptions().getAuthentication() instanceof KafkaJmxAuthenticationPassword) {
@@ -146,8 +158,13 @@ public class JmxTrans extends AbstractModel {
                 if (template.getContainer() != null && template.getContainer().getSecurityContext() != null) {
                     result.templateContainerSecurityContext = template.getContainer().getSecurityContext();
                 }
-            }
 
+                if (template.getServiceAccount() != null && template.getServiceAccount().getMetadata() != null) {
+                    result.templateServiceAccountLabels = template.getServiceAccount().getMetadata().getLabels();
+                    result.templateServiceAccountAnnotations = template.getServiceAccount().getMetadata().getAnnotations();
+                }
+            }
+            result.templatePodLabels = Util.mergeLabelsOrAnnotations(result.templatePodLabels, DEFAULT_POD_LABELS);
         }
 
         return result;
@@ -197,7 +214,7 @@ public class JmxTrans extends AbstractModel {
         try {
             return mapper.writeValueAsString(servers);
         } catch (JsonProcessingException e) {
-            log.error("Could not create JmxTrans config json because: " + e.getMessage());
+            LOGGER.errorCr(reconciliation, "Could not create JmxTrans config json because: " + e.getMessage());
             throw e;
         }
     }

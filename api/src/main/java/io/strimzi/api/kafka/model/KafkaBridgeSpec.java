@@ -26,9 +26,9 @@ import lombok.EqualsAndHashCode;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
-        "replicas", "image", "bootstrapServers", "tls", "authentication", "http", "consumer",
-        "producer", "resources", "jvmOptions", "logging",
-        "enableMetrics", "livenessProbe", "readinessProbe", "template", "tracing"})
+    "replicas", "image", "bootstrapServers", "tls", "authentication", "http", "adminClient", "consumer",
+    "producer", "resources", "jvmOptions", "logging",
+    "enableMetrics", "livenessProbe", "readinessProbe", "template", "tracing"})
 @EqualsAndHashCode
 public class KafkaBridgeSpec extends Spec {
     private static final long serialVersionUID = 1L;
@@ -39,10 +39,11 @@ public class KafkaBridgeSpec extends Spec {
     private String image;
     private KafkaBridgeHttpConfig http;
     private String bootstrapServers;
-    private KafkaBridgeTls tls;
+    private ClientTls tls;
     private KafkaClientAuthentication authentication;
     private KafkaBridgeConsumerSpec consumer;
     private KafkaBridgeProducerSpec producer;
+    private KafkaBridgeAdminClientSpec adminClient;
     private ResourceRequirements resources;
     private JvmOptions jvmOptions;
     private Logging logging;
@@ -117,11 +118,11 @@ public class KafkaBridgeSpec extends Spec {
 
     @Description("TLS configuration for connecting Kafka Bridge to the cluster.")
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public KafkaBridgeTls getTls() {
+    public ClientTls getTls() {
         return tls;
     }
 
-    public void setTls(KafkaBridgeTls tls) {
+    public void setTls(ClientTls tls) {
         this.tls = tls;
     }
 
@@ -133,6 +134,16 @@ public class KafkaBridgeSpec extends Spec {
 
     public void setBootstrapServers(String bootstrapServers) {
         this.bootstrapServers = bootstrapServers;
+    }
+
+    @Description("Kafka AdminClient related configuration.")
+    @JsonInclude(value = JsonInclude.Include.NON_NULL)
+    public KafkaBridgeAdminClientSpec getAdminClient() {
+        return adminClient;
+    }
+
+    public void setAdminClient(KafkaBridgeAdminClientSpec adminClient) {
+        this.adminClient = adminClient;
     }
 
     @Description("Kafka producer related configuration")

@@ -7,12 +7,10 @@ package io.strimzi.api.kafka.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
-import io.strimzi.api.annotations.DeprecatedProperty;
 import io.strimzi.api.kafka.model.balancing.BrokerCapacity;
 import io.strimzi.api.kafka.model.template.CruiseControlTemplate;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.KubeLink;
-import io.strimzi.crdgenerator.annotations.PresentInVersions;
 import io.sundr.builder.annotations.Buildable;
 import java.io.Serializable;
 import java.util.HashMap;
@@ -26,11 +24,8 @@ import lombok.EqualsAndHashCode;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
-        "image", "tlsSidecar", "resources",
-        "livenessProbe", "readinessProbe",
-        "jvmOptions", "logging",
-        "template", "brokerCapacity",
-        "config", "metrics", "metricsConfig"})
+    "image", "tlsSidecar", "resources", "livenessProbe", "readinessProbe", "jvmOptions", "logging", "template",
+    "brokerCapacity", "config", "metricsConfig"})
 @EqualsAndHashCode
 public class CruiseControlSpec implements HasConfigurableMetrics, UnknownPropertyPreserving, Serializable {
     private static final long serialVersionUID = 1L;
@@ -39,9 +34,9 @@ public class CruiseControlSpec implements HasConfigurableMetrics, UnknownPropert
     public static final String FORBIDDEN_PREFIXES = "bootstrap.servers, client.id, zookeeper., network., security., failed.brokers.zk.path,"
         + "webserver.http., webserver.api.urlprefix, webserver.session.path, webserver.accesslog., two.step., request.reason.required,"
         + "metric.reporter.sampler.bootstrap.servers, metric.reporter.topic, partition.metric.sample.store.topic, broker.metric.sample.store.topic,"
-        + "capacity.config.file, self.healing., anomaly.detection., ssl.";
-    public static final String FORBIDDEN_PREFIX_EXCEPTIONS = "ssl.cipher.suites, ssl.protocol, ssl.enabled.protocols, webserver.http.cors.enabled," +
-            "webserver.http.cors.origin, webserver.http.cors.exposeheaders";
+        + "capacity.config.file, self.healing., ssl.";
+    public static final String FORBIDDEN_PREFIX_EXCEPTIONS = "ssl.cipher.suites, ssl.protocol, ssl.enabled.protocols, webserver.http.cors.enabled, "
+        + "webserver.http.cors.origin, webserver.http.cors.exposeheaders, webserver.security.enable, webserver.ssl.enable";
 
     private String image;
     private TlsSidecar tlsSidecar;
@@ -53,7 +48,6 @@ public class CruiseControlSpec implements HasConfigurableMetrics, UnknownPropert
     private CruiseControlTemplate template;
     private BrokerCapacity brokerCapacity;
     private Map<String, Object> config = new HashMap<>(0);
-    private Map<String, Object> metrics;
     private MetricsConfig metricsConfig;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
@@ -98,22 +92,6 @@ public class CruiseControlSpec implements HasConfigurableMetrics, UnknownPropert
 
     public void setConfig(Map<String, Object> config) {
         this.config = config;
-    }
-
-    @DeprecatedProperty(movedToPath = "spec.cruiseControl.metricsConfig", removalVersion = "v1beta2")
-    @PresentInVersions("v1alpha1-v1beta1")
-    @Deprecated
-    @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    @Description("The Prometheus JMX Exporter configuration. " +
-            "See https://github.com/prometheus/jmx_exporter for details of the structure of this configuration.")
-    @Override
-    public Map<String, Object> getMetrics() {
-        return metrics;
-    }
-
-    @Override
-    public void setMetrics(Map<String, Object> metrics) {
-        this.metrics = metrics;
     }
 
     @Description("Metrics configuration.")

@@ -21,6 +21,7 @@ spec:
         - name: strimzi-tmp
           emptyDir:
             medium: Memory
+            sizeLimit: 1Mi
         - name: co-config-volume
           configMap:
             name: strimzi-cluster-operator
@@ -47,48 +48,33 @@ spec:
             - name: STRIMZI_OPERATION_TIMEOUT_MS
               value: "300000"
             - name: STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE
-              value: quay.io/strimzi/kafka:latest-kafka-2.8.0
+              value: quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_DEFAULT_KAFKA_EXPORTER_IMAGE
-              value: quay.io/strimzi/kafka:latest-kafka-2.8.0
+              value: quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_DEFAULT_CRUISE_CONTROL_IMAGE
-              value: quay.io/strimzi/kafka:latest-kafka-2.8.0
+              value: quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_DEFAULT_TLS_SIDECAR_CRUISE_CONTROL_IMAGE
-              value: quay.io/strimzi/kafka:latest-kafka-2.8.0
+              value: quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_KAFKA_IMAGES
               value: |
-                2.6.0=quay.io/strimzi/kafka:latest-kafka-2.6.0
-                2.6.1=quay.io/strimzi/kafka:latest-kafka-2.6.1
-                2.6.2=quay.io/strimzi/kafka:latest-kafka-2.6.2
-                2.7.0=quay.io/strimzi/kafka:latest-kafka-2.7.0
                 2.8.0=quay.io/strimzi/kafka:latest-kafka-2.8.0
+                2.8.1=quay.io/strimzi/kafka:latest-kafka-2.8.1
+                3.0.0=quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_KAFKA_CONNECT_IMAGES
               value: |
-                2.6.0=quay.io/strimzi/kafka:latest-kafka-2.6.0
-                2.6.1=quay.io/strimzi/kafka:latest-kafka-2.6.1
-                2.6.2=quay.io/strimzi/kafka:latest-kafka-2.6.2
-                2.7.0=quay.io/strimzi/kafka:latest-kafka-2.7.0
                 2.8.0=quay.io/strimzi/kafka:latest-kafka-2.8.0
-            - name: STRIMZI_KAFKA_CONNECT_S2I_IMAGES
-              value: |
-                2.6.0=quay.io/strimzi/kafka:latest-kafka-2.6.0
-                2.6.1=quay.io/strimzi/kafka:latest-kafka-2.6.1
-                2.6.2=quay.io/strimzi/kafka:latest-kafka-2.6.2
-                2.7.0=quay.io/strimzi/kafka:latest-kafka-2.7.0
-                2.8.0=quay.io/strimzi/kafka:latest-kafka-2.8.0
+                2.8.1=quay.io/strimzi/kafka:latest-kafka-2.8.1
+                3.0.0=quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_KAFKA_MIRROR_MAKER_IMAGES
               value: |
-                2.6.0=quay.io/strimzi/kafka:latest-kafka-2.6.0
-                2.6.1=quay.io/strimzi/kafka:latest-kafka-2.6.1
-                2.6.2=quay.io/strimzi/kafka:latest-kafka-2.6.2
-                2.7.0=quay.io/strimzi/kafka:latest-kafka-2.7.0
                 2.8.0=quay.io/strimzi/kafka:latest-kafka-2.8.0
+                2.8.1=quay.io/strimzi/kafka:latest-kafka-2.8.1
+                3.0.0=quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES
               value: |
-                2.6.0=quay.io/strimzi/kafka:latest-kafka-2.6.0
-                2.6.1=quay.io/strimzi/kafka:latest-kafka-2.6.1
-                2.6.2=quay.io/strimzi/kafka:latest-kafka-2.6.2
-                2.7.0=quay.io/strimzi/kafka:latest-kafka-2.7.0
                 2.8.0=quay.io/strimzi/kafka:latest-kafka-2.8.0
+                2.8.1=quay.io/strimzi/kafka:latest-kafka-2.8.1
+                3.0.0=quay.io/strimzi/kafka:latest-kafka-3.0.0
             - name: STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE
               value: quay.io/strimzi/operator:latest
             - name: STRIMZI_DEFAULT_USER_OPERATOR_IMAGE
@@ -96,11 +82,13 @@ spec:
             - name: STRIMZI_DEFAULT_KAFKA_INIT_IMAGE
               value: quay.io/strimzi/operator:latest
             - name: STRIMZI_DEFAULT_KAFKA_BRIDGE_IMAGE
-              value: quay.io/strimzi/kafka-bridge:0.19.0
+              value: quay.io/strimzi/kafka-bridge:0.20.3
             - name: STRIMZI_DEFAULT_JMXTRANS_IMAGE
               value: quay.io/strimzi/jmxtrans:latest
             - name: STRIMZI_DEFAULT_KANIKO_EXECUTOR_IMAGE
               value: quay.io/strimzi/kaniko-executor:latest
+            - name: STRIMZI_DEFAULT_MAVEN_BUILDER
+              value: quay.io/strimzi/maven-builder:latest
             - name: STRIMZI_OPERATOR_NAMESPACE
               valueFrom:
                 fieldRef:

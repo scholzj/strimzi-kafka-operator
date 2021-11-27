@@ -12,6 +12,7 @@ import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.NodeSelectorTermBuilder;
 import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
+import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.TolerationBuilder;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
@@ -32,6 +33,7 @@ import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.components.JmxTransOutputWriter;
 import io.strimzi.operator.cluster.model.components.JmxTransQueries;
 import io.strimzi.operator.cluster.model.components.JmxTransServer;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.annotations.ParallelSuite;
@@ -79,11 +81,11 @@ public class JmxTransTest {
             .withKafkaQueries(new JmxTransQueryTemplateBuilder()
                     .withOutputs("name")
                     .withAttributes("attributes")
-                    .withNewTargetMBean("mbean")
+                    .withTargetMBean("mbean")
                     .build())
             .build();
 
-    private final Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, configuration, kafkaLog, zooLog))
+    private final Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout, jmxMetricsConfig, configuration, kafkaLog, zooLog))
             .editSpec()
                 .withJmxTrans(jmxTransSpec)
                 .editKafka().withJmxOptions(new KafkaJmxOptionsBuilder()
@@ -93,7 +95,7 @@ public class JmxTransTest {
             .endSpec()
             .build();
 
-    private final JmxTrans jmxTrans = JmxTrans.fromCrd(kafkaAssembly, VERSIONS);
+    private final JmxTrans jmxTrans = JmxTrans.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafkaAssembly, VERSIONS);
 
     @ParallelTest
     public void testOutputDefinitionWriterDeserialization() {
@@ -200,13 +202,16 @@ public class JmxTransTest {
         Map<String, String> podLabels = TestUtils.map("l3", "v3", "l4", "v4");
         Map<String, String> podAnots = TestUtils.map("a3", "v3", "a4", "v4");
 
+        Map<String, String> saLabels = TestUtils.map("l5", "v5", "l6", "v6");
+        Map<String, String> saAnots = TestUtils.map("a5", "v5", "a6", "v6");
+
         Affinity affinity = new AffinityBuilder()
                 .withNewNodeAffinity()
                     .withNewRequiredDuringSchedulingIgnoredDuringExecution()
                         .withNodeSelectorTerms(new NodeSelectorTermBuilder()
                                 .addNewMatchExpression()
-                                    .withNewKey("key1")
-                                    .withNewOperator("In")
+                                    .withKey("key1")
+                                    .withOperator("In")
                                     .withValues("value1", "value2")
                                 .endMatchExpression()
                                 .build())
@@ -236,17 +241,23 @@ public class JmxTransTest {
                                     .withLabels(podLabels)
                                     .withAnnotations(podAnots)
                                 .endMetadata()
-                                .withNewPriorityClassName("top-priority")
-                                .withNewSchedulerName("my-scheduler")
+                                .withPriorityClassName("top-priority")
+                                .withSchedulerName("my-scheduler")
                                 .withAffinity(affinity)
                                 .withTolerations(tolerations)
                                 .withEnableServiceLinks(false)
                             .endPod()
+                            .withNewServiceAccount()
+                                .withNewMetadata()
+                                    .withLabels(saLabels)
+                                    .withAnnotations(saAnots)
+                                .endMetadata()
+                            .endServiceAccount()
                         .endTemplate()
                     .endJmxTrans()
                 .endSpec()
                 .build();
-        JmxTrans jmxTrans = JmxTrans.fromCrd(resource, VERSIONS);
+        JmxTrans jmxTrans = JmxTrans.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
 
         // Check Deployment
         Deployment dep = jmxTrans.generateDeployment(null, null);
@@ -261,6 +272,11 @@ public class JmxTransTest {
         assertThat(dep.getSpec().getTemplate().getMetadata().getAnnotations(), hasEntries(podAnots));
         assertThat(dep.getSpec().getTemplate().getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(dep.getSpec().getTemplate().getSpec().getEnableServiceLinks(), is(false));
+
+        // Check Service Account
+        ServiceAccount sa = jmxTrans.generateServiceAccount();
+        assertThat(sa.getMetadata().getLabels().entrySet().containsAll(saLabels.entrySet()), is(true));
+        assertThat(sa.getMetadata().getAnnotations().entrySet().containsAll(saAnots.entrySet()), is(true));
     }
 
     @ParallelTest
@@ -296,7 +312,7 @@ public class JmxTransTest {
                 .endSpec()
                 .build();
 
-        List<EnvVar> envVars = JmxTrans.fromCrd(resource, VERSIONS).getEnvVars();
+        List<EnvVar> envVars = JmxTrans.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS).getEnvVars();
 
         assertThat("Failed to correctly set container environment variable: " + testEnvOneKey,
                 envVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
@@ -331,7 +347,7 @@ public class JmxTransTest {
                 .endSpec()
                 .build();
 
-        List<EnvVar> envVars = JmxTrans.fromCrd(resource, VERSIONS).getEnvVars();
+        List<EnvVar> envVars = JmxTrans.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS).getEnvVars();
 
         assertThat("Failed to prevent over writing existing container environment variable: " + testEnvOneKey,
                 envVars.stream().filter(env -> testEnvOneKey.equals(env.getName()))
@@ -343,7 +359,7 @@ public class JmxTransTest {
 
         SecurityContext securityContext = new SecurityContextBuilder()
                 .withPrivileged(false)
-                .withNewReadOnlyRootFilesystem(false)
+                .withReadOnlyRootFilesystem(false)
                 .withAllowPrivilegeEscalation(false)
                 .withRunAsNonRoot(true)
                 .withNewCapabilities()
@@ -363,7 +379,7 @@ public class JmxTransTest {
                 .endSpec()
                 .build();
 
-        JmxTrans jmxTrans = JmxTrans.fromCrd(resource, VERSIONS);
+        JmxTrans jmxTrans = JmxTrans.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource, VERSIONS);
         assertThat(jmxTrans.templateContainerSecurityContext, is(securityContext));
 
         Deployment deployment = jmxTrans.generateDeployment(null, null);

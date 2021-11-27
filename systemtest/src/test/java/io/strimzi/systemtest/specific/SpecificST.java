@@ -15,20 +15,22 @@ import io.strimzi.api.kafka.model.KafkaConnect;
 import io.strimzi.api.kafka.model.KafkaConnectResources;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.Rack;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerConfigurationBrokerBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.systemtest.AbstractST;
+import io.strimzi.systemtest.BeforeAllOnce;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.Environment;
+import io.strimzi.systemtest.kafkaclients.externalClients.ExternalKafkaClient;
+import io.strimzi.systemtest.resources.operator.SetupClusterOperator;
 import io.strimzi.systemtest.annotations.IsolatedTest;
-import io.strimzi.systemtest.kafkaclients.externalClients.BasicExternalKafkaClient;
 import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.crd.KafkaConnectResource;
 import io.strimzi.systemtest.resources.crd.KafkaResource;
 import io.strimzi.systemtest.resources.crd.kafkaclients.KafkaBasicExampleClients;
 import io.strimzi.systemtest.resources.kubernetes.NetworkPolicyResource;
-import io.strimzi.systemtest.resources.operator.BundleResource;
 import io.strimzi.systemtest.templates.crd.KafkaClientsTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaConnectTemplates;
 import io.strimzi.systemtest.templates.crd.KafkaTemplates;
@@ -40,6 +42,7 @@ import io.strimzi.systemtest.utils.kafkaUtils.KafkaUtils;
 import io.strimzi.systemtest.utils.kubeUtils.controllers.DeploymentUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.PodUtils;
 import io.strimzi.systemtest.utils.specific.BridgeUtils;
+import io.strimzi.test.annotations.IsolatedSuite;
 import io.strimzi.test.executor.Exec;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -54,9 +57,12 @@ import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static io.strimzi.systemtest.Constants.ACCEPTANCE;
 import static io.strimzi.systemtest.Constants.CONNECT;
+import static io.strimzi.systemtest.Constants.CONNECT_COMPONENTS;
 import static io.strimzi.systemtest.Constants.CO_OPERATION_TIMEOUT_SHORT;
 import static io.strimzi.systemtest.Constants.EXTERNAL_CLIENTS_USED;
+import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
 import static io.strimzi.systemtest.Constants.INTERNAL_CLIENTS_USED;
 import static io.strimzi.systemtest.Constants.LOADBALANCER_SUPPORTED;
 import static io.strimzi.systemtest.Constants.REGRESSION;
@@ -75,13 +81,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 @Tag(SPECIFIC)
+@IsolatedSuite
 public class SpecificST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(SpecificST.class);
-    public static final String NAMESPACE = "specific-cluster-test";
-    private ExtensionContext sharedExtensionContext;
 
-    @IsolatedTest("Using more tha one Kafka cluster in one namespace")
+    @IsolatedTest("UtestRackAwareConnectWrongDeploymentsing more tha one Kafka cluster in one namespace")
     @Tag(REGRESSION)
     @Tag(INTERNAL_CLIENTS_USED)
     void testRackAware(ExtensionContext extensionContext) {
@@ -140,6 +145,7 @@ public class SpecificST extends AbstractST {
 
     @IsolatedTest("Modification of shared Cluster Operator configuration")
     @Tag(CONNECT)
+    @Tag(CONNECT_COMPONENTS)
     @Tag(REGRESSION)
     @Tag(INTERNAL_CLIENTS_USED)
     void testRackAwareConnectWrongDeployment(ExtensionContext extensionContext) {
@@ -151,16 +157,26 @@ public class SpecificST extends AbstractST {
         Map<String, String> anno = Collections.singletonMap("my-annotation", "value");
 
         // We need to update CO configuration to set OPERATION_TIMEOUT to shorter value, because we expect timeout in that test
-        Map<String, String> coSnapshot = DeploymentUtils.depSnapshot(ResourceManager.getCoDeploymentName());
+        Map<String, String> coSnapshot = DeploymentUtils.depSnapshot(INFRA_NAMESPACE, ResourceManager.getCoDeploymentName());
         // We have to install CO in class stack, otherwise it will be deleted at the end of test case and all following tests will fail
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .withOperationTimeout(CO_OPERATION_TIMEOUT_SHORT)
+            .withReconciliationInterval(Constants.RECONCILIATION_INTERVAL)
+            .createInstallation()
+            .runBundleInstallation();
 
-        resourceManager.createResource(sharedExtensionContext, BundleResource.clusterOperator(NAMESPACE, CO_OPERATION_TIMEOUT_SHORT).build());
-        coSnapshot = DeploymentUtils.waitTillDepHasRolled(ResourceManager.getCoDeploymentName(), 1, coSnapshot);
+        coSnapshot = DeploymentUtils.waitTillDepHasRolled(INFRA_NAMESPACE, ResourceManager.getCoDeploymentName(), 1, coSnapshot);
 
         String wrongRackKey = "wrong-key";
         String rackKey = "rack-key";
 
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3)
+            .editMetadata()
+                .withNamespace(INFRA_NAMESPACE)
+            .endMetadata()
             .editSpec()
                     .editKafka()
                         .withNewRack()
@@ -171,12 +187,15 @@ public class SpecificST extends AbstractST {
                 .endSpec()
                 .build());
 
-        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(false, kafkaClientsName).build());
-        String kafkaClientsPodName = kubeClient().listPodsByPrefixInName(kafkaClientsName).get(0).getMetadata().getName();
+        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(INFRA_NAMESPACE, false, kafkaClientsName).build());
+        String kafkaClientsPodName = kubeClient(INFRA_NAMESPACE).listPodsByPrefixInName(INFRA_NAMESPACE, kafkaClientsName).get(0).getMetadata().getName();
 
         LOGGER.info("Deploy KafkaConnect with wrong rack-aware topology key: {}", wrongRackKey);
 
         KafkaConnect kc = KafkaConnectTemplates.kafkaConnect(extensionContext, clusterName, clusterName, 1)
+            .editMetadata()
+                .withNamespace(INFRA_NAMESPACE)
+            .endMetadata()
             .editSpec()
                 .withNewRack()
                     .withTopologyKey(wrongRackKey)
@@ -199,54 +218,66 @@ public class SpecificST extends AbstractST {
 
         NetworkPolicyResource.deployNetworkPolicyForResource(extensionContext, kc, KafkaConnectResources.deploymentName(clusterName));
 
-        PodUtils.waitForPendingPod(clusterName + "-connect");
-        List<String> connectWrongPods = kubeClient().listPodNames(Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND);
+        PodUtils.waitForPendingPod(INFRA_NAMESPACE, clusterName + "-connect");
+        List<String> connectWrongPods = kubeClient(INFRA_NAMESPACE).listPodNames(INFRA_NAMESPACE, clusterName, Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND);
         String connectWrongPodName = connectWrongPods.get(0);
         LOGGER.info("Waiting for ClusterOperator to get timeout operation of incorrectly set up KafkaConnect");
-        KafkaConnectUtils.waitForKafkaConnectCondition("TimeoutException", "NotReady", NAMESPACE, clusterName);
+        KafkaConnectUtils.waitForKafkaConnectCondition("TimeoutException", "NotReady", INFRA_NAMESPACE, clusterName);
 
-        PodStatus kcWrongStatus = kubeClient().getPod(connectWrongPodName).getStatus();
+        PodStatus kcWrongStatus = kubeClient().getPod(INFRA_NAMESPACE, connectWrongPodName).getStatus();
         assertThat("Unschedulable", is(kcWrongStatus.getConditions().get(0).getReason()));
         assertThat("PodScheduled", is(kcWrongStatus.getConditions().get(0).getType()));
 
-        KafkaConnectResource.replaceKafkaConnectResource(clusterName, kafkaConnect -> {
+        KafkaConnectResource.replaceKafkaConnectResourceInSpecificNamespace(clusterName, kafkaConnect -> {
             kafkaConnect.getSpec().setRack(new Rack(rackKey));
-        });
-        KafkaConnectUtils.waitForConnectReady(clusterName);
+        }, INFRA_NAMESPACE);
+        KafkaConnectUtils.waitForConnectReady(INFRA_NAMESPACE, clusterName);
         LOGGER.info("KafkaConnect is ready with changed rack key: '{}'.", rackKey);
         LOGGER.info("Verify KafkaConnect rack key update");
-        kc = KafkaConnectResource.kafkaConnectClient().inNamespace(NAMESPACE).withName(clusterName).get();
+        kc = KafkaConnectResource.kafkaConnectClient().inNamespace(INFRA_NAMESPACE).withName(clusterName).get();
         assertThat(kc.getSpec().getRack().getTopologyKey(), is(rackKey));
 
-        List<String> kcPods = kubeClient().listPodNames(Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND);
-        KafkaConnectUtils.sendReceiveMessagesThroughConnect(kcPods.get(0), TOPIC_NAME, kafkaClientsPodName, NAMESPACE, clusterName);
-
-        // Revert changes for CO deployment
-        resourceManager.createResource(sharedExtensionContext, BundleResource.clusterOperator(NAMESPACE).build());
-        DeploymentUtils.waitTillDepHasRolled(ResourceManager.getCoDeploymentName(), 1, coSnapshot);
+        List<String> kcPods = kubeClient(INFRA_NAMESPACE).listPodNames(INFRA_NAMESPACE, clusterName, Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND);
+        KafkaConnectUtils.sendReceiveMessagesThroughConnect(kcPods.get(0), TOPIC_NAME, kafkaClientsPodName, INFRA_NAMESPACE, clusterName);
 
         // check the ClusterRoleBinding annotations and labels in Kafka cluster
-        Map<String, String> actualLabel = KafkaConnectResource.kafkaConnectClient().inNamespace(NAMESPACE).withName(clusterName).get().getSpec().getTemplate().getClusterRoleBinding().getMetadata().getLabels();
-        Map<String, String> actualAnno = KafkaConnectResource.kafkaConnectClient().inNamespace(NAMESPACE).withName(clusterName).get().getSpec().getTemplate().getClusterRoleBinding().getMetadata().getAnnotations();
+        Map<String, String> actualLabel = KafkaConnectResource.kafkaConnectClient().inNamespace(INFRA_NAMESPACE).withName(clusterName).get().getSpec().getTemplate().getClusterRoleBinding().getMetadata().getLabels();
+        Map<String, String> actualAnno = KafkaConnectResource.kafkaConnectClient().inNamespace(INFRA_NAMESPACE).withName(clusterName).get().getSpec().getTemplate().getClusterRoleBinding().getMetadata().getAnnotations();
 
         assertThat(actualLabel, is(label));
         assertThat(actualAnno, is(anno));
+
+        // Revert changes for CO deployment
+        install.unInstall();
+        install = new SetupClusterOperator.SetupClusterOperatorBuilder()
+            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
+            .withNamespace(INFRA_NAMESPACE)
+            .createInstallation()
+            .runBundleInstallation();
+
+        DeploymentUtils.waitTillDepHasRolled(INFRA_NAMESPACE, ResourceManager.getCoDeploymentName(), 1, coSnapshot);
     }
 
     @IsolatedTest("Modification of shared Cluster Operator configuration")
     @Tag(CONNECT)
-    @Tag(REGRESSION)
+    @Tag(CONNECT_COMPONENTS)
+    @Tag(ACCEPTANCE)
     @Tag(INTERNAL_CLIENTS_USED)
-    public void testRackAwareConnectCorrectDeployment(ExtensionContext extensionContext) {
+    void testRackAwareConnectCorrectDeployment(ExtensionContext extensionContext) {
         assumeFalse(Environment.isNamespaceRbacScope());
 
         String kafkaClientsName = mapWithKafkaClientNames.get(extensionContext.getDisplayName());
         String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
 
         // We need to update CO configuration to set OPERATION_TIMEOUT to shorter value, because we expect timeout in that test
-        Map<String, String> coSnapshot = DeploymentUtils.depSnapshot(ResourceManager.getCoDeploymentName());
+        Map<String, String> coSnapshot = DeploymentUtils.depSnapshot(INFRA_NAMESPACE, ResourceManager.getCoDeploymentName());
         // We have to install CO in class stack, otherwise it will be deleted at the end of test case and all following tests will fail
-        resourceManager.createResource(sharedExtensionContext, BundleResource.clusterOperator(NAMESPACE, CO_OPERATION_TIMEOUT_SHORT).build());
+        install.unInstall();
+        install = SetupClusterOperator.defaultInstallation()
+            .withOperationTimeout(CO_OPERATION_TIMEOUT_SHORT)
+            .withReconciliationInterval(Constants.RECONCILIATION_INTERVAL)
+            .createInstallation()
+            .runBundleInstallation();
 
         coSnapshot = DeploymentUtils.waitTillDepHasRolled(ResourceManager.getCoDeploymentName(), 1, coSnapshot);
 
@@ -299,10 +330,13 @@ public class SpecificST extends AbstractST {
         assertThat(connectPodNodeSelectorRequirement.getKey(), is(rackKey));
         assertThat(connectPodNodeSelectorRequirement.getOperator(), is("Exists"));
 
-        KafkaConnectUtils.sendReceiveMessagesThroughConnect(connectPodName, topicName, kafkaClientsPodName, NAMESPACE, clusterName);
-
+        KafkaConnectUtils.sendReceiveMessagesThroughConnect(connectPodName, topicName, kafkaClientsPodName, INFRA_NAMESPACE, clusterName);
         // Revert changes for CO deployment
-        resourceManager.createResource(sharedExtensionContext, BundleResource.clusterOperator(NAMESPACE).build());
+        install.unInstall();
+        install = SetupClusterOperator.defaultInstallation()
+            .createInstallation()
+            .runInstallation();
+
         DeploymentUtils.waitTillDepHasRolled(ResourceManager.getCoDeploymentName(), 1, coSnapshot);
     }
 
@@ -317,8 +351,7 @@ public class SpecificST extends AbstractST {
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3, 1)
             .editSpec()
                 .editKafka()
-                    .withNewListeners()
-                        .addNewGenericKafkaListener()
+                    .withListeners(new GenericKafkaListenerBuilder()
                             .withName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
                             .withPort(9094)
                             .withType(KafkaListenerType.LOADBALANCER)
@@ -333,8 +366,7 @@ public class SpecificST extends AbstractST {
                                         .build())
                                 .withFinalizers(LB_FINALIZERS)
                             .endConfiguration()
-                        .endGenericKafkaListener()
-                    .endListeners()
+                            .build())
                 .endKafka()
             .endSpec()
             .build());
@@ -342,17 +374,17 @@ public class SpecificST extends AbstractST {
         assertThat("Kafka External bootstrap doesn't contain correct loadBalancer address", kubeClient().getService(KafkaResources.externalBootstrapServiceName(clusterName)).getSpec().getLoadBalancerIP(), is(bootstrapOverrideIP));
         assertThat("Kafka Broker-0 service doesn't contain correct loadBalancer address", kubeClient().getService(KafkaResources.brokerSpecificService(clusterName, 0)).getSpec().getLoadBalancerIP(), is(brokerOverrideIP));
 
-        BasicExternalKafkaClient basicExternalKafkaClient = new BasicExternalKafkaClient.Builder()
+        ExternalKafkaClient externalKafkaClient = new ExternalKafkaClient.Builder()
             .withTopicName(TOPIC_NAME)
-            .withNamespaceName(NAMESPACE)
+            .withNamespaceName(INFRA_NAMESPACE)
             .withClusterName(clusterName)
             .withMessageCount(MESSAGE_COUNT)
             .withListenerName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
             .build();
 
-        basicExternalKafkaClient.verifyProducedAndConsumedMessages(
-            basicExternalKafkaClient.sendMessagesPlain(),
-            basicExternalKafkaClient.receiveMessagesPlain()
+        externalKafkaClient.verifyProducedAndConsumedMessages(
+            externalKafkaClient.sendMessagesPlain(),
+            externalKafkaClient.receiveMessagesPlain()
         );
     }
 
@@ -372,10 +404,10 @@ public class SpecificST extends AbstractST {
 
         LOGGER.info("Kafka with version {} deployed.", nonExistingVersion);
 
-        KafkaUtils.waitForKafkaNotReady(clusterName);
-        KafkaUtils.waitUntilKafkaStatusConditionContainsMessage(clusterName, NAMESPACE, nonExistingVersionMessage);
+        KafkaUtils.waitForKafkaNotReady(INFRA_NAMESPACE, clusterName);
+        KafkaUtils.waitUntilKafkaStatusConditionContainsMessage(clusterName, INFRA_NAMESPACE, nonExistingVersionMessage);
 
-        KafkaResource.kafkaClient().inNamespace(NAMESPACE).withName(clusterName).delete();
+        KafkaResource.kafkaClient().inNamespace(INFRA_NAMESPACE).withName(clusterName).delete();
     }
 
     @IsolatedTest("Using more tha one Kafka cluster in one namespace")
@@ -400,33 +432,31 @@ public class SpecificST extends AbstractST {
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaPersistent(clusterName, 3)
             .editSpec()
                 .editKafka()
-                    .withNewListeners()
-                        .addNewGenericKafkaListener()
-                            .withName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
-                            .withPort(9094)
-                            .withType(KafkaListenerType.LOADBALANCER)
-                            .withTls(false)
-                            .withNewConfiguration()
-                                .withLoadBalancerSourceRanges(Collections.singletonList(ipWithPrefix))
-                                .withFinalizers(LB_FINALIZERS)
-                            .endConfiguration()
-                        .endGenericKafkaListener()
-                    .endListeners()
+                    .withListeners(new GenericKafkaListenerBuilder()
+                        .withName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
+                        .withPort(9094)
+                        .withType(KafkaListenerType.LOADBALANCER)
+                        .withTls(false)
+                        .withNewConfiguration()
+                            .withLoadBalancerSourceRanges(Collections.singletonList(ipWithPrefix))
+                            .withFinalizers(LB_FINALIZERS)
+                        .endConfiguration()
+                        .build())
                 .endKafka()
             .endSpec()
             .build());
 
-        BasicExternalKafkaClient basicExternalKafkaClient = new BasicExternalKafkaClient.Builder()
+        ExternalKafkaClient externalKafkaClient = new ExternalKafkaClient.Builder()
             .withTopicName(TOPIC_NAME)
-            .withNamespaceName(NAMESPACE)
+            .withNamespaceName(INFRA_NAMESPACE)
             .withClusterName(clusterName)
             .withMessageCount(MESSAGE_COUNT)
             .withListenerName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
             .build();
 
-        basicExternalKafkaClient.verifyProducedAndConsumedMessages(
-            basicExternalKafkaClient.sendMessagesPlain(),
-            basicExternalKafkaClient.receiveMessagesPlain()
+        externalKafkaClient.verifyProducedAndConsumedMessages(
+            externalKafkaClient.sendMessagesPlain(),
+            externalKafkaClient.receiveMessagesPlain()
         );
 
         String invalidNetworkAddress = "255.255.255.111/30";
@@ -434,33 +464,34 @@ public class SpecificST extends AbstractST {
         LOGGER.info("Replacing Kafka CR invalid load-balancer source range to {}", invalidNetworkAddress);
 
         KafkaResource.replaceKafkaResource(clusterName, kafka ->
-                kafka.getSpec().getKafka().getTemplate().getExternalBootstrapService().setLoadBalancerSourceRanges(Collections.singletonList(invalidNetworkAddress))
+            kafka.getSpec().getKafka().setListeners(Collections.singletonList(new GenericKafkaListenerBuilder()
+                .withName(Constants.EXTERNAL_LISTENER_DEFAULT_NAME)
+                .withPort(9094)
+                .withType(KafkaListenerType.LOADBALANCER)
+                .withTls(false)
+                .withNewConfiguration()
+                    .withLoadBalancerSourceRanges(Collections.singletonList(ipWithPrefix))
+                    .withFinalizers(LB_FINALIZERS)
+                .endConfiguration()
+                .build()))
         );
 
         LOGGER.info("Expecting that clients will not be able to connect to external load-balancer service cause of invalid load-balancer source range.");
 
-        BasicExternalKafkaClient newBasicExternalKafkaClient = basicExternalKafkaClient.toBuilder()
+        ExternalKafkaClient newExternalKafkaClient = externalKafkaClient.toBuilder()
             .withMessageCount(2 * MESSAGE_COUNT)
             .withConsumerGroupName(ClientUtils.generateRandomConsumerGroup())
             .build();
 
         assertThrows(TimeoutException.class, () ->
-            newBasicExternalKafkaClient.verifyProducedAndConsumedMessages(
-                newBasicExternalKafkaClient.sendMessagesPlain(),
-                newBasicExternalKafkaClient.receiveMessagesPlain()
+            newExternalKafkaClient.verifyProducedAndConsumedMessages(
+                newExternalKafkaClient.sendMessagesPlain(),
+                newExternalKafkaClient.receiveMessagesPlain()
             ));
     }
 
     @BeforeAll
     void setup(ExtensionContext extensionContext) {
-        sharedExtensionContext = extensionContext;
-
-
         LOGGER.info(BridgeUtils.getBridgeVersion());
-        prepareEnvForOperator(sharedExtensionContext, NAMESPACE);
-
-        applyBindings(sharedExtensionContext, NAMESPACE);
-        // 060-Deployment
-        resourceManager.createResource(sharedExtensionContext, BundleResource.clusterOperator(NAMESPACE).build());
     }
 }

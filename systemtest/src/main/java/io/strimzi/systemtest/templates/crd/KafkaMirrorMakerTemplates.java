@@ -19,9 +19,9 @@ import io.strimzi.test.TestUtils;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 
+// Deprecation is suppressed because of KafkaMirrorMaker
+@SuppressWarnings("deprecation")
 public class KafkaMirrorMakerTemplates {
-
-    public static final String PATH_TO_KAFKA_MIRROR_MAKER_CONFIG = Constants.PATH_TO_PACKAGING_EXAMPLES + "/mirror-maker/kafka-mirror-maker.yaml";
 
     private KafkaMirrorMakerTemplates() {}
 
@@ -30,18 +30,8 @@ public class KafkaMirrorMakerTemplates {
     }
 
     public static KafkaMirrorMakerBuilder kafkaMirrorMaker(String name, String sourceBootstrapServer, String targetBootstrapServer, String groupId, int mirrorMakerReplicas, boolean tlsListener) {
-        KafkaMirrorMaker kafkaMirrorMaker = getKafkaMirrorMakerFromYaml(PATH_TO_KAFKA_MIRROR_MAKER_CONFIG);
+        KafkaMirrorMaker kafkaMirrorMaker = getKafkaMirrorMakerFromYaml(Constants.PATH_TO_KAFKA_MIRROR_MAKER_CONFIG);
         return defaultKafkaMirrorMaker(kafkaMirrorMaker, name, sourceBootstrapServer, targetBootstrapServer, groupId, mirrorMakerReplicas, tlsListener);
-    }
-
-    public static KafkaMirrorMakerBuilder defaultKafkaMirrorMaker(String name,
-                                                                  String sourceBootstrapServer,
-                                                                  String targetBootstrapServer,
-                                                                  String groupId,
-                                                                  int kafkaMirrorMakerReplicas,
-                                                                  boolean tlsListener) {
-        KafkaMirrorMaker kafkaMirrorMaker = getKafkaMirrorMakerFromYaml(PATH_TO_KAFKA_MIRROR_MAKER_CONFIG);
-        return defaultKafkaMirrorMaker(kafkaMirrorMaker, name, sourceBootstrapServer, targetBootstrapServer, groupId, kafkaMirrorMakerReplicas, tlsListener);
     }
 
     private static KafkaMirrorMakerBuilder defaultKafkaMirrorMaker(KafkaMirrorMaker kafkaMirrorMaker,
@@ -68,7 +58,7 @@ public class KafkaMirrorMakerTemplates {
                     .addToConfig(ProducerConfig.ACKS_CONFIG, "all")
                 .endProducer()
                 .withReplicas(kafkaMirrorMakerReplicas)
-                .withWhitelist(".*")
+                .withInclude(".*")
                 .withNewInlineLogging()
                     .addToLoggers("mirrormaker.root.logger", "DEBUG")
                 .endInlineLogging()

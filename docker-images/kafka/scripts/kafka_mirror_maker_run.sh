@@ -58,7 +58,7 @@ export KAFKA_OPTS
 
 # enabling Prometheus JMX exporter as Java agent
 if [ "$KAFKA_MIRRORMAKER_METRICS_ENABLED" = "true" ]; then
-  KAFKA_OPTS="$KAFKA_OPTS -javaagent:$(ls "$KAFKA_HOME"/libs/jmx_prometheus_javaagent*.jar)=9404:$KAFKA_HOME/custom-config/metrics-config.yml"
+  KAFKA_OPTS="$KAFKA_OPTS -javaagent:$(ls "$KAFKA_HOME"/libs/jmx_prometheus_javaagent*.jar)=9404:$KAFKA_HOME/custom-config/metrics-config.json"
   export KAFKA_OPTS
 fi
 
@@ -79,9 +79,9 @@ if [ -z "$KAFKA_HEAP_OPTS" ] && [ -n "${DYNAMIC_HEAP_FRACTION}" ]; then
     fi
 fi
 
-if [ -n "$KAFKA_MIRRORMAKER_WHITELIST" ]; then
+if [ -n "$KAFKA_MIRRORMAKER_INCLUDE" ]; then
     # shellcheck disable=SC2089
-    whitelist="--whitelist \"${KAFKA_MIRRORMAKER_WHITELIST}\""
+    include="--whitelist \"${KAFKA_MIRRORMAKER_INCLUDE}\""
 fi
 
 if [ -n "$KAFKA_MIRRORMAKER_NUMSTREAMS" ]; then
@@ -116,7 +116,7 @@ fi
 exec /usr/bin/tini -w -e 143 -- "$KAFKA_HOME"/bin/kafka-mirror-maker.sh \
 --consumer.config /tmp/strimzi-consumer.properties \
 --producer.config /tmp/strimzi-producer.properties \
-$whitelist \
+$include \
 $numstreams \
 $offset_commit_interval \
 $abort_on_send_failure \

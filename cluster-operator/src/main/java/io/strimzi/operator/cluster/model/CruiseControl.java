@@ -28,7 +28,7 @@ import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRuleBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeerBuilder;
-import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
+import io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.CruiseControlResources;
 import io.strimzi.api.kafka.model.CruiseControlSpec;
@@ -40,16 +40,24 @@ import io.strimzi.api.kafka.model.Probe;
 import io.strimzi.api.kafka.model.ProbeBuilder;
 import io.strimzi.api.kafka.model.TlsSidecar;
 import io.strimzi.api.kafka.model.template.CruiseControlTemplate;
+import io.strimzi.certs.CertAndKey;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.model.cruisecontrol.Capacity;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlConfigurationParameters;
 import io.strimzi.operator.common.Annotations;
+import io.strimzi.operator.common.PasswordGenerator;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.OrderedProperties;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +75,17 @@ public class CruiseControl extends AbstractModel {
     public static final String CRUISE_CONTROL_METRIC_REPORTER = "com.linkedin.kafka.cruisecontrol.metricsreporter.CruiseControlMetricsReporter";
 
     protected static final String CRUISE_CONTROL_CONTAINER_NAME = "cruise-control";
+
+    // Fields used for Cruise Control API authentication
+    public static final String API_ADMIN_NAME = "admin";
+    private static final String API_ADMIN_ROLE = "ADMIN";
+    protected static final String API_USER_NAME = "user";
+    private static final String API_USER_ROLE = "USER";
+    public static final String API_ADMIN_PASSWORD_KEY = APPLICATION_NAME + ".apiAdminPassword";
+    private static final String API_USER_PASSWORD_KEY = APPLICATION_NAME + ".apiUserPassword";
+    private static final String API_AUTH_FILE_KEY = APPLICATION_NAME + ".apiAuthFile";
+    protected static final String API_HEALTHCHECK_PATH = "/kafkacruisecontrol/state";
+
     protected static final String TLS_SIDECAR_NAME = "tls-sidecar";
     protected static final String TLS_SIDECAR_CC_CERTS_VOLUME_NAME = "cc-certs";
     protected static final String TLS_SIDECAR_CC_CERTS_VOLUME_MOUNT = "/etc/tls-sidecar/cc-certs/";
@@ -74,6 +93,11 @@ public class CruiseControl extends AbstractModel {
     protected static final String TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT = "/etc/tls-sidecar/cluster-ca-certs/";
     protected static final String LOG_AND_METRICS_CONFIG_VOLUME_NAME = "cruise-control-metrics-and-logging";
     protected static final String LOG_AND_METRICS_CONFIG_VOLUME_MOUNT = "/opt/cruise-control/custom-config/";
+    protected static final String API_AUTH_CONFIG_VOLUME_NAME = "api-auth-config";
+    protected static final String API_AUTH_CONFIG_VOLUME_MOUNT = "/opt/cruise-control/api-auth-config/";
+
+    protected static final String API_AUTH_CREDENTIALS_FILE = API_AUTH_CONFIG_VOLUME_MOUNT + API_AUTH_FILE_KEY;
+
     private static final String NAME_SUFFIX = "-cruise-control";
 
     // Volume name of the temporary volume used by the TLS sidecar container
@@ -89,6 +113,8 @@ public class CruiseControl extends AbstractModel {
     // Configuration defaults
     protected static final int DEFAULT_REPLICAS = 1;
     public static final boolean DEFAULT_CRUISE_CONTROL_METRICS_ENABLED = false;
+    protected static final boolean DEFAULT_WEBSERVER_SECURITY_ENABLED = true;
+    protected static final boolean DEFAULT_WEBSERVER_SSL_ENABLED = true;
 
     // Default probe settings (liveness and readiness) for health checks
     protected static final int DEFAULT_HEALTHCHECK_DELAY = 15;
@@ -102,6 +128,8 @@ public class CruiseControl extends AbstractModel {
     private TlsSidecar tlsSidecar;
     private String tlsSidecarImage;
     private String minInsyncReplicas = "1";
+    private boolean sslEnabled;
+    private boolean authEnabled;
     private Double brokerDiskMiBCapacity;
     private int brokerCpuUtilizationCapacity;
     private Double brokerInboundNetworkKiBPerSecondCapacity;
@@ -122,6 +150,14 @@ public class CruiseControl extends AbstractModel {
     protected static final String ENV_VAR_BROKER_INBOUND_NETWORK_KIB_PER_SECOND_CAPACITY = "BROKER_INBOUND_NETWORK_KIB_PER_SECOND_CAPACITY";
     protected static final String ENV_VAR_BROKER_OUTBOUND_NETWORK_KIB_PER_SECOND_CAPACITY = "BROKER_OUTBOUND_NETWORK_KIB_PER_SECOND_CAPACITY";
 
+    protected static final String ENV_VAR_API_SSL_ENABLED = "STRIMZI_CC_API_SSL_ENABLED";
+    protected static final String ENV_VAR_API_AUTH_ENABLED = "STRIMZI_CC_API_AUTH_ENABLED";
+    protected static final String ENV_VAR_API_USER = "API_USER";
+    protected static final String ENV_VAR_API_PORT = "API_PORT";
+    protected static final String ENV_VAR_API_HEALTHCHECK_PATH = "API_HEALTHCHECK_PATH";
+
+    protected static final String CO_ENV_VAR_CUSTOM_CRUISE_CONTROL_POD_LABELS = "STRIMZI_CUSTOM_CRUISE_CONTROL_LABELS";
+
     // Templates
     protected List<ContainerEnvVar> templateCruiseControlContainerEnvVars;
     protected List<ContainerEnvVar> templateTlsSidecarContainerEnvVars;
@@ -131,19 +167,26 @@ public class CruiseControl extends AbstractModel {
 
     private boolean isDeployed;
 
+    private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
+    static {
+        String value = System.getenv(CO_ENV_VAR_CUSTOM_CRUISE_CONTROL_POD_LABELS);
+        if (value != null) {
+            DEFAULT_POD_LABELS.putAll(Util.parseMap(value));
+        }
+    }
+
     /**
      * Constructor
      *
+     * @param reconciliation The reconciliation
      * @param resource  Kubernetes resource with metadata containing the namespace and cluster name
      */
-    protected CruiseControl(HasMetadata resource) {
-        super(resource, APPLICATION_NAME);
+    protected CruiseControl(Reconciliation reconciliation, HasMetadata resource) {
+        super(reconciliation, resource, APPLICATION_NAME);
         this.name = CruiseControlResources.deploymentName(cluster);
         this.serviceName = CruiseControlResources.serviceName(cluster);
         this.ancillaryConfigMapName = metricAndLogConfigsName(cluster);
         this.replicas = DEFAULT_REPLICAS;
-        this.readinessPath = "/kafkacruisecontrol/state";
-        this.livenessPath = "/kafkacruisecontrol/state";
         this.livenessProbeOptions = DEFAULT_HEALTHCHECK_OPTIONS;
         this.readinessProbeOptions = DEFAULT_HEALTHCHECK_OPTIONS;
         this.mountPath = "/var/lib/kafka";
@@ -170,14 +213,30 @@ public class CruiseControl extends AbstractModel {
         return KafkaCluster.serviceName(cluster) + ":" + DEFAULT_BOOTSTRAP_SERVERS_PORT;
     }
 
-    @SuppressWarnings("deprecation")
-    public static CruiseControl fromCrd(Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
+    public static String encodeToBase64(String s) {
+        return Base64.getEncoder().encodeToString(s.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    private static boolean isEnabledInConfiguration(CruiseControlConfiguration config, String s1, String s2) {
+        String s = config.getConfigOption(s1, s2);
+        return Boolean.parseBoolean(s);
+    }
+
+    public static boolean isApiAuthEnabled(CruiseControlConfiguration config) {
+        return isEnabledInConfiguration(config, CruiseControlConfigurationParameters.CRUISE_CONTROL_WEBSERVER_SECURITY_ENABLE.getValue(), Boolean.toString(DEFAULT_WEBSERVER_SECURITY_ENABLED));
+    }
+
+    public static boolean isApiSslEnabled(CruiseControlConfiguration config) {
+        return isEnabledInConfiguration(config, CruiseControlConfigurationParameters.CRUISE_CONTROL_WEBSERVER_SSL_ENABLE.getValue(), Boolean.toString(DEFAULT_WEBSERVER_SSL_ENABLED));
+    }
+
+    public static CruiseControl fromCrd(Reconciliation reconciliation, Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
         CruiseControl cruiseControl = null;
         CruiseControlSpec spec = kafkaAssembly.getSpec().getCruiseControl();
         KafkaClusterSpec kafkaClusterSpec = kafkaAssembly.getSpec().getKafka();
 
         if (spec != null) {
-            cruiseControl = new CruiseControl(kafkaAssembly);
+            cruiseControl = new CruiseControl(reconciliation, kafkaAssembly);
             cruiseControl.isDeployed = true;
 
             cruiseControl.setReplicas(DEFAULT_REPLICAS);
@@ -201,9 +260,12 @@ public class CruiseControl extends AbstractModel {
             cruiseControl.tlsSidecarImage = tlsSideCarImage;
             cruiseControl.setTlsSidecar(tlsSidecar);
 
-            cruiseControl = updateConfiguration(spec, cruiseControl);
+            cruiseControl = cruiseControl.updateConfiguration(spec);
+            CruiseControlConfiguration ccConfiguration = (CruiseControlConfiguration) cruiseControl.getConfiguration();
+            cruiseControl.sslEnabled = isApiSslEnabled(ccConfiguration);
+            cruiseControl.authEnabled = isApiAuthEnabled(ccConfiguration);
 
-            KafkaConfiguration configuration = new KafkaConfiguration(kafkaClusterSpec.getConfig().entrySet());
+            KafkaConfiguration configuration = new KafkaConfiguration(reconciliation, kafkaClusterSpec.getConfig().entrySet());
             if (configuration.getConfigOption(MIN_INSYNC_REPLICAS) != null) {
                 cruiseControl.minInsyncReplicas = configuration.getConfigOption(MIN_INSYNC_REPLICAS);
             }
@@ -234,13 +296,14 @@ public class CruiseControl extends AbstractModel {
             cruiseControl.setResources(spec.getResources());
             cruiseControl.setOwnerReference(kafkaAssembly);
             cruiseControl = updateTemplate(spec, cruiseControl);
+            cruiseControl.templatePodLabels = Util.mergeLabelsOrAnnotations(cruiseControl.templatePodLabels, DEFAULT_POD_LABELS);
         }
 
         return cruiseControl;
     }
 
-    public static CruiseControl updateConfiguration(CruiseControlSpec spec, CruiseControl cruiseControl) {
-        CruiseControlConfiguration userConfiguration = new CruiseControlConfiguration(spec.getConfig().entrySet());
+    public CruiseControl updateConfiguration(CruiseControlSpec spec) {
+        CruiseControlConfiguration userConfiguration = new CruiseControlConfiguration(reconciliation, spec.getConfig().entrySet());
         for (Map.Entry<String, String> defaultEntry : CruiseControlConfiguration.getCruiseControlDefaultPropertiesMap().entrySet()) {
             if (userConfiguration.getConfigOption(defaultEntry.getKey()) == null) {
                 userConfiguration.setConfigOption(defaultEntry.getKey(), defaultEntry.getValue());
@@ -248,8 +311,8 @@ public class CruiseControl extends AbstractModel {
         }
         // Ensure that the configured anomaly.detection.goals are a sub-set of the default goals
         checkGoals(userConfiguration);
-        cruiseControl.setConfiguration(userConfiguration);
-        return cruiseControl;
+        this.setConfiguration(userConfiguration);
+        return this;
     }
 
     /**
@@ -259,7 +322,7 @@ public class CruiseControl extends AbstractModel {
      * @param configuration The configuration instance to be checked.
      * @throws UnsupportedOperationException If the configuration contains self.healing.goals configurations.
      */
-    public static void checkGoals(CruiseControlConfiguration configuration) {
+    public void checkGoals(CruiseControlConfiguration configuration) {
         // If self healing goals are defined then these take precedence.
         // Right now, self.healing.goals must either be null or an empty list
         if (configuration.getConfigOption(CruiseControlConfigurationParameters.CRUISE_CONTROL_SELF_HEALING_CONFIG_KEY.toString()) != null) {
@@ -285,7 +348,7 @@ public class CruiseControl extends AbstractModel {
             // If the anomaly detection goals contain goals which are not in the default goals then the CC startup
             // checks will fail, so we make the anomaly goals match the default goals
             configuration.setConfigOption(CruiseControlConfigurationParameters.CRUISE_CONTROL_ANOMALY_DETECTION_CONFIG_KEY.toString(), defaultGoalsString);
-            log.warn("Anomaly goals contained goals which are not in the configured default goals. Anomaly goals have " +
+            LOGGER.warnCr(reconciliation, "Anomaly goals contained goals which are not in the configured default goals. Anomaly goals have " +
                     "been changed to match the specified default goals.");
         }
     }
@@ -318,6 +381,11 @@ public class CruiseControl extends AbstractModel {
                 cruiseControl.templateTlsSidecarContainerSecurityContext = template.getTlsSidecarContainer().getSecurityContext();
             }
 
+            if (template.getServiceAccount() != null && template.getServiceAccount().getMetadata() != null) {
+                cruiseControl.templateServiceAccountLabels = template.getServiceAccount().getMetadata().getLabels();
+                cruiseControl.templateServiceAccountAnnotations = template.getServiceAccount().getMetadata().getAnnotations();
+            }
+
             ModelUtils.parsePodDisruptionBudgetTemplate(cruiseControl, template.getPodDisruptionBudget());
         }
         return cruiseControl;
@@ -327,7 +395,7 @@ public class CruiseControl extends AbstractModel {
         return CruiseControlResources.deploymentName(cluster);
     }
 
-    public static String cruiseControlServiceName(String cluster) {
+    public static String serviceName(String cluster) {
         return CruiseControlResources.serviceName(cluster);
     }
 
@@ -357,6 +425,7 @@ public class CruiseControl extends AbstractModel {
                 createTempDirVolume(TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME),
                 createSecretVolume(TLS_SIDECAR_CC_CERTS_VOLUME_NAME, CruiseControl.secretName(cluster), isOpenShift),
                 createSecretVolume(TLS_SIDECAR_CA_CERTS_VOLUME_NAME, AbstractModel.clusterCaCertSecretName(cluster), isOpenShift),
+                createSecretVolume(API_AUTH_CONFIG_VOLUME_NAME, CruiseControlResources.apiSecretName(cluster), isOpenShift),
                 createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
     }
 
@@ -364,6 +433,7 @@ public class CruiseControl extends AbstractModel {
         return Arrays.asList(createTempDirVolumeMount(),
                 createVolumeMount(CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME, CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_MOUNT),
                 createVolumeMount(CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT),
+                createVolumeMount(CruiseControl.API_AUTH_CONFIG_VOLUME_NAME, CruiseControl.API_AUTH_CONFIG_VOLUME_MOUNT),
                 createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath));
     }
 
@@ -400,8 +470,16 @@ public class CruiseControl extends AbstractModel {
                 .withCommand("/opt/cruise-control/cruise_control_run.sh")
                 .withEnv(getEnvVars())
                 .withPorts(getContainerPortList())
-                .withLivenessProbe(ProbeGenerator.httpProbe(livenessProbeOptions, livenessPath, REST_API_PORT_NAME))
-                .withReadinessProbe(ProbeGenerator.httpProbe(readinessProbeOptions, readinessPath, REST_API_PORT_NAME))
+                .withLivenessProbe(ProbeGenerator.defaultBuilder(livenessProbeOptions)
+                        .withNewExec()
+                            .withCommand("/opt/cruise-control/cruise_control_healthcheck.sh")
+                        .endExec()
+                        .build())
+                .withReadinessProbe(ProbeGenerator.defaultBuilder(readinessProbeOptions)
+                        .withNewExec()
+                            .withCommand("/opt/cruise-control/cruise_control_healthcheck.sh")
+                        .endExec()
+                        .build())
                 .withResources(getResources())
                 .withVolumeMounts(getVolumeMounts())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
@@ -427,7 +505,8 @@ public class CruiseControl extends AbstractModel {
                 .withLifecycle(new LifecycleBuilder().withNewPreStop().withNewExec()
                         .withCommand("/opt/stunnel/cruise_control_stunnel_pre_stop.sh",
                                 String.valueOf(templateTerminationGracePeriodSeconds))
-                        .endExec().endPreStop().build())
+                        .endExec().endPreStop()
+                        .build())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, tlsSidecarImage))
                 .withSecurityContext(templateTlsSidecarContainerSecurityContext)
                 .build();
@@ -451,6 +530,12 @@ public class CruiseControl extends AbstractModel {
         varList.add(buildEnvVar(ENV_VAR_BROKER_CPU_UTILIZATION_CAPACITY, String.valueOf(brokerCpuUtilizationCapacity)));
         varList.add(buildEnvVar(ENV_VAR_BROKER_INBOUND_NETWORK_KIB_PER_SECOND_CAPACITY, String.valueOf(brokerInboundNetworkKiBPerSecondCapacity)));
         varList.add(buildEnvVar(ENV_VAR_BROKER_OUTBOUND_NETWORK_KIB_PER_SECOND_CAPACITY,  String.valueOf(brokerOuboundNetworkKiBPerSecondCapacity)));
+
+        varList.add(buildEnvVar(ENV_VAR_API_SSL_ENABLED,  String.valueOf(this.sslEnabled)));
+        varList.add(buildEnvVar(ENV_VAR_API_AUTH_ENABLED,  String.valueOf(this.authEnabled)));
+        varList.add(buildEnvVar(ENV_VAR_API_USER,  API_USER_NAME));
+        varList.add(buildEnvVar(ENV_VAR_API_PORT,  String.valueOf(REST_API_PORT)));
+        varList.add(buildEnvVar(ENV_VAR_API_HEALTHCHECK_PATH,  String.valueOf(API_HEALTHCHECK_PATH)));
 
         heapOptions(varList, 1.0, 0L);
         jvmPerformanceOptions(varList);
@@ -528,21 +613,78 @@ public class CruiseControl extends AbstractModel {
     }
 
     /**
+     * Creates Cruise Control API auth usernames, passwords, and credentials file
+     *
+     * @return Map containing Cruise Control API auth credentials
+     */
+    public static Map<String, String> generateCruiseControlApiCredentials() {
+        PasswordGenerator passwordGenerator = new PasswordGenerator(16);
+        String apiAdminPassword = passwordGenerator.generate();
+        String apiUserPassword = passwordGenerator.generate();
+
+        /*
+         * Create Cruise Control API auth credentials file following Jetty's
+         *  HashLoginService's file format: username: password [,rolename ...]
+         */
+        String authCredentialsFile =
+                API_ADMIN_NAME + ": " + apiAdminPassword + "," + API_ADMIN_ROLE + "\n" +
+                API_USER_NAME + ": " + apiUserPassword + "," + API_USER_ROLE + "\n";
+
+        Map<String, String> data = new HashMap<>(3);
+        data.put(API_ADMIN_PASSWORD_KEY, encodeToBase64(apiAdminPassword));
+        data.put(API_USER_PASSWORD_KEY, encodeToBase64(apiUserPassword));
+        data.put(API_AUTH_FILE_KEY, encodeToBase64(authCredentialsFile));
+
+        return data;
+    }
+
+    /**
+     * Generate the Secret containing the Cruise Control API auth credentials.
+     *
+     * @return The generated Secret.
+     */
+    public Secret generateApiSecret() {
+        if (!isDeployed()) {
+            return null;
+        }
+        return ModelUtils.createSecret(CruiseControlResources.apiSecretName(cluster), namespace, labels, createOwnerReference(), generateCruiseControlApiCredentials(), Collections.emptyMap(), Collections.emptyMap());
+    }
+
+    /**
      * Generate the Secret containing the Cruise Control certificate signed by the cluster CA certificate used for TLS based
      * internal communication with Kafka and Zookeeper.
      * It also contains the related Cruise Control private key.
      *
+     * @param kafka The Kafka custom resource
      * @param clusterCa The cluster CA.
      * @param isMaintenanceTimeWindowsSatisfied Indicates whether we are in the maintenance window or not.
      *                                          This is used for certificate renewals
      * @return The generated Secret.
      */
-    public Secret generateSecret(ClusterCa clusterCa, boolean isMaintenanceTimeWindowsSatisfied) {
+    public Secret generateSecret(Kafka kafka, ClusterCa clusterCa, boolean isMaintenanceTimeWindowsSatisfied) {
         if (!isDeployed()) {
             return null;
         }
-        Secret secret = clusterCa.cruiseControlSecret();
-        return ModelUtils.buildSecret(clusterCa, secret, namespace, CruiseControl.secretName(cluster), name, "cruise-control", labels, createOwnerReference(), isMaintenanceTimeWindowsSatisfied);
+
+        Map<String, CertAndKey> ccCerts = new HashMap<>(4);
+        LOGGER.debugCr(reconciliation, "Generating certificates");
+        try {
+            ccCerts = clusterCa.generateCcCerts(kafka, isMaintenanceTimeWindowsSatisfied);
+        } catch (IOException e) {
+            LOGGER.warnCr(reconciliation, "Error while generating certificates", e);
+        }
+        LOGGER.debugCr(reconciliation, "End generating certificates");
+
+        String keyCertName = "cruise-control";
+        Map<String, String> data = new HashMap<>(4);
+
+        CertAndKey cert = ccCerts.get(keyCertName);
+        data.put(keyCertName + ".key", cert.keyAsBase64String());
+        data.put(keyCertName + ".crt", cert.certAsBase64String());
+        data.put(keyCertName + ".p12", cert.keyStoreAsBase64String());
+        data.put(keyCertName + ".password", cert.storePasswordAsBase64String());
+
+        return createSecret(CruiseControl.secretName(cluster), data);
     }
 
     /**
@@ -568,7 +710,7 @@ public class CruiseControl extends AbstractModel {
         NetworkPolicyIngressRule restApiRule = new NetworkPolicyIngressRuleBuilder()
                 .addNewPort()
                     .withNewPort(REST_API_PORT)
-                    .withNewProtocol("TCP")
+                    .withProtocol("TCP")
                 .endPort()
                 .build();
 
@@ -587,7 +729,7 @@ public class CruiseControl extends AbstractModel {
             NetworkPolicyIngressRule metricsRule = new NetworkPolicyIngressRuleBuilder()
                     .addNewPort()
                         .withNewPort(METRICS_PORT)
-                        .withNewProtocol("TCP")
+                        .withProtocol("TCP")
                     .endPort()
                     .withFrom()
                     .build();
@@ -610,7 +752,7 @@ public class CruiseControl extends AbstractModel {
                 .endSpec()
                 .build();
 
-        log.trace("Created network policy {}", networkPolicy);
+        LOGGER.traceCr(reconciliation, "Created network policy {}", networkPolicy);
         return networkPolicy;
     }
 

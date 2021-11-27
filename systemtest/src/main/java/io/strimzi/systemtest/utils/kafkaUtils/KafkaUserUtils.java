@@ -81,10 +81,6 @@ public class KafkaUserUtils {
                 .inNamespace(namespaceName).withName(userName).get().getStatus().getObservedGeneration());
     }
 
-    public static void waitForKafkaUserIncreaseObserverGeneration(long observation, String userName) {
-        waitForKafkaUserIncreaseObserverGeneration(kubeClient().getNamespace(), observation, userName);
-    }
-
     public static void waitUntilKafkaUserStatusConditionIsPresent(String namespaceName, String userName) {
         LOGGER.info("Wait until KafkaUser {} status is available", userName);
         TestUtils.waitFor("KafkaUser " + userName + " status is available", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
@@ -94,27 +90,32 @@ public class KafkaUserUtils {
         LOGGER.info("KafkaUser {} status is available", userName);
     }
 
-    public static void waitUntilKafkaUserStatusConditionIsPresent(String userName) {
-        waitUntilKafkaUserStatusConditionIsPresent(kubeClient().getNamespace(), userName);
-    }
-
-
     /**
      * Wait until KafkaUser is in desired state
+     * @param namespaceName Namespace name
      * @param userName name of KafkaUser
      * @param state desired state
      */
+    public static boolean waitForKafkaUserStatus(String namespaceName, String userName, Enum<?> state) {
+        KafkaUser kafkaUser = KafkaUserResource.kafkaUserClient().inNamespace(namespaceName).withName(userName).get();
+        return ResourceManager.waitForResourceStatus(KafkaUserResource.kafkaUserClient(), kafkaUser, state);
+    }
+
     public static boolean waitForKafkaUserStatus(String userName, Enum<?> state) {
         KafkaUser kafkaUser = KafkaUserResource.kafkaUserClient().inNamespace(kubeClient().getNamespace()).withName(userName).get();
         return ResourceManager.waitForResourceStatus(KafkaUserResource.kafkaUserClient(), kafkaUser, state);
     }
 
-    public static boolean waitForKafkaUserReady(String userName) {
-        return waitForKafkaUserStatus(userName, Ready);
+    public static boolean waitForKafkaUserNotReady(String namespaceName, String userName) {
+        return waitForKafkaUserStatus(namespaceName, userName, NotReady);
     }
 
     public static boolean waitForKafkaUserNotReady(String userName) {
-        return waitForKafkaUserStatus(userName, NotReady);
+        return waitForKafkaUserStatus(kubeClient().getNamespace(), userName, NotReady);
+    }
+
+    public static boolean waitForKafkaUserReady(String namespaceName, String userName) {
+        return waitForKafkaUserStatus(namespaceName, userName, Ready);
     }
 
     public static String removeKafkaUserPart(File kafkaUserFile, String partName) {

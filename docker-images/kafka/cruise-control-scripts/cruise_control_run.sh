@@ -17,7 +17,7 @@ mkdir -p /tmp/cruise-control
 export STRIMZI_TRUSTSTORE_LOCATION=/tmp/cruise-control/replication.truststore.p12
 export STRIMZI_TRUSTSTORE_PASSWORD="$CERTS_STORE_PASSWORD"
 
-export STRIMZI_KEYSTORE_LOCATION=/tmp/cruise-control/replication.keystore.p12
+export STRIMZI_KEYSTORE_LOCATION=/tmp/cruise-control/cruise-control.keystore.p12
 export STRIMZI_KEYSTORE_PASSWORD="$CERTS_STORE_PASSWORD"
 
 if [ -z "$KAFKA_LOG4J_OPTS" ]; then
@@ -26,7 +26,7 @@ fi
 
 # enabling Prometheus JMX exporter as Java agent
 if [ "$CRUISE_CONTROL_METRICS_ENABLED" = "true" ]; then
-  KAFKA_OPTS="${KAFKA_OPTS} -javaagent:$(ls "$KAFKA_HOME"/libs/jmx_prometheus_javaagent*.jar)=9404:$CRUISE_CONTROL_HOME/custom-config/metrics-config.yml"
+  KAFKA_OPTS="${KAFKA_OPTS} -javaagent:$(ls "$KAFKA_HOME"/libs/jmx_prometheus_javaagent*.jar)=9404:$CRUISE_CONTROL_HOME/custom-config/metrics-config.json"
   export KAFKA_OPTS
 fi
 

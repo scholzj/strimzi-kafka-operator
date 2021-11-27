@@ -27,8 +27,7 @@ import java.util.Map;
         builderPackage = Constants.FABRIC8_KUBERNETES_API
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
-@JsonPropertyOrder({
-        "metadata", "maxUnavailable"})
+@JsonPropertyOrder({"metadata", "maxUnavailable"})
 @DescriptionFile
 @EqualsAndHashCode
 public class PodDisruptionBudgetTemplate implements Serializable, UnknownPropertyPreserving {
@@ -38,7 +37,7 @@ public class PodDisruptionBudgetTemplate implements Serializable, UnknownPropert
     private int maxUnavailable = 1;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
-    @Description("Metadata to apply to the `PodDistruptionBugetTemplate` resource.")
+    @Description("Metadata to apply to the `PodDisruptionBudgetTemplate` resource.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     public MetadataTemplate getMetadata() {
         return metadata;

@@ -13,28 +13,17 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
-import static io.strimzi.systemtest.resources.ResourceManager.kubeClient;
-
 public class NetworkPolicyTemplates {
 
     private static final Logger LOGGER = LogManager.getLogger(NetworkPolicyTemplates.class);
 
-    public static NetworkPolicyBuilder networkPolicyBuilder(String name) {
-        return networkPolicyBuilder(name, null)
-            .withNewSpec()
-                .withNewPodSelector()
-                .endPodSelector()
-                .withPolicyTypes("Ingress")
-            .endSpec();
-    }
-
-    public static NetworkPolicyBuilder networkPolicyBuilder(String name, LabelSelector labelSelector) {
+    public static NetworkPolicyBuilder networkPolicyBuilder(String namespace, String name, LabelSelector labelSelector) {
         return new NetworkPolicyBuilder()
-            .withNewApiVersion("networking.k8s.io/v1")
-                .withNewKind(Constants.NETWORK_POLICY)
+            .withApiVersion("networking.k8s.io/v1")
+                .withKind(Constants.NETWORK_POLICY)
                     .withNewMetadata()
                         .withName(name + "-allow")
-                        .withNamespace(kubeClient().getNamespace())
+                        .withNamespace(namespace)
                     .endMetadata()
                     .withNewSpec()
                         .addNewIngress()
@@ -48,8 +37,8 @@ public class NetworkPolicyTemplates {
 
     public static NetworkPolicy applyDefaultNetworkPolicy(ExtensionContext extensionContext, String namespace, DefaultNetworkPolicy policy) {
         NetworkPolicy networkPolicy = new NetworkPolicyBuilder()
-            .withNewApiVersion("networking.k8s.io/v1")
-            .withNewKind(Constants.NETWORK_POLICY)
+            .withApiVersion("networking.k8s.io/v1")
+            .withKind(Constants.NETWORK_POLICY)
             .withNewMetadata()
                 .withName("global-network-policy")
                 .withNamespace(namespace)

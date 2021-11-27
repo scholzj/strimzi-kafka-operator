@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
+import java.time.ZonedDateTime;
 import java.util.Base64;
 import java.util.List;
 
@@ -121,6 +122,8 @@ public class MockCertManager implements CertManager {
             "QtlIdmFljGSaGGY6aJjUvUdgoPp1yQPa5oS+afr5g9gaEp4lxP6mc+Li\n" +
             "-----END CERTIFICATE-----\n";
 
+    private static final String CERT_STORE_PASSWORD = "123456";
+
     private static final byte[] CLUSTER_CERT_STORE;
     private static final byte[] CLIENTS_CERT_STORE;
 
@@ -153,6 +156,10 @@ public class MockCertManager implements CertManager {
 
     public static String clientsCaCertStore() {
         return Base64.getEncoder().encodeToString(CLIENTS_CERT_STORE);
+    }
+
+    public static String certStorePassword() {
+        return Base64.getEncoder().encodeToString(CERT_STORE_PASSWORD.getBytes(Charset.defaultCharset()));
     }
 
     private void write(File keyFile, String str) throws IOException {
@@ -192,19 +199,6 @@ public class MockCertManager implements CertManager {
     }
 
     /**
-     * Generate a self-signed certificate
-     *
-     * @param keyFile  path to the file which will contain the private key
-     * @param certFile path to the file which will contain the self signed certificate
-     * @param days     certificate duration
-     * @throws IOException
-     */
-    @Override
-    public void generateSelfSignedCert(File keyFile, File certFile, int days) throws IOException {
-        generateSelfSignedCert(keyFile, certFile, null, days);
-    }
-
-    /**
      * Renew a new self-signed certificate, keeping the existing private key
      *
      * @param keyFile  path to the file containing the existing private key
@@ -216,6 +210,16 @@ public class MockCertManager implements CertManager {
     @Override
     public void renewSelfSignedCert(File keyFile, File certFile, Subject sbj, int days) throws IOException {
         generateSelfSignedCert(keyFile, certFile, sbj, days);
+    }
+
+    @Override
+    public void generateRootCaCert(Subject subject, File subjectKeyFile, File subjectCertFile, ZonedDateTime notBefore, ZonedDateTime notAfter, int pathLength) throws IOException {
+        generateSelfSignedCert(subjectKeyFile, subjectCertFile, subject, 1);
+    }
+
+    @Override
+    public void generateIntermediateCaCert(File issuerCaKeyFile, File issuerCaCertFile, Subject subject, File subjectKeyFile, File subjectCertFile, ZonedDateTime notBefore, ZonedDateTime notAfter, int pathLength) throws IOException {
+        throw new RuntimeException("Not implemented");
     }
 
     @Override
@@ -253,38 +257,8 @@ public class MockCertManager implements CertManager {
         write(csrFile, "csr file");
     }
 
-    /**
-     * Generate a certificate signed by a Certificate Authority
-     *
-     * @param csrFile path to the file containing the certificate sign request
-     * @param caKey   path to the file containing the CA private key
-     * @param caCert  path to the file containing the CA certificate
-     * @param crtFile path to the file which will contain the signed certificate
-     * @param days    certificate duration
-     * @throws IOException
-     */
-    @Override
-    public void generateCert(File csrFile, File caKey, File caCert, File crtFile, int days) throws IOException {
-        write(crtFile, "crt file");
-    }
-
     @Override
     public void generateCert(File csrFile, File caKey, File caCert, File crtFile, Subject sbj, int days) throws IOException {
-        write(crtFile, "crt file");
-    }
-
-    /**
-     * Generate a certificate signed by a Certificate Authority
-     *
-     * @param csrFile path to the file containing the certificate sign request
-     * @param caKey   CA private key bytes
-     * @param caCert  CA certificate bytes
-     * @param crtFile path to the file which will contain the signed certificate
-     * @param days    certificate duration
-     * @throws IOException
-     */
-    @Override
-    public void generateCert(File csrFile, byte[] caKey, byte[] caCert, File crtFile, int days) throws IOException {
         write(crtFile, "crt file");
     }
 

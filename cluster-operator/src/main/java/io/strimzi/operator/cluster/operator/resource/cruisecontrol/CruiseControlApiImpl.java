@@ -5,34 +5,43 @@
 package io.strimzi.operator.cluster.operator.resource.cruisecontrol;
 
 import io.strimzi.operator.cluster.operator.resource.HttpClientUtils;
+import io.fabric8.kubernetes.api.model.HTTPHeader;
+import io.fabric8.kubernetes.api.model.Secret;
+import io.strimzi.operator.cluster.model.CruiseControl;
+import io.strimzi.operator.common.Util;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.net.PemTrustOptions;
 
 import java.net.ConnectException;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeoutException;
 
-public class CruiseControlApiImpl implements CruiseControlApi {
+import static io.strimzi.operator.cluster.model.CruiseControl.encodeToBase64;
 
+public class CruiseControlApiImpl implements CruiseControlApi {
     private static final boolean HTTP_CLIENT_ACTIVITY_LOGGING = false;
-    private static final int HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS = -1; // use default internal HTTP client timeout
+    public static final int HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS = -1; // use default internal HTTP client timeout
     private static final String STATUS_KEY = "Status";
-    private static final String SUMMARY_KEY = "summary";
 
     private final Vertx vertx;
     private final long idleTimeout;
+    private boolean apiSslEnabled;
+    private HTTPHeader authHttpHeader;
+    private PemTrustOptions pto;
 
-    public CruiseControlApiImpl(Vertx vertx) {
-        this(vertx, HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS);
-    }
-
-    public CruiseControlApiImpl(Vertx vertx, int idleTimeout) {
+    public CruiseControlApiImpl(Vertx vertx, int idleTimeout, Secret ccSecret, Secret ccApiSecret, Boolean apiAuthEnabled, boolean apiSslEnabled) {
         this.vertx = vertx;
         this.idleTimeout = idleTimeout;
+        this.apiSslEnabled = apiSslEnabled;
+        this.authHttpHeader = getAuthHttpHeader(apiAuthEnabled, ccApiSecret);
+        this.pto = new PemTrustOptions().addCertValue(Buffer.buffer(Util.decodeFromSecret(ccSecret, "cruise-control.crt")));
     }
 
     @Override
@@ -40,20 +49,56 @@ public class CruiseControlApiImpl implements CruiseControlApi {
         return getCruiseControlState(host, port, verbose, null);
     }
 
+    public HttpClientOptions getHttpClientOptions() {
+        if (apiSslEnabled) {
+            return new HttpClientOptions()
+                .setLogActivity(HTTP_CLIENT_ACTIVITY_LOGGING)
+                .setSsl(true)
+                .setVerifyHost(true)
+                .setPemTrustOptions(
+                    new PemTrustOptions(pto)
+                );
+        } else {
+            return new HttpClientOptions()
+                    .setLogActivity(HTTP_CLIENT_ACTIVITY_LOGGING);
+        }
+    }
+
+    private static HTTPHeader generateAuthHttpHeader(String user, String password) {
+        String headerName = "Authorization";
+        String headerValue = "Basic " + encodeToBase64(String.join(":", user, password));
+
+        return new HTTPHeader(headerName, headerValue);
+    }
+
+    public static HTTPHeader getAuthHttpHeader(boolean apiAuthEnabled, Secret apiSecret) {
+        if (apiAuthEnabled) {
+            String password = new String(Util.decodeFromSecret(apiSecret, CruiseControl.API_ADMIN_PASSWORD_KEY), StandardCharsets.US_ASCII);
+            HTTPHeader header = generateAuthHttpHeader(CruiseControl.API_ADMIN_NAME, password);
+            return header;
+        } else {
+            return null;
+        }
+    }
+
     @SuppressWarnings("deprecation")
     public Future<CruiseControlResponse> getCruiseControlState(String host, int port, boolean verbose, String userTaskId) {
-
 
         String path = new PathBuilder(CruiseControlEndpoints.STATE)
                 .addParameter(CruiseControlParameters.JSON, "true")
                 .addParameter(CruiseControlParameters.VERBOSE, String.valueOf(verbose))
                 .build();
 
-        HttpClientOptions options = new HttpClientOptions().setLogActivity(HTTP_CLIENT_ACTIVITY_LOGGING);
+        HttpClientOptions options = getHttpClientOptions();
 
         return HttpClientUtils.withHttpClient(vertx, options, (httpClient, result) -> {
             httpClient.request(HttpMethod.GET, port, host, path, request -> {
                 if (request.succeeded()) {
+
+                    if (authHttpHeader != null) {
+                        request.result().putHeader(authHttpHeader.getName(), authHttpHeader.getValue());
+                    }
+
                     request.result().send(response -> {
                         if (response.succeeded()) {
                             if (response.result().statusCode() == 200 || response.result().statusCode() == 201) {
@@ -102,13 +147,12 @@ public class CruiseControlApiImpl implements CruiseControlApi {
                     new IllegalArgumentException("Either rebalance options or user task ID should be supplied, both were null"));
         }
 
-
         String path = new PathBuilder(CruiseControlEndpoints.REBALANCE)
                 .addParameter(CruiseControlParameters.JSON, "true")
                 .addRebalanceParameters(rbOptions)
                 .build();
 
-        HttpClientOptions options = new HttpClientOptions().setLogActivity(HTTP_CLIENT_ACTIVITY_LOGGING);
+        HttpClientOptions options = getHttpClientOptions();
 
         return HttpClientUtils.withHttpClient(vertx, options, (httpClient, result) -> {
             httpClient.request(HttpMethod.POST, port, host, path, request -> {
@@ -119,6 +163,10 @@ public class CruiseControlApiImpl implements CruiseControlApi {
 
                     if (userTaskId != null) {
                         request.result().putHeader(CC_REST_API_USER_ID_HEADER, userTaskId);
+                    }
+
+                    if (authHttpHeader != null) {
+                        request.result().putHeader(authHttpHeader.getName(), authHttpHeader.getValue());
                     }
 
                     request.result().send(response -> {
@@ -197,11 +245,16 @@ public class CruiseControlApiImpl implements CruiseControlApi {
 
         String path = pathBuilder.build();
 
-        HttpClientOptions options = new HttpClientOptions().setLogActivity(HTTP_CLIENT_ACTIVITY_LOGGING);
+        HttpClientOptions options = getHttpClientOptions();
 
         return HttpClientUtils.withHttpClient(vertx, options, (httpClient, result) -> {
             httpClient.request(HttpMethod.GET, port, host, path, request -> {
                 if (request.succeeded()) {
+
+                    if (authHttpHeader != null) {
+                        request.result().putHeader(authHttpHeader.getName(), authHttpHeader.getValue());
+                    }
+
                     request.result().send(response -> {
                         if (response.succeeded()) {
                             if (response.result().statusCode() == 200 || response.result().statusCode() == 201) {
@@ -228,11 +281,21 @@ public class CruiseControlApiImpl implements CruiseControlApi {
                                             // We handle these in the same way as COMPLETED tasks so we drop down to that case.
                                         case COMPLETED:
                                             // Completed tasks will have the original rebalance proposal summary in their original response
-                                            statusJson.put(SUMMARY_KEY, ((JsonObject) Json.decodeValue(jsonUserTask.getString("originalResponse"))).getJsonObject(SUMMARY_KEY));
+                                            JsonObject originalResponse = (JsonObject) Json.decodeValue(jsonUserTask.getString(
+                                                    CruiseControlRebalanceKeys.ORIGINAL_RESPONSE.getKey()));
+                                            statusJson.put(CruiseControlRebalanceKeys.SUMMARY.getKey(),
+                                                    originalResponse.getJsonObject(CruiseControlRebalanceKeys.SUMMARY.getKey()));
+                                            // Extract the load before/after information for the brokers
+                                            statusJson.put(
+                                                    CruiseControlRebalanceKeys.LOAD_BEFORE_OPTIMIZATION.getKey(),
+                                                    originalResponse.getJsonObject(CruiseControlRebalanceKeys.LOAD_BEFORE_OPTIMIZATION.getKey()));
+                                            statusJson.put(
+                                                    CruiseControlRebalanceKeys.LOAD_AFTER_OPTIMIZATION.getKey(),
+                                                    originalResponse.getJsonObject(CruiseControlRebalanceKeys.LOAD_AFTER_OPTIMIZATION.getKey()));
                                             break;
                                         case COMPLETED_WITH_ERROR:
                                             // Completed with error tasks will have "CompletedWithError" as their original response, which is not Json.
-                                            statusJson.put(SUMMARY_KEY, jsonUserTask.getString("originalResponse"));
+                                            statusJson.put(CruiseControlRebalanceKeys.SUMMARY.getKey(), jsonUserTask.getString(CruiseControlRebalanceKeys.ORIGINAL_RESPONSE.getKey()));
                                             break;
                                         default:
                                             throw new IllegalStateException("Unexpected user task status: " + taskStatus);
@@ -279,11 +342,16 @@ public class CruiseControlApiImpl implements CruiseControlApi {
         String path = new PathBuilder(CruiseControlEndpoints.STOP)
                         .addParameter(CruiseControlParameters.JSON, "true").build();
 
-        HttpClientOptions options = new HttpClientOptions().setLogActivity(HTTP_CLIENT_ACTIVITY_LOGGING);
+        HttpClientOptions options = getHttpClientOptions();
 
         return HttpClientUtils.withHttpClient(vertx, options, (httpClient, result) -> {
             httpClient.request(HttpMethod.POST, port, host, path, request -> {
                 if (request.succeeded()) {
+
+                    if (authHttpHeader != null) {
+                        request.result().putHeader(authHttpHeader.getName(), authHttpHeader.getValue());
+                    }
+
                     request.result().send(response -> {
                         if (response.succeeded()) {
                             if (response.result().statusCode() == 200 || response.result().statusCode() == 201) {

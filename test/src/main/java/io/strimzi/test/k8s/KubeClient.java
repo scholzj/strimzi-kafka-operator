@@ -16,12 +16,13 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
+import io.fabric8.kubernetes.api.model.admissionregistration.v1.ValidatingWebhookConfiguration;
 import io.fabric8.kubernetes.api.model.apiextensions.v1.CustomResourceDefinition;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
-import io.fabric8.kubernetes.api.model.batch.Job;
-import io.fabric8.kubernetes.api.model.batch.JobList;
-import io.fabric8.kubernetes.api.model.batch.JobStatus;
+import io.fabric8.kubernetes.api.model.batch.v1.Job;
+import io.fabric8.kubernetes.api.model.batch.v1.JobList;
+import io.fabric8.kubernetes.api.model.batch.v1.JobStatus;
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRole;
@@ -120,6 +121,14 @@ public class KubeClient {
     // ================================
     // ---------> CONFIG MAP <---------
     // ================================
+
+    public ConfigMap createOrReplaceConfigMap(ConfigMap configMap) {
+        return client.configMaps().inNamespace(configMap.getMetadata().getNamespace()).createOrReplace(configMap);
+    }
+
+    public Boolean deleteConfigMap(ConfigMap configMap) {
+        return client.configMaps().inNamespace(configMap.getMetadata().getNamespace()).delete(configMap);
+    }
 
     public void deleteConfigMap(String configMapName) {
         client.configMaps().inNamespace(getNamespace()).withName(configMapName).withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
@@ -293,19 +302,6 @@ public class KubeClient {
         return listPodsByPrefixInName(getNamespace(), podNamePrefix);
     }
 
-    public List<Pod> listKafkaConnectS2IPods(String namespaceName, String connectS2iClusterName) {
-        return listPods(namespaceName)
-            .stream().filter(p ->
-                p.getMetadata().getName().startsWith(connectS2iClusterName) &&
-                !p.getMetadata().getName().endsWith("-build") &&
-                !p.getMetadata().getName().endsWith("-deploy"))
-            .collect(Collectors.toList());
-    }
-
-    public List<Pod> listKafkaConnectS2IPods(String connectS2iClusterName) {
-        return listKafkaConnectS2IPods(getNamespace(), connectS2iClusterName);
-    }
-
     /**
      * Gets pod
      */
@@ -320,8 +316,12 @@ public class KubeClient {
     /**
      * Gets pod
      */
+    public PodResource<Pod> getPodResource(String namespaceName, String name) {
+        return client.pods().inNamespace(namespaceName).withName(name);
+    }
+
     public PodResource<Pod> getPodResource(String name) {
-        return client.pods().inNamespace(getNamespace()).withName(name);
+        return getPodResource(kubeClient().getNamespace(), name);
     }
 
     /**
@@ -583,6 +583,14 @@ public class KubeClient {
         return client.nodes().list().getItems();
     }
 
+    public List<Node> listWorkerNodes() {
+        return listNodes().stream().filter(node -> node.getMetadata().getLabels().containsKey("node-role.kubernetes.io/worker")).collect(Collectors.toList());
+    }
+
+    public List<Node> listMasterNodes() {
+        return listNodes().stream().filter(node -> node.getMetadata().getLabels().containsKey("node-role.kubernetes.io/master")).collect(Collectors.toList());
+    }
+
     /**
      * Method which return list of kube cluster nodes
      * @return list of nodes
@@ -596,39 +604,40 @@ public class KubeClient {
     // =========================
 
     public boolean jobExists(String jobName) {
-        return client.batch().jobs().inNamespace(getNamespace()).list().getItems().stream().anyMatch(j -> j.getMetadata().getName().startsWith(jobName));
+        return client.batch().v1().jobs().inNamespace(getNamespace()).list().getItems().stream().anyMatch(j -> j.getMetadata().getName().startsWith(jobName));
     }
 
     public Job createJob(Job job) {
-        return client.batch().jobs().inNamespace(job.getMetadata().getNamespace()).createOrReplace(job);
+        return client.batch().v1().jobs().inNamespace(job.getMetadata().getNamespace()).createOrReplace(job);
     }
 
     public Job replaceJob(Job job) {
-        return client.batch().jobs().inNamespace(getNamespace()).createOrReplace(job);
+        return client.batch().v1().jobs().inNamespace(getNamespace()).createOrReplace(job);
     }
 
     public Boolean deleteJob(String jobName) {
-        return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).delete();
+        return client.batch().v1().jobs().inNamespace(getNamespace()).withName(jobName).delete();
     }
 
     public Job getJob(String jobName) {
-        return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get();
+        return client.batch().v1().jobs().inNamespace(getNamespace()).withName(jobName).get();
     }
 
-    public Boolean checkSucceededJobStatus(String jobName) {
+    public boolean checkSucceededJobStatus(String jobName) {
         return checkSucceededJobStatus(getNamespace(), jobName, 1);
     }
 
-    public Boolean checkSucceededJobStatus(String namespaceName, String jobName, int expectedSucceededPods) {
+    public boolean checkSucceededJobStatus(String namespaceName, String jobName, int expectedSucceededPods) {
         return getJobStatus(namespaceName, jobName).getSucceeded().equals(expectedSucceededPods);
     }
-    public Boolean checkSucceededJobStatus(String jobName, int expectedSucceededPods) {
-        return checkSucceededJobStatus(getNamespace(), jobName, expectedSucceededPods);
+
+    public boolean checkFailedJobStatus(String namespaceName, String jobName, int expectedFailedPods) {
+        return getJobStatus(namespaceName, jobName).getFailed().equals(expectedFailedPods);
     }
 
     // Pods Statuses:  0 Running / 0 Succeeded / 1 Failed
     public JobStatus getJobStatus(String namespaceName, String jobName) {
-        return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get().getStatus();
+        return client.batch().v1().jobs().inNamespace(namespaceName).withName(jobName).get().getStatus();
     }
 
     public JobStatus getJobStatus(String jobName) {
@@ -636,11 +645,11 @@ public class KubeClient {
     }
 
     public JobList getJobList() {
-        return client.batch().jobs().inNamespace(getNamespace()).list();
+        return client.batch().v1().jobs().inNamespace(getNamespace()).list();
     }
 
     public List<Job> listJobs(String namePrefix) {
-        return client.batch().jobs().inNamespace(getNamespace()).list().getItems().stream()
+        return client.batch().v1().jobs().inNamespace(getNamespace()).list().getItems().stream()
             .filter(job -> job.getMetadata().getName().startsWith(namePrefix)).collect(Collectors.toList());
     }
 
@@ -665,7 +674,7 @@ public class KubeClient {
     }
 
     public Secret getSecret(String secretName) {
-        return getSecret(kubeClient().getNamespace(), secretName);
+        return getSecret(getNamespace(), secretName);
     }
 
     public boolean deleteSecret(String namespaceName, String secretName) {
@@ -673,7 +682,7 @@ public class KubeClient {
     }
 
     public boolean deleteSecret(String secretName) {
-        return deleteSecret(kubeClient().getNamespace(), secretName);
+        return deleteSecret(getNamespace(), secretName);
     }
 
     public List<Secret> listSecrets(String namespaceName) {
@@ -757,6 +766,18 @@ public class KubeClient {
         return listServiceAccounts(getNamespace());
     }
 
+    public ServiceAccount createOrReplaceServiceAccount(ServiceAccount serviceAccount) {
+        return client.serviceAccounts().inNamespace(serviceAccount.getMetadata().getNamespace()).createOrReplace(serviceAccount);
+    }
+
+    public Boolean deleteServiceAccount(ServiceAccount serviceAccount) {
+        return client.serviceAccounts().inNamespace(serviceAccount.getMetadata().getNamespace()).delete(serviceAccount);
+    }
+
+    public ServiceAccount getServiceAccount(String namespaceName, String name) {
+        return client.serviceAccounts().inNamespace(namespaceName).withName(name).get();
+    }
+
     // =========================
     // ---------> LOG <---------
     // =========================
@@ -817,6 +838,18 @@ public class KubeClient {
         return client.rbac().clusterRoles().list().getItems();
     }
 
+    public ClusterRole createOrReplaceClusterRoles(ClusterRole clusterRole) {
+        return client.rbac().clusterRoles().createOrReplace(clusterRole);
+    }
+
+    public Boolean deleteClusterRole(ClusterRole clusterRole) {
+        return client.rbac().clusterRoles().delete(clusterRole);
+    }
+
+    public ClusterRole getClusterRole(String name) {
+        return client.rbac().clusterRoles().withName(name).get();
+    }
+
     // ==================================
     // ---------> ROLE BINDING <---------
     // ==================================
@@ -826,15 +859,15 @@ public class KubeClient {
     }
 
     public ClusterRoleBinding createOrReplaceClusterRoleBinding(ClusterRoleBinding clusterRoleBinding) {
-        return client.rbac().clusterRoleBindings().inNamespace(getNamespace()).createOrReplace(clusterRoleBinding);
+        return client.rbac().clusterRoleBindings().createOrReplace(clusterRoleBinding);
     }
 
     public Boolean deleteClusterRoleBinding(ClusterRoleBinding clusterRoleBinding) {
-        return client.rbac().clusterRoleBindings().inNamespace(getNamespace()).delete(clusterRoleBinding);
+        return client.rbac().clusterRoleBindings().delete(clusterRoleBinding);
     }
 
     public ClusterRoleBinding getClusterRoleBinding(String name) {
-        return client.rbac().clusterRoleBindings().inNamespace(getNamespace()).withName(name).get();
+        return client.rbac().clusterRoleBindings().withName(name).get();
     }
 
     public List<RoleBinding> listRoleBindings(String namespaceName) {
@@ -849,12 +882,24 @@ public class KubeClient {
         return client.rbac().roleBindings().inNamespace(getNamespace()).withName(name).get();
     }
 
-    public void deleteRoleBinding(String name) {
-        client.rbac().roleBindings().inNamespace(getNamespace()).withName(name).delete();
+    public void deleteRoleBinding(String namespace, String name) {
+        client.rbac().roleBindings().inNamespace(namespace).withName(name).delete();
+    }
+
+    public Role createOrReplaceRole(Role role) {
+        return client.rbac().roles().inNamespace(getNamespace()).createOrReplace(role);
+    }
+
+    public Role getRole(String name) {
+        return client.rbac().roles().inNamespace(getNamespace()).withName(name).get();
+    }
+
+    public void deleteRole(String namespace, String name) {
+        client.rbac().roles().inNamespace(namespace).withName(name).delete();
     }
 
     public <T extends CustomResource, L extends CustomResourceList<T>> MixedOperation<T, L, Resource<T>> customResources(CustomResourceDefinitionContext crdContext, Class<T> resourceType, Class<L> listClass) {
-        return client.customResources(resourceType, listClass); //TODO namespace here
+        return client.resources(resourceType, listClass); //TODO namespace here
     }
 
     // =========================
@@ -907,7 +952,21 @@ public class KubeClient {
         client.network().networkPolicies().inNamespace(getNamespace()).withName(name).delete();
     }
 
+    // =====================================
+    // ---> CUSTOM RESOURCE DEFINITIONS <---
+    // =====================================
 
+    public CustomResourceDefinition createOrReplaceCustomResourceDefinition(CustomResourceDefinition resourceDefinition) {
+        return client.apiextensions().v1().customResourceDefinitions().createOrReplace(resourceDefinition);
+    }
+
+    public Boolean deleteCustomResourceDefinition(CustomResourceDefinition resourceDefinition) {
+        return client.apiextensions().v1().customResourceDefinitions().delete(resourceDefinition);
+    }
+
+    public CustomResourceDefinition getCustomResourceDefinition(String name) {
+        return client.apiextensions().v1().customResourceDefinitions().withName(name).get();
+    }
 
     // ======================================
     // ---------> CLUSTER SPECIFIC <---------
@@ -927,9 +986,13 @@ public class KubeClient {
      * Method which return name of cluster operator pod
      * @return cluster operator pod name
      */
+    public String getClusterOperatorPodName(final String namespaceName) {
+        LabelSelector selector = kubeClient(namespaceName).getDeploymentSelectors(namespaceName, "strimzi-cluster-operator");
+        return kubeClient(namespaceName).listPods(namespaceName, selector).get(0).getMetadata().getName();
+    }
+
     public String getClusterOperatorPodName() {
-        LabelSelector selector = kubeClient().getDeploymentSelectors("strimzi-cluster-operator");
-        return kubeClient().listPods(selector).get(0).getMetadata().getName();
+        return getClusterOperatorPodName(getNamespace());
     }
 
     /**
@@ -939,5 +1002,21 @@ public class KubeClient {
     public List<Node> getClusterWorkers() {
         return getClusterNodes().stream().filter(node ->
                 node.getMetadata().getLabels().containsKey("node-role.kubernetes.io/worker")).collect(Collectors.toList());
+    }
+
+    // ======================================================
+    // ---------> VALIDATING WEBHOOK CONFIGURATION <---------
+    // ======================================================
+
+    public ValidatingWebhookConfiguration getValidatingWebhookConfiguration(String webhookName) {
+        return client.admissionRegistration().v1().validatingWebhookConfigurations().withName(webhookName).get();
+    }
+
+    public ValidatingWebhookConfiguration createValidatingWebhookConfiguration(ValidatingWebhookConfiguration validatingWebhookConfiguration) {
+        return client.admissionRegistration().v1().validatingWebhookConfigurations().createOrReplace(validatingWebhookConfiguration);
+    }
+
+    public Boolean deleteValidatingWebhookConfiguration(ValidatingWebhookConfiguration validatingWebhookConfiguration) {
+        return client.admissionRegistration().v1().validatingWebhookConfigurations().delete(validatingWebhookConfiguration);
     }
 }

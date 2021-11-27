@@ -4,7 +4,7 @@
  */
 package io.strimzi.systemtest.olm;
 
-import io.strimzi.systemtest.resources.specific.OlmResource;
+import io.strimzi.systemtest.resources.operator.specific.OlmResource;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -13,6 +13,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.extension.ExtensionContext;
 
+import static io.strimzi.systemtest.Constants.BRIDGE;
+import static io.strimzi.systemtest.Constants.CONNECT;
+import static io.strimzi.systemtest.Constants.MIRROR_MAKER;
+import static io.strimzi.systemtest.Constants.MIRROR_MAKER2;
 import static io.strimzi.systemtest.Constants.OLM;
 
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -42,36 +46,34 @@ public class AllNamespacesST extends OlmAbstractST {
 
     @Test
     @Order(4)
+    @Tag(CONNECT)
     void testDeployExampleKafkaConnect() {
         doTestDeployExampleKafkaConnect();
     }
 
     @Test
     @Order(5)
-    void testDeployExampleKafkaConnectS2I() {
-        doTestDeployExampleKafkaConnectS2I();
-    }
-
-    @Test
-    @Order(6)
+    @Tag(BRIDGE)
     void testDeployExampleKafkaBridge() {
         doTestDeployExampleKafkaBridge();
     }
 
     @Test
-    @Order(7)
+    @Order(6)
+    @Tag(MIRROR_MAKER)
     void testDeployExampleKafkaMirrorMaker() {
         doTestDeployExampleKafkaMirrorMaker();
     }
 
     @Test
-    @Order(8)
+    @Order(7)
+    @Tag(MIRROR_MAKER2)
     void testDeployExampleKafkaMirrorMaker2() {
         doTestDeployExampleKafkaMirrorMaker2();
     }
 
     @Test
-    @Order(9)
+    @Order(8)
     void testDeployExampleKafkaRebalance(ExtensionContext extensionContext) {
         doTestDeployExampleKafkaRebalance(extensionContext);
     }
