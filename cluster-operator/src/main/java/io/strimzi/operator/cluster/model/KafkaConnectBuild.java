@@ -351,6 +351,7 @@ public class KafkaConnectBuild extends AbstractModel {
                 .withArgs(args)
                 .withVolumeMounts(getVolumeMounts())
                 .withResources(build.getResources())
+                // The Kaniko builder needs to run as root, so it does nto use the default context
                 .withSecurityContext(templateBuildContainerSecurityContext)
                 .withEnv(getBuildContainerEnvVars())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))

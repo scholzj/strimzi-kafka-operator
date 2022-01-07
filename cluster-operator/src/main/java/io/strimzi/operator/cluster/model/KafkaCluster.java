@@ -1596,7 +1596,7 @@ public class KafkaCluster extends AbstractModel {
                     .withEnv(getInitContainerEnvVars())
                     .withVolumeMounts(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT))
                     .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, initImage))
-                    .withSecurityContext(templateInitContainerSecurityContext)
+                    .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateInitContainerSecurityContext))
                     .build();
 
             if (getResources() != null) {
@@ -1628,7 +1628,7 @@ public class KafkaCluster extends AbstractModel {
                 .withResources(getResources())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
                 .withCommand("/opt/kafka/kafka_run.sh")
-                .withSecurityContext(templateKafkaContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateKafkaContainerSecurityContext))
                 .build();
 
         return singletonList(container);

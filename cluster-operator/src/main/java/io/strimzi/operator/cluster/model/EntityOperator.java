@@ -245,7 +245,7 @@ public class EntityOperator extends AbstractModel {
                             .withCommand("/opt/stunnel/entity_operator_stunnel_pre_stop.sh")
                             .endExec().endPreStop().build())
                     .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, tlsSidecarImage))
-                    .withSecurityContext(templateTlsSidecarContainerSecurityContext)
+                    .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateTlsSidecarContainerSecurityContext))
                     .build();
 
             containers.add(tlsSidecarContainer);

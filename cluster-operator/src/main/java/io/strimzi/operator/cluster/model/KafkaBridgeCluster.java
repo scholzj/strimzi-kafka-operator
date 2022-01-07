@@ -332,7 +332,7 @@ public class KafkaBridgeCluster extends AbstractModel {
                 .withVolumeMounts(getVolumeMounts())
                 .withResources(getResources())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(templateContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateContainerSecurityContext))
                 .build();
 
         containers.add(container);

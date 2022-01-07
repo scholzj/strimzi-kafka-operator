@@ -528,7 +528,7 @@ public class ZookeeperCluster extends AbstractModel {
                 .withReadinessProbe(ProbeGenerator.execProbe(readinessProbeOptions, Collections.singletonList(readinessPath)))
                 .withResources(getResources())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(templateZookeeperContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateZookeeperContainerSecurityContext))
                 .build();
 
         containers.add(container);

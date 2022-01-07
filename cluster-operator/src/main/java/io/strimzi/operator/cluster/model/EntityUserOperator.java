@@ -181,7 +181,7 @@ public class EntityUserOperator extends AbstractModel {
                 .withResources(getResources())
                 .withVolumeMounts(getVolumeMounts())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(templateContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateContainerSecurityContext))
                 .build());
     }
 

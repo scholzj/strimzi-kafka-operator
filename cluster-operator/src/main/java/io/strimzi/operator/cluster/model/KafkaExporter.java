@@ -217,7 +217,7 @@ public class KafkaExporter extends AbstractModel {
                         VolumeUtils.createVolumeMount(KAFKA_EXPORTER_CERTS_VOLUME_NAME, KAFKA_EXPORTER_CERTS_VOLUME_MOUNT),
                         VolumeUtils.createVolumeMount(CLUSTER_CA_CERTS_VOLUME_NAME, CLUSTER_CA_CERTS_VOLUME_MOUNT))
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(templateContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateContainerSecurityContext))
                 .build();
 
         containers.add(container);

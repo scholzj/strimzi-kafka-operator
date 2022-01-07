@@ -39,7 +39,16 @@ nodeSelector: {}
 priorityClassName: ""
 
 podSecurityContext: {}
-securityContext: {}
+
+# Default container security context which allows the Cluster Operator to run under the "restricted" Pod Security Policy
+securityContext:
+  allowPrivilegeEscalation: false
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+  capabilities:
+    drop:
+      - ALL
 
 # Docker images that operator uses to provision various components of Strimzi.  To use your own registry prefix the
 # repository name with your registry URL.

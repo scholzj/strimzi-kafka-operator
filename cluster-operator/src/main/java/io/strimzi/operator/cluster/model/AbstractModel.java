@@ -30,7 +30,6 @@ import io.fabric8.kubernetes.api.model.PersistentVolumeClaimBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodSecurityContext;
-import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.Secret;
@@ -130,8 +129,6 @@ public abstract class AbstractModel {
     protected static final String INIT_VOLUME_MOUNT = "/opt/kafka/init";
     protected static final String ENV_VAR_KAFKA_INIT_RACK_TOPOLOGY_KEY = "RACK_TOPOLOGY_KEY";
     protected static final String ENV_VAR_KAFKA_INIT_NODE_NAME = "NODE_NAME";
-
-    private static final Long DEFAULT_FS_GROUPID = 0L;
 
     public static final String ANCILLARY_CM_KEY_METRICS = "metrics-config.json";
     public static final String ANCILLARY_CM_KEY_LOG_CONFIG = "log4j.properties";
@@ -1090,18 +1087,6 @@ public abstract class AbstractModel {
             List<Container> containers,
             List<LocalObjectReference> imagePullSecrets,
             boolean isOpenShift) {
-
-        PodSecurityContext securityContext = templateSecurityContext;
-
-        // if a persistent volume claim is requested and the running cluster is a Kubernetes one (non-openshift) and we
-        // have no user configured PodSecurityContext we set the podSecurityContext.
-        // This is to give each pod write permissions under a specific group so that if a pod changes users it does not have permission issues.
-        if (ModelUtils.containsPersistentStorage(storage) && !isOpenShift && securityContext == null) {
-            securityContext = new PodSecurityContextBuilder()
-                    .withFsGroup(AbstractModel.DEFAULT_FS_GROUPID)
-                    .build();
-        }
-
         StatefulSet statefulSet = new StatefulSetBuilder()
                 .withNewMetadata()
                     .withName(name)
@@ -1132,7 +1117,7 @@ public abstract class AbstractModel {
                             .withTolerations(getTolerations())
                             .withTerminationGracePeriodSeconds(Long.valueOf(templateTerminationGracePeriodSeconds))
                             .withImagePullSecrets(templateImagePullSecrets != null ? templateImagePullSecrets : imagePullSecrets)
-                            .withSecurityContext(securityContext)
+                            .withSecurityContext(SecurityContextUtils.podSecurityContext(templateSecurityContext, ModelUtils.containsPersistentStorage(storage), isOpenShift))
                             .withPriorityClassName(templatePodPriorityClassName)
                             .withSchedulerName(templatePodSchedulerName != null ? templatePodSchedulerName : "default-scheduler")
                             .withHostAliases(templatePodHostAliases)
@@ -1232,18 +1217,6 @@ public abstract class AbstractModel {
             List<Container> containers,
             List<LocalObjectReference> imagePullSecrets,
             boolean isOpenShift) {
-
-        PodSecurityContext securityContext = templateSecurityContext;
-
-        // if a persistent volume claim is requested and the running cluster is a Kubernetes one (non-openshift) and we
-        // have no user configured PodSecurityContext we set the podSecurityContext.
-        // This is to give each pod write permissions under a specific group so that if a pod changes users it does not have permission issues.
-        if (ModelUtils.containsPersistentStorage(storage) && !isOpenShift && securityContext == null) {
-            securityContext = new PodSecurityContextBuilder()
-                    .withFsGroup(AbstractModel.DEFAULT_FS_GROUPID)
-                    .build();
-        }
-
         Pod pod = new PodBuilder()
                 .withNewMetadata()
                     .withName(podName)
@@ -1264,7 +1237,7 @@ public abstract class AbstractModel {
                     .withTolerations(getTolerations())
                     .withTerminationGracePeriodSeconds(Long.valueOf(templateTerminationGracePeriodSeconds))
                     .withImagePullSecrets(templateImagePullSecrets != null ? templateImagePullSecrets : imagePullSecrets)
-                    .withSecurityContext(securityContext)
+                    .withSecurityContext(SecurityContextUtils.podSecurityContext(templateSecurityContext, ModelUtils.containsPersistentStorage(storage), isOpenShift))
                     .withPriorityClassName(templatePodPriorityClassName)
                     .withSchedulerName(templatePodSchedulerName != null ? templatePodSchedulerName : "default-scheduler")
                     .withHostAliases(templatePodHostAliases)
@@ -1286,18 +1259,6 @@ public abstract class AbstractModel {
             List<Container> containers,
             List<LocalObjectReference> imagePullSecrets,
             boolean isOpenShift) {
-
-        PodSecurityContext securityContext = templateSecurityContext;
-
-        // if a persistent volume claim is requested and the running cluster is a Kubernetes one (non-openshift) and we
-        // have no user configured PodSecurityContext we set the podSecurityContext.
-        // This is to give each pod write permissions under a specific group so that if a pod changes users it does not have permission issues.
-        if (ModelUtils.containsPersistentStorage(storage) && !isOpenShift && securityContext == null) {
-            securityContext = new PodSecurityContextBuilder()
-                    .withFsGroup(AbstractModel.DEFAULT_FS_GROUPID)
-                    .build();
-        }
-
         Pod pod = new PodBuilder()
                 .withNewMetadata()
                     .withName(name)
@@ -1317,7 +1278,7 @@ public abstract class AbstractModel {
                     .withTolerations(getTolerations())
                     .withTerminationGracePeriodSeconds(Long.valueOf(templateTerminationGracePeriodSeconds))
                     .withImagePullSecrets(templateImagePullSecrets != null ? templateImagePullSecrets : imagePullSecrets)
-                    .withSecurityContext(securityContext)
+                    .withSecurityContext(SecurityContextUtils.podSecurityContext(templateSecurityContext, ModelUtils.containsPersistentStorage(storage), isOpenShift))
                     .withPriorityClassName(templatePodPriorityClassName)
                     .withSchedulerName(templatePodSchedulerName != null ? templatePodSchedulerName : "default-scheduler")
                 .endSpec()
@@ -1363,7 +1324,7 @@ public abstract class AbstractModel {
                             .withTolerations(getTolerations())
                             .withTerminationGracePeriodSeconds(Long.valueOf(templateTerminationGracePeriodSeconds))
                             .withImagePullSecrets(templateImagePullSecrets != null ? templateImagePullSecrets : imagePullSecrets)
-                            .withSecurityContext(templateSecurityContext)
+                            .withSecurityContext(SecurityContextUtils.podSecurityContext(templateSecurityContext, false, false))
                             .withPriorityClassName(templatePodPriorityClassName)
                             .withSchedulerName(templatePodSchedulerName)
                             .withHostAliases(templatePodHostAliases)

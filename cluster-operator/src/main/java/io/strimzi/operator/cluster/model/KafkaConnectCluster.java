@@ -481,7 +481,7 @@ public class KafkaConnectCluster extends AbstractModel {
                 .withVolumeMounts(getVolumeMounts())
                 .withResources(getResources())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(templateContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateContainerSecurityContext))
                 .build();
 
         containers.add(container);
@@ -515,7 +515,7 @@ public class KafkaConnectCluster extends AbstractModel {
                     .withEnv(getInitContainerEnvVars())
                     .withVolumeMounts(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT))
                     .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, initImage))
-                    .withSecurityContext(templateInitContainerSecurityContext)
+                    .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateInitContainerSecurityContext))
                     .build();
 
             if (getResources() != null) {

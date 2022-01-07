@@ -418,7 +418,7 @@ public class CruiseControl extends AbstractModel {
                 .withResources(getResources())
                 .withVolumeMounts(getVolumeMounts())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(templateCruiseControlContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateCruiseControlContainerSecurityContext))
                 .build();
 
         Container tlsSidecarContainer = new ContainerBuilder()
@@ -438,7 +438,7 @@ public class CruiseControl extends AbstractModel {
                         .endExec().endPreStop()
                         .build())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, tlsSidecarImage))
-                .withSecurityContext(templateTlsSidecarContainerSecurityContext)
+                .withSecurityContext(SecurityContextUtils.containerSecurityContext(templateTlsSidecarContainerSecurityContext))
                 .build();
 
         containers.add(container);
