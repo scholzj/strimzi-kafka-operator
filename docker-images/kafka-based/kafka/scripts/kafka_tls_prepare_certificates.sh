@@ -7,7 +7,7 @@ set -e
 # $3: Public key to be imported
 # $4: Alias of the certificate
 function create_truststore {
-   keytool -keystore "$1" -storepass "$2" -noprompt -alias "$4" -import -file "$3" -storetype PKCS12
+   keytool -J-Dcom.redhat.fips=false -keystore "$1" -storepass "$2" -noprompt -alias "$4" -import -file "$3" -storetype PKCS12
 }
 
 # Parameters:
@@ -45,35 +45,43 @@ function find_ca {
     done
 }
 
-echo "Preparing truststore for replication listener"
-# Add each certificate to the trust store
-STORE=/tmp/kafka/cluster.truststore.p12
-rm -f "$STORE"
-for CRT in /opt/kafka/cluster-ca-certs/*.crt; do
-  ALIAS=$(basename "$CRT" .crt)
-  echo "Adding $CRT to truststore $STORE with alias $ALIAS"
-  create_truststore "$STORE" "$CERTS_STORE_PASSWORD" "$CRT" "$ALIAS"
+# Combine all the certs in the cluster CA into one file
+echo "Preparing PEM truststore"
+CA_CERTS=/tmp/kafka/cluster.ca.crt
+rm -f "$CA_CERTS"
+for cert in /opt/kafka/cluster-ca-certs/*.crt; do
+  sed -z '$ s/\n$//' "$cert" >> "$CA_CERTS"
+  echo "" >> "$CA_CERTS"
 done
-echo "Preparing truststore for replication listener is complete"
+echo "Preparing PEM truststore for ZooKeeper is complete"
+
+echo "Preparing ZooKeeper PEM keystore"
+KEYSTORE=/tmp/kafka/kafka-zookeeper.pem
+rm -f "$KEYSTORE"
+cat "/opt/kafka/broker-certs/$HOSTNAME.crt" >> "$KEYSTORE"
+cat "/opt/kafka/broker-certs/$HOSTNAME.key" >> "$KEYSTORE"
+echo "Preparing ZooKeeper PEM keystore is complete"
 
 echo "Looking for the right CA"
 CA=$(find_ca /opt/kafka/cluster-ca-certs "/opt/kafka/broker-certs/$HOSTNAME.crt")
-
 if [ ! -f "$CA" ]; then
     echo "No CA found. Thus exiting."
     exit 1
 fi
 echo "Found the right CA: $CA"
 
-echo "Preparing keystore for replication and clienttls listener"
-STORE=/tmp/kafka/cluster.keystore.p12
-rm -f "$STORE"
-create_keystore "$STORE" "$CERTS_STORE_PASSWORD" \
-    "/opt/kafka/broker-certs/$HOSTNAME.crt" \
-    "/opt/kafka/broker-certs/$HOSTNAME.key" \
-    "$CA" \
-    "$HOSTNAME"
-echo "Preparing keystore for replication and clienttls listener is complete"
+echo "Preparing Kafka PEM keystore"
+KEYSTORE=/tmp/kafka/kafka.pem
+rm -f "$KEYSTORE"
+cat "/opt/kafka/broker-certs/$HOSTNAME.key" >> "$KEYSTORE"
+echo "Preparing Kafka PEM keystore is complete"
+
+echo "Preparing Kafka PEM certificate chain"
+KEYSTORE=/tmp/kafka/kafka.crt
+rm -f "$KEYSTORE"
+cat "/opt/kafka/broker-certs/$HOSTNAME.crt" >> "$KEYSTORE"
+cat "$CA" >> "$KEYSTORE"
+echo "Preparing Kafka PEM certificate chain is complete"
 
 regex="^\/opt\/kafka\/certificates\/(custom|oauth)-(.+)-(.+)-certs$"
 for CERT_DIR in /opt/kafka/certificates/*; do
@@ -100,16 +108,14 @@ for CERT_DIR in /opt/kafka/certificates/*; do
   fi
 done
 
-echo "Preparing truststore for client authentication"
-# Add each certificate to the trust store
-STORE=/tmp/kafka/clients.truststore.p12
-rm -f "$STORE"
-for CRT in /opt/kafka/client-ca-certs/*.crt; do
-  ALIAS=$(basename "$CRT" .crt)
-  echo "Adding $CRT to truststore $STORE with alias $ALIAS"
-  create_truststore "$STORE" "$CERTS_STORE_PASSWORD" "$CRT" "$ALIAS"
+echo "Preparing PEM truststore for client authentication"
+CA_CERTS=/tmp/kafka/clients.ca.crt
+rm -f "$CA_CERTS"
+for cert in /opt/kafka/client-ca-certs/*.crt; do
+  sed -z '$ s/\n$//' "$cert" >> "$CA_CERTS"
+  echo "" >> "$CA_CERTS"
 done
-echo "Preparing truststore for client authentication is complete"
+echo "Preparing PEM truststore for client authentication is complete"
 
 AUTHZ_KEYCLOAK_DIR="/opt/kafka/certificates/authz-keycloak-certs"
 AUTHZ_KEYCLOAK_STORE="/tmp/kafka/authz-keycloak.truststore.p12"

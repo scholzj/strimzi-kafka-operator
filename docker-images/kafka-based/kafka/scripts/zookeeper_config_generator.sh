@@ -20,19 +20,15 @@ ssl.quorum.clientAuth=need
 secureClientPort=2181
 sslQuorum=true
 
-ssl.trustStore.location=/tmp/zookeeper/cluster.truststore.p12
-ssl.trustStore.password=${CERTS_STORE_PASSWORD}
-ssl.trustStore.type=PKCS12
-ssl.quorum.trustStore.location=/tmp/zookeeper/cluster.truststore.p12
-ssl.quorum.trustStore.password=${CERTS_STORE_PASSWORD}
-ssl.quorum.trustStore.type=PKCS12
+ssl.trustStore.location=/tmp/zookeeper/cluster.ca.crt
+ssl.trustStore.type=PEM
+ssl.quorum.trustStore.location=/tmp/zookeeper/cluster.ca.crt
+ssl.quorum.trustStore.type=PEM
 
-ssl.keyStore.location=/tmp/zookeeper/cluster.keystore.p12
-ssl.keyStore.password=${CERTS_STORE_PASSWORD}
-ssl.keyStore.type=PKCS12
-ssl.quorum.keyStore.location=/tmp/zookeeper/cluster.keystore.p12
-ssl.quorum.keyStore.password=${CERTS_STORE_PASSWORD}
-ssl.quorum.keyStore.type=PKCS12
+ssl.keyStore.location=/tmp/zookeeper/zookeeper.pem
+ssl.keyStore.type=PEM
+ssl.quorum.keyStore.location=/tmp/zookeeper/zookeeper.pem
+ssl.quorum.keyStore.type=PEM
 
 # Provided configuration
 ${ZOOKEEPER_CONFIGURATION}

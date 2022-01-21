@@ -137,12 +137,10 @@ public class KafkaBrokerConfigurationBuilder {
         writer.println(String.format("zookeeper.connect=%s:%d", ZookeeperCluster.serviceName(clusterName), ZookeeperCluster.CLIENT_TLS_PORT));
         writer.println("zookeeper.clientCnxnSocket=org.apache.zookeeper.ClientCnxnSocketNetty");
         writer.println("zookeeper.ssl.client.enable=true");
-        writer.println("zookeeper.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12");
-        writer.println("zookeeper.ssl.keystore.password=${CERTS_STORE_PASSWORD}");
-        writer.println("zookeeper.ssl.keystore.type=PKCS12");
-        writer.println("zookeeper.ssl.truststore.location=/tmp/kafka/cluster.truststore.p12");
-        writer.println("zookeeper.ssl.truststore.password=${CERTS_STORE_PASSWORD}");
-        writer.println("zookeeper.ssl.truststore.type=PKCS12");
+        writer.println("zookeeper.ssl.keystore.location=/tmp/kafka/kafka-zookeeper.pem");
+        writer.println("zookeeper.ssl.keystore.type=PEM");
+        writer.println("zookeeper.ssl.truststore.location=/tmp/kafka/cluster.ca.crt");
+        writer.println("zookeeper.ssl.truststore.type=PEM");
         writer.println();
 
         return this;
@@ -244,12 +242,11 @@ public class KafkaBrokerConfigurationBuilder {
      */
     private void configureControlPlaneListener() {
         printSectionHeader("Control Plane listener");
-        writer.println("listener.name.controlplane-9090.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12");
-        writer.println("listener.name.controlplane-9090.ssl.keystore.password=${CERTS_STORE_PASSWORD}");
-        writer.println("listener.name.controlplane-9090.ssl.keystore.type=PKCS12");
-        writer.println("listener.name.controlplane-9090.ssl.truststore.location=/tmp/kafka/cluster.truststore.p12");
-        writer.println("listener.name.controlplane-9090.ssl.truststore.password=${CERTS_STORE_PASSWORD}");
-        writer.println("listener.name.controlplane-9090.ssl.truststore.type=PKCS12");
+        writer.println("listener.name.controlplane-9090.ssl.keystore.key=${certs:/tmp/kafka:kafka.pem}");
+        writer.println("listener.name.controlplane-9090.ssl.keystore.certificate.chain=${certs:/tmp/kafka:kafka.crt}");
+        writer.println("listener.name.controlplane-9090.ssl.keystore.type=PEM");
+        writer.println("listener.name.controlplane-9090.ssl.truststore.location=/tmp/kafka/cluster.ca.crt");
+        writer.println("listener.name.controlplane-9090.ssl.truststore.type=PEM");
         writer.println("listener.name.controlplane-9090.ssl.client.auth=required");
         writer.println();
     }
@@ -260,12 +257,11 @@ public class KafkaBrokerConfigurationBuilder {
      */
     private void configureReplicationListener() {
         printSectionHeader("Replication listener");
-        writer.println("listener.name.replication-9091.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12");
-        writer.println("listener.name.replication-9091.ssl.keystore.password=${CERTS_STORE_PASSWORD}");
-        writer.println("listener.name.replication-9091.ssl.keystore.type=PKCS12");
-        writer.println("listener.name.replication-9091.ssl.truststore.location=/tmp/kafka/cluster.truststore.p12");
-        writer.println("listener.name.replication-9091.ssl.truststore.password=${CERTS_STORE_PASSWORD}");
-        writer.println("listener.name.replication-9091.ssl.truststore.type=PKCS12");
+        writer.println("listener.name.replication-9091.ssl.keystore.key=${certs:/tmp/kafka:kafka.pem}");
+        writer.println("listener.name.replication-9091.ssl.keystore.certificate.chain=${certs:/tmp/kafka:kafka.crt}");
+        writer.println("listener.name.replication-9091.ssl.keystore.type=PEM");
+        writer.println("listener.name.replication-9091.ssl.truststore.location=/tmp/kafka/cluster.ca.crt");
+        writer.println("listener.name.replication-9091.ssl.truststore.type=PEM");
         writer.println("listener.name.replication-9091.ssl.client.auth=required");
         writer.println();
     }
@@ -302,11 +298,11 @@ public class KafkaBrokerConfigurationBuilder {
         if (serverCertificate != null)  {
             writer.println(String.format("listener.name.%s.ssl.keystore.location=/tmp/kafka/custom-%s.keystore.p12", listenerNameInProperty, listenerNameInProperty));
         } else {
-            writer.println(String.format("listener.name.%s.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12", listenerNameInProperty));
+            writer.println(String.format("listener.name.%s.ssl.keystore.key=${certs:/tmp/kafka:kafka.pem}", listenerNameInProperty));
+            writer.println(String.format("listener.name.%s.ssl.keystore.certificate.chain=${certs:/tmp/kafka:kafka.crt}", listenerNameInProperty));
         }
 
-        writer.println(String.format("listener.name.%s.ssl.keystore.password=${CERTS_STORE_PASSWORD}", listenerNameInProperty));
-        writer.println(String.format("listener.name.%s.ssl.keystore.type=PKCS12", listenerNameInProperty));
+        writer.println(String.format("listener.name.%s.ssl.keystore.type=PEM", listenerNameInProperty));
 
         writer.println();
     }
@@ -374,9 +370,8 @@ public class KafkaBrokerConfigurationBuilder {
             securityProtocol.add(String.format("%s:%s", listenerName, getSecurityProtocol(tls, false)));
 
             writer.println(String.format("listener.name.%s.ssl.client.auth=required", listenerNameInProperty));
-            writer.println(String.format("listener.name.%s.ssl.truststore.location=/tmp/kafka/clients.truststore.p12", listenerNameInProperty));
-            writer.println(String.format("listener.name.%s.ssl.truststore.password=${CERTS_STORE_PASSWORD}", listenerNameInProperty));
-            writer.println(String.format("listener.name.%s.ssl.truststore.type=PKCS12", listenerNameInProperty));
+            writer.println(String.format("listener.name.%s.ssl.truststore.location=/tmp/kafka/clients.ca.crt", listenerNameInProperty));
+            writer.println(String.format("listener.name.%s.ssl.truststore.type=PEM", listenerNameInProperty));
             writer.println();
         } else {
             securityProtocol.add(String.format("%s:%s", listenerName, getSecurityProtocol(tls, false)));
@@ -558,6 +553,11 @@ public class KafkaBrokerConfigurationBuilder {
      * @return  Returns the builder instance
      */
     public KafkaBrokerConfigurationBuilder withUserConfiguration(AbstractConfiguration userConfig)  {
+        printSectionHeader("Configuration providers");
+        writer.println("config.providers=certs");
+        writer.println("config.providers.certs.class=org.apache.kafka.common.config.provider.DirectoryConfigProvider");
+        writer.println();
+
         if (userConfig != null && !userConfig.getConfiguration().isEmpty()) {
             printSectionHeader("User provided configuration");
             writer.println(userConfig.getConfiguration());
