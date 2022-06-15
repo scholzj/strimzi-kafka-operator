@@ -92,17 +92,14 @@ public class K8sImpl implements K8s {
         vertx.executeBlocking(future -> {
             try {
                 // Delete the resource by the topic name, because neither ZK nor Kafka know the resource name
-                if (!Boolean.TRUE.equals(operation().inNamespace(namespace).withName(resourceName.toString()).withPropagationPolicy(DeletionPropagation.FOREGROUND).delete())) {
-                    LOGGER.warn("KafkaTopic {} could not be deleted, since it doesn't seem to exist", resourceName.toString());
-                    future.complete();
-                } else {
-                    Util.waitFor(reconciliation, vertx, "sync resource deletion " + resourceName, "deleted", 1000, Long.MAX_VALUE, () -> {
-                        KafkaTopic kafkaTopic = operation().inNamespace(namespace).withName(resourceName.toString()).get();
-                        boolean notExists = kafkaTopic == null;
-                        LOGGER.debug("KafkaTopic {} deleted {}", resourceName.toString(), notExists);
-                        return notExists;
-                    }).onComplete(future);
-                }
+                operation().inNamespace(namespace).withName(resourceName.toString()).withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
+
+                Util.waitFor(reconciliation, vertx, "sync resource deletion " + resourceName, "deleted", 1000, Long.MAX_VALUE, () -> {
+                    KafkaTopic kafkaTopic = operation().inNamespace(namespace).withName(resourceName.toString()).get();
+                    boolean notExists = kafkaTopic == null;
+                    LOGGER.debug("KafkaTopic {} deleted {}", resourceName.toString(), notExists);
+                    return notExists;
+                }).onComplete(future);
             } catch (Exception e) {
                 future.fail(e);
             }
