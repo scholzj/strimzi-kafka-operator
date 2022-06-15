@@ -112,11 +112,11 @@ public class ServiceAccountOperatorTest extends AbstractResourceOperatorTest<Kub
             .onComplete(context.succeeding(rr -> {
                 context.verify(() -> assertThat(rr, instanceOf(ReconcileResult.Noop.class)));
                 verify(mockResource).get();
-                verify(mockResource, never()).patch(any());
-                verify(mockResource, never()).create(any());
+                verify(mockResource, never()).patch(any(), any());
                 verify(mockResource, never()).create();
-                verify(mockResource, never()).createOrReplace(any());
-                verify(mockCms, never()).createOrReplace(any());
+                verify(mockResource, never()).create();
+                verify(mockResource, never()).createOrReplace();
+                //verify(mockCms, never()).createOrReplace(any());
                 async.flag();
             }));
     }

@@ -49,7 +49,7 @@
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
-            <artifactId>kubernetes-client</artifactId>
+            <artifactId>kubernetes-client-api</artifactId>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -86,7 +86,7 @@
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
-            <artifactId>openshift-client</artifactId>
+            <artifactId>openshift-client-api</artifactId>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>

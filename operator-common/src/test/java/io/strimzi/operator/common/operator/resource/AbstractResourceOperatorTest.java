@@ -7,10 +7,11 @@ package io.strimzi.operator.common.operator.resource;
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+import io.fabric8.kubernetes.client.GracePeriodConfigurable;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
-import io.fabric8.kubernetes.client.dsl.EditReplacePatchDeletable;
+import io.fabric8.kubernetes.client.dsl.Deletable;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.hamcrest.CoreMatchers.is;
@@ -97,12 +99,10 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
     public void testCreateWhenExistsWithChangeIsAPatch(VertxTestContext context, boolean cascade) {
         T resource = resource();
         Resource mockResource = mock(resourceType());
-        EditReplacePatchDeletable mockR = mock(resourceType());
         HasMetadata hasMetadata = mock(HasMetadata.class);
         when(mockResource.get()).thenReturn(resource);
 
-        when(mockResource.withPropagationPolicy(cascade ? DeletionPropagation.FOREGROUND : DeletionPropagation.ORPHAN)).thenReturn(mockR);
-        when(mockR.patch((T) any())).thenReturn(hasMetadata);
+        when(mockResource.patch(any(), (T) any())).thenReturn(hasMetadata);
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(resource.getMetadata().getName()))).thenReturn(mockResource);
@@ -118,11 +118,11 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
         Checkpoint async = context.checkpoint();
         op.createOrUpdate(Reconciliation.DUMMY_RECONCILIATION, modifiedResource()).onComplete(context.succeeding(rr -> context.verify(() -> {
             verify(mockResource).get();
-            verify(mockR).patch((T) any());
-            verify(mockResource, never()).create(any());
+            verify(mockResource).patch(any(), (T) any());
             verify(mockResource, never()).create();
-            verify(mockResource, never()).createOrReplace(any());
-            verify(mockCms, never()).createOrReplace(any());
+            verify(mockResource, never()).create();
+            verify(mockResource, never()).createOrReplace();
+            //verify(mockCms, never()).createOrReplace();
             async.flag();
         })));
     }
@@ -137,7 +137,7 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
         Resource mockResource = mock(resourceType());
         when(mockResource.get()).thenReturn(resource);
         when(mockResource.withPropagationPolicy(cascade ? DeletionPropagation.FOREGROUND : DeletionPropagation.ORPHAN)).thenReturn(mockResource);
-        when(mockResource.patch(any())).thenReturn(resource);
+        when(mockResource.patch(any(), any())).thenReturn(resource);
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(resource.getMetadata().getName()))).thenReturn(mockResource);
@@ -153,11 +153,11 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
         Checkpoint async = context.checkpoint();
         op.createOrUpdate(Reconciliation.DUMMY_RECONCILIATION, resource()).onComplete(context.succeeding(rr -> context.verify(() -> {
             verify(mockResource).get();
-            verify(mockResource, never()).patch(any());
-            verify(mockResource, never()).create(any());
+            verify(mockResource, never()).patch(any(), any());
             verify(mockResource, never()).create();
-            verify(mockResource, never()).createOrReplace(any());
-            verify(mockCms, never()).createOrReplace(any());
+            verify(mockResource, never()).create();
+            verify(mockResource, never()).createOrReplace();
+            //verify(mockCms, never()).createOrReplace();
             async.flag();
         })));
     }
@@ -193,7 +193,7 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
         T resource = resource();
         Resource mockResource = mock(resourceType());
         when(mockResource.get()).thenReturn(null);
-        when(mockResource.create((T) any())).thenReturn(resource);
+        when(mockResource.create()).thenReturn(resource);
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(resource.getMetadata().getName()))).thenReturn(mockResource);
@@ -209,7 +209,7 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
         Checkpoint async = context.checkpoint();
         op.createOrUpdate(Reconciliation.DUMMY_RECONCILIATION, resource).onComplete(context.succeeding(rr -> context.verify(() -> {
             verify(mockResource).get();
-            verify(mockResource).create(eq(resource));
+            verify(mockResource).create();
             async.flag();
         })));
     }
@@ -227,7 +227,7 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
 
         MixedOperation mockCms = mock(MixedOperation.class);
         when(mockCms.inNamespace(matches(resource.getMetadata().getNamespace()))).thenReturn(mockNameable);
-        when(mockResource.create((T) any())).thenThrow(ex);
+        when(mockResource.create()).thenThrow(ex);
 
         C mockClient = mock(clientType());
         mocker(mockClient, mockCms);
@@ -268,10 +268,10 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
 
     @Test
     public void testReconcileDeleteWhenResourceExistsStillDeletes(VertxTestContext context) {
-        EditReplacePatchDeletable mockDeletable = mock(EditReplacePatchDeletable.class);
-        when(mockDeletable.delete()).thenReturn(Boolean.TRUE);
-        EditReplacePatchDeletable mockDeletableGrace = mock(EditReplacePatchDeletable.class);
-        when(mockDeletableGrace.delete()).thenReturn(Boolean.TRUE);
+        Deletable mockDeletable = mock(Deletable.class);
+        when(mockDeletable.delete()).thenReturn(List.of());
+        GracePeriodConfigurable mockDeletableGrace = mock(GracePeriodConfigurable.class);
+        when(mockDeletableGrace.delete()).thenReturn(List.of());
 
         T resource = resource();
         Resource mockResource = mock(resourceType());
@@ -308,10 +308,10 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
 
     @Test
     public void testReconcileDeletionSuccessfullyDeletes(VertxTestContext context) {
-        EditReplacePatchDeletable mockDeletable = mock(EditReplacePatchDeletable.class);
-        when(mockDeletable.delete()).thenReturn(Boolean.TRUE);
-        EditReplacePatchDeletable mockDeletableGrace = mock(EditReplacePatchDeletable.class);
-        when(mockDeletableGrace.delete()).thenReturn(Boolean.TRUE);
+        Deletable mockDeletable = mock(Deletable.class);
+        when(mockDeletable.delete()).thenReturn(List.of());
+        GracePeriodConfigurable mockDeletableGrace = mock(GracePeriodConfigurable.class);
+        when(mockDeletableGrace.delete()).thenReturn(List.of());
 
         T resource = resource();
         Resource mockResource = mock(resourceType());
@@ -349,12 +349,9 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
     @Test
     public void testReconcileDeleteThrowsWhenDeletionThrows(VertxTestContext context) {
         RuntimeException ex = new RuntimeException("Testing this exception is handled correctly");
-        EditReplacePatchDeletable mockDeletable = mock(EditReplacePatchDeletable.class);
-        EditReplacePatchDeletable mockDeletableGrace = mock(EditReplacePatchDeletable.class);
+        Deletable mockDeletable = mock(Deletable.class);
+        GracePeriodConfigurable mockDeletableGrace = mock(GracePeriodConfigurable.class);
         when(mockDeletable.delete()).thenThrow(ex);
-
-        EditReplacePatchDeletable mockERPD = mock(EditReplacePatchDeletable.class);
-        when(mockERPD.withGracePeriod(anyLong())).thenReturn(mockDeletable);
 
         T resource = resource();
         Resource mockResource = mock(resourceType());
@@ -392,10 +389,10 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
     @Test
     @SuppressWarnings("unchecked")
     public void testReconcileDeleteDoesNotThrowWhenDeletionReturnsFalse(VertxTestContext context) {
-        EditReplacePatchDeletable mockDeletable = mock(EditReplacePatchDeletable.class);
-        when(mockDeletable.delete()).thenReturn(Boolean.FALSE);
-        EditReplacePatchDeletable mockDeletableGrace = mock(EditReplacePatchDeletable.class);
-        when(mockDeletableGrace.delete()).thenReturn(Boolean.FALSE);
+        Deletable mockDeletable = mock(Deletable.class);
+        when(mockDeletable.delete()).thenReturn(List.of());
+        GracePeriodConfigurable mockDeletableGrace = mock(GracePeriodConfigurable.class);
+        when(mockDeletableGrace.delete()).thenReturn(List.of());
 
         T resource = resource();
         Resource mockResource = mock(resourceType());
@@ -435,10 +432,10 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
     @Test
     @SuppressWarnings("unchecked")
     public void testReconcileDeleteDoesNotTimeoutWhenResourceIsAlreadyDeleted(VertxTestContext context) {
-        EditReplacePatchDeletable mockDeletable = mock(EditReplacePatchDeletable.class);
-        when(mockDeletable.delete()).thenReturn(Boolean.FALSE);
-        EditReplacePatchDeletable mockDeletableGrace = mock(EditReplacePatchDeletable.class);
-        when(mockDeletableGrace.delete()).thenReturn(Boolean.FALSE);
+        Deletable mockDeletable = mock(Deletable.class);
+        when(mockDeletable.delete()).thenReturn(List.of());
+        GracePeriodConfigurable mockDeletableGrace = mock(GracePeriodConfigurable.class);
+        when(mockDeletableGrace.delete()).thenReturn(List.of());
 
         T resource = resource();
         Resource mockResource = mock(resourceType());

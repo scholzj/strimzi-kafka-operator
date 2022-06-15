@@ -14,7 +14,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.fabric8.kubernetes.client.utils.Serialization;
 import io.fabric8.zjsonpatch.JsonDiff;
 import io.strimzi.kafka.config.model.ConfigModel;
 import io.strimzi.kafka.config.model.Scope;
@@ -28,8 +30,6 @@ import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
 
-import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
-
 /**
  The algorithm:
  *  1. Create a map from the supplied desired String
@@ -40,9 +40,11 @@ import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
  *  3c. If custom entry was removed, delete property
  */
 public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
-
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaBrokerConfigurationDiff.class);
     private static final String PLACE_HOLDER = Pattern.quote("STRIMZI_BROKER_ID");
+
+    // use SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS just for better human readability in the logs
+    public static final ObjectMapper PATCH_MAPPER = Serialization.jsonMapper().copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private final Reconciliation reconciliation;
     private final Collection<AlterConfigOp> diff;
@@ -150,8 +152,8 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
 
         fillPlaceholderValue(desiredMap, Integer.toString(brokerId));
 
-        JsonNode source = patchMapper().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true).valueToTree(currentMap);
-        JsonNode target = patchMapper().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true).valueToTree(desiredMap);
+        JsonNode source = PATCH_MAPPER.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true).valueToTree(currentMap);
+        JsonNode target = PATCH_MAPPER.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true).valueToTree(desiredMap);
         JsonNode jsonDiff = JsonDiff.asJson(source, target);
 
         for (JsonNode d : jsonDiff) {

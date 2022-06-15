@@ -10,6 +10,8 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
+import io.fabric8.kubernetes.client.dsl.base.PatchContext;
+import io.fabric8.kubernetes.client.dsl.base.PatchType;
 import io.strimzi.api.kafka.KafkaTopicList;
 import io.strimzi.api.kafka.model.KafkaTopic;
 import io.strimzi.operator.common.Reconciliation;
@@ -48,7 +50,7 @@ public class K8sImpl implements K8s {
         Promise<KafkaTopic> handler = Promise.promise();
         vertx.executeBlocking(future -> {
             try {
-                KafkaTopic kafkaTopic = operation().inNamespace(namespace).create(topicResource);
+                KafkaTopic kafkaTopic = operation().inNamespace(namespace).resource(topicResource).create();
                 LOGGER.debug("KafkaTopic {} created with version {}->{}",
                         kafkaTopic.getMetadata().getName(),
                         topicResource.getMetadata() != null ? topicResource.getMetadata().getResourceVersion() : null,
@@ -66,7 +68,7 @@ public class K8sImpl implements K8s {
         Promise<KafkaTopic> handler = Promise.promise();
         vertx.executeBlocking(future -> {
             try {
-                KafkaTopic kafkaTopic = operation().inNamespace(namespace).withName(topicResource.getMetadata().getName()).patch(topicResource);
+                KafkaTopic kafkaTopic = operation().inNamespace(namespace).withName(topicResource.getMetadata().getName()).patch(PatchContext.of(PatchType.JSON), topicResource);
                 LOGGER.debug("KafkaTopic {} updated with version {}->{}",
                         kafkaTopic != null && kafkaTopic.getMetadata() != null ? kafkaTopic.getMetadata().getName() : null,
                         topicResource.getMetadata() != null ? topicResource.getMetadata().getResourceVersion() : null,
@@ -132,7 +134,7 @@ public class K8sImpl implements K8s {
             try {
                 try {
                     LOGGER.debug("Creating event {}", event);
-                    client.v1().events().inNamespace(namespace).create(event);
+                    client.v1().events().inNamespace(namespace).resource(event).create();
                 } catch (KubernetesClientException e) {
                     LOGGER.error("Error creating event {}", event, e);
                 }

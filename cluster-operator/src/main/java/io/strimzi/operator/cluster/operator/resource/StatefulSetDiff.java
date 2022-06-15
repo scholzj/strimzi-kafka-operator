@@ -5,8 +5,11 @@
 package io.strimzi.operator.cluster.operator.resource;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
+import io.fabric8.kubernetes.client.utils.Serialization;
 import io.fabric8.zjsonpatch.JsonDiff;
 import io.strimzi.operator.cluster.model.StorageUtils;
 import io.strimzi.operator.common.Annotations;
@@ -17,11 +20,11 @@ import io.strimzi.operator.common.operator.resource.AbstractJsonDiff;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
-
 public class StatefulSetDiff extends AbstractJsonDiff {
-
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(StatefulSetDiff.class.getName());
+
+    // use SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS just for better human readability in the logs
+    public static final ObjectMapper PATCH_MAPPER = Serialization.jsonMapper().copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private static final String SHORTENED_STRIMZI_DOMAIN = Annotations.STRIMZI_DOMAIN.substring(0, Annotations.STRIMZI_DOMAIN.length() - 1);
 
@@ -70,8 +73,8 @@ public class StatefulSetDiff extends AbstractJsonDiff {
     private final boolean changesSpecReplicas;
 
     public StatefulSetDiff(Reconciliation reconciliation, StatefulSet current, StatefulSet desired) {
-        JsonNode source = patchMapper().valueToTree(current);
-        JsonNode target = patchMapper().valueToTree(desired);
+        JsonNode source = PATCH_MAPPER.valueToTree(current);
+        JsonNode target = PATCH_MAPPER.valueToTree(desired);
         JsonNode diff = JsonDiff.asJson(source, target);
         int num = 0;
         boolean changesVolumeClaimTemplate = false;

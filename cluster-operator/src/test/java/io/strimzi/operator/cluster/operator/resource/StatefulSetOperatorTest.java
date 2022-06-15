@@ -12,12 +12,12 @@ import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetList;
+import io.fabric8.kubernetes.client.GracePeriodConfigurable;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.AppsAPIGroupDSL;
 import io.fabric8.kubernetes.client.dsl.Deletable;
-import io.fabric8.kubernetes.client.dsl.EditReplacePatchDeletable;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -37,6 +37,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.exceptions.base.MockitoException;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.BiPredicate;
 
@@ -197,7 +198,7 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
                 .build();
 
         Deletable mockDeletable = mock(Deletable.class);
-        when(mockDeletable.delete()).thenReturn(Boolean.TRUE);
+        when(mockDeletable.delete()).thenReturn(List.of());
 
         Resource mockERPD = mock(resourceType());
         when(mockERPD.withPropagationPolicy(any(DeletionPropagation.class))).thenReturn(mockDeletable);
@@ -206,7 +207,7 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
         Resource mockResource = mock(resourceType());
         when(mockResource.get()).thenReturn(sts1);
         when(mockResource.withPropagationPolicy(eq(DeletionPropagation.ORPHAN))).thenReturn(mockERPD);
-        when(mockResource.create(any(StatefulSet.class))).thenReturn(sts1);
+        when(mockResource.create()).thenReturn(sts1);
 
         PodOperator podOperator = mock(PodOperator.class);
         when(podOperator.waitFor(any(), anyString(), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture());
@@ -249,7 +250,7 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
     @Test
     public void testCascadingDeleteAsync(VertxTestContext context)   {
         Deletable mockDeletable = mock(Deletable.class);
-        when(mockDeletable.delete()).thenReturn(Boolean.TRUE);
+        when(mockDeletable.delete()).thenReturn(List.of());
 
         Resource mockERPD = mock(resourceType());
         when(mockERPD.withPropagationPolicy(any(DeletionPropagation.class))).thenReturn(mockDeletable);
@@ -269,7 +270,6 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
         when(mockCms.inNamespace(matches(NAMESPACE))).thenReturn(mockNameable);
 
         PodOperator podOperator = mock(PodOperator.class);
-        PvcOperator pvcOperator = mock(PvcOperator.class);
 
         KubernetesClient mockClient = mock(KubernetesClient.class);
         mocker(mockClient, mockCms);
@@ -292,7 +292,7 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
     @Test
     public void testNonCascadingDeleteAsync(VertxTestContext context)   {
         Deletable mockDeletable = mock(Deletable.class);
-        when(mockDeletable.delete()).thenReturn(Boolean.TRUE);
+        when(mockDeletable.delete()).thenReturn(List.of());
 
         Resource mockERPD = mock(resourceType());
         when(mockERPD.withPropagationPolicy(any(DeletionPropagation.class))).thenReturn(mockDeletable);
@@ -311,7 +311,6 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
         when(mockCms.inNamespace(matches(NAMESPACE))).thenReturn(mockNameable);
 
         PodOperator podOperator = mock(PodOperator.class);
-        PvcOperator pvcOperator = mock(PvcOperator.class);
 
         KubernetesClient mockClient = mock(KubernetesClient.class);
         mocker(mockClient, mockCms);
@@ -333,8 +332,8 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
 
     @Test
     public void testDeleteAsyncNotDeleted(VertxTestContext context)   {
-        EditReplacePatchDeletable mockERPD = mock(EditReplacePatchDeletable.class);
-        when(mockERPD.delete()).thenReturn(Boolean.FALSE);
+        GracePeriodConfigurable mockERPD = mock(GracePeriodConfigurable.class);
+        when(mockERPD.delete()).thenReturn(List.of());
 
         RollableScalableResource mockRSR = mock(RollableScalableResource.class);
         when(mockRSR.withPropagationPolicy(any(DeletionPropagation.class))).thenReturn(mockERPD);
@@ -346,7 +345,6 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
         when(mockCms.inNamespace(matches(NAMESPACE))).thenReturn(mockNameable);
 
         PodOperator podOperator = mock(PodOperator.class);
-        PvcOperator pvcOperator = mock(PvcOperator.class);
 
         KubernetesClient mockClient = mock(KubernetesClient.class);
         mocker(mockClient, mockCms);
@@ -383,7 +381,6 @@ public class StatefulSetOperatorTest extends ScalableResourceOperatorTest<Kubern
         when(mockCms.inNamespace(matches(NAMESPACE))).thenReturn(mockNameable);
 
         PodOperator podOperator = mock(PodOperator.class);
-        PvcOperator pvcOperator = mock(PvcOperator.class);
 
         KubernetesClient mockClient = mock(KubernetesClient.class);
         mocker(mockClient, mockCms);
