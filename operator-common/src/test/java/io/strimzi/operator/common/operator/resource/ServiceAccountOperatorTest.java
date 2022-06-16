@@ -148,7 +148,7 @@ public class ServiceAccountOperatorTest extends AbstractResourceOperatorTest<Kub
         Resource mockResource = mock(resourceType());
         when(mockResource.get()).thenReturn(current);
         ArgumentCaptor<ServiceAccount> saCaptor = ArgumentCaptor.forClass(ServiceAccount.class);
-        when(mockResource.patch(saCaptor.capture())).thenReturn(desired);
+        when(mockResource.patch(any(), saCaptor.capture())).thenReturn(desired);
         when(mockResource.withPropagationPolicy(DeletionPropagation.FOREGROUND)).thenReturn(mockResource);
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
@@ -165,7 +165,7 @@ public class ServiceAccountOperatorTest extends AbstractResourceOperatorTest<Kub
         Checkpoint async = context.checkpoint();
         op.reconcile(Reconciliation.DUMMY_RECONCILIATION, NAMESPACE, RESOURCE_NAME, desired)
                 .onComplete(context.succeeding(rr -> {
-                    verify(mockResource, times(1)).patch(any(ServiceAccount.class));
+                    verify(mockResource, times(1)).patch(any(), any(ServiceAccount.class));
 
                     assertThat(saCaptor.getValue(), is(notNullValue()));
                     assertThat(saCaptor.getValue().getSecrets().size(), is(2));

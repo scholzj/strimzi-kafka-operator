@@ -70,6 +70,7 @@ public class MockStatefulSetController extends AbstractMockController {
                             client.apps().statefulSets().inNamespace(namespace).resource(new StatefulSetBuilder(sts)
                                     .withStatus(new StatefulSetStatusBuilder()
                                             .withObservedGeneration(sts.getMetadata().getGeneration())
+                                            .withCurrentReplicas(sts.getSpec().getReplicas())
                                             .withReplicas(sts.getSpec().getReplicas())
                                             .withReadyReplicas(sts.getSpec().getReplicas())
                                             .build())

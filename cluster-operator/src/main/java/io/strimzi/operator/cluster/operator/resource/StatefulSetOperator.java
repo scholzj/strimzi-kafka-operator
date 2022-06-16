@@ -209,7 +209,7 @@ public class StatefulSetOperator extends AbstractScalableResourceOperator<Kubern
             // When volume claim templates change, we need to delete the STS and re-create it
             return internalReplace(reconciliation, namespace, name, current, desired, false);
         } else {
-            return super.internalPatch(reconciliation, namespace, name, current, desired, false);
+            return super.internalPatch(reconciliation, namespace, name, current, desired);
         }
 
     }

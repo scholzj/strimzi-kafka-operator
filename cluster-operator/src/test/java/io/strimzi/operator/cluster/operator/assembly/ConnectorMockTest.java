@@ -10,6 +10,8 @@ import io.fabric8.kubernetes.client.CustomResource;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.dsl.Resource;
+import io.fabric8.kubernetes.client.dsl.base.PatchContext;
+import io.fabric8.kubernetes.client.dsl.base.PatchType;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -870,7 +872,7 @@ public class ConnectorMockTest {
      * check the connector is added to the new cluster
      * */
     @Test
-    public void testChangeStrimziClusterLabel(VertxTestContext context) throws InterruptedException {
+    public void testChangeStrimziClusterLabel(VertxTestContext context) {
         String oldConnectClusterName = "cluster1";
         String newConnectClusterName = "cluster2";
         String connectorName = "connector";
@@ -927,7 +929,7 @@ public class ConnectorMockTest {
                 eq(connectorName), any());
 
         // patch connector with new Strimzi cluster label associated with cluster 2
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).withName(connectorName).patch(new KafkaConnectorBuilder()
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).withName(connectorName).patch(PatchContext.of(PatchType.JSON), new KafkaConnectorBuilder()
                 .withNewMetadata()
                     .withName(connectorName)
                     .withNamespace(NAMESPACE)
@@ -1110,16 +1112,17 @@ public class ConnectorMockTest {
         String connectorName = "connector";
 
         // Create KafkaConnect cluster and wait till it's ready
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectBuilder()
-            .withNewMetadata()
-                .withNamespace(NAMESPACE)
-                .withName(connectName)
-                .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
-            .endMetadata()
-            .withNewSpec()
-                .withReplicas(1)
-            .endSpec()
-            .build());
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectBuilder()
+                        .withNewMetadata()
+                            .withNamespace(NAMESPACE)
+                            .withName(connectName)
+                            .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
+                        .endMetadata()
+                        .withNewSpec()
+                            .withReplicas(1)
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectReady(connectName);
 
         // could be triggered twice (creation followed by status update) but waitForConnectReady could be satisfied with single
@@ -1130,17 +1133,18 @@ public class ConnectorMockTest {
             eq(connectorName), any());
 
         // Create KafkaConnector and wait till it's ready
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectorBuilder()
-            .withNewMetadata()
-                .withName(connectorName)
-                .withNamespace(NAMESPACE)
-                .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
-            .endMetadata()
-            .withNewSpec()
-                .withTasksMax(1)
-                .withClassName("Dummy")
-            .endSpec()
-            .build());
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectorBuilder()
+                        .withNewMetadata()
+                            .withName(connectorName)
+                            .withNamespace(NAMESPACE)
+                            .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
+                        .endMetadata()
+                        .withNewSpec()
+                            .withTasksMax(1)
+                            .withClassName("Dummy")
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectorReady(connectorName);
         waitForConnectorState(connectorName, "RUNNING");
 
@@ -1187,16 +1191,17 @@ public class ConnectorMockTest {
             .thenAnswer(invocation -> Future.failedFuture(new ConnectRestException("GET", "/foo", 500, "Internal server error", "Bad stuff happened")));
 
         // Create KafkaConnect cluster and wait till it's ready
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectBuilder()
-            .withNewMetadata()
-                .withNamespace(NAMESPACE)
-                .withName(connectName)
-                .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
-            .endMetadata()
-            .withNewSpec()
-                .withReplicas(1)
-            .endSpec()
-            .build());
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectBuilder()
+                        .withNewMetadata()
+                            .withNamespace(NAMESPACE)
+                            .withName(connectName)
+                            .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
+                        .endMetadata()
+                        .withNewSpec()
+                            .withReplicas(1)
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectReady(connectName);
 
         // could be triggered twice (creation followed by status update) but waitForConnectReady could be satisfied with single
@@ -1207,17 +1212,18 @@ public class ConnectorMockTest {
             eq(connectorName), any());
 
         // Create KafkaConnector and wait till it's ready
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectorBuilder()
-            .withNewMetadata()
-                .withName(connectorName)
-                .withNamespace(NAMESPACE)
-                .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
-            .endMetadata()
-            .withNewSpec()
-                .withTasksMax(1)
-                .withClassName("Dummy")
-            .endSpec()
-            .build());
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectorBuilder()
+                        .withNewMetadata()
+                            .withName(connectorName)
+                            .withNamespace(NAMESPACE)
+                            .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
+                        .endMetadata()
+                        .withNewSpec()
+                            .withTasksMax(1)
+                            .withClassName("Dummy")
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectorReady(connectorName);
         waitForConnectorState(connectorName, "RUNNING");
 
@@ -1262,16 +1268,17 @@ public class ConnectorMockTest {
         String connectorName = "connector";
 
         // Create KafkaConnect cluster and wait till it's ready
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectBuilder()
-            .withNewMetadata()
-                .withNamespace(NAMESPACE)
-                .withName(connectName)
-                .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
-            .endMetadata()
-            .withNewSpec()
-                .withReplicas(1)
-            .endSpec()
-            .build());
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectBuilder()
+                        .withNewMetadata()
+                            .withNamespace(NAMESPACE)
+                            .withName(connectName)
+                            .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
+                        .endMetadata()
+                        .withNewSpec()
+                            .withReplicas(1)
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectReady(connectName);
 
         // could be triggered twice (creation followed by status update) but waitForConnectReady could be satisfied with single
@@ -1282,17 +1289,18 @@ public class ConnectorMockTest {
             eq(connectorName), any());
 
         // Create KafkaConnector and wait till it's ready
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectorBuilder()
-            .withNewMetadata()
-                .withName(connectorName)
-                .withNamespace(NAMESPACE)
-                .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
-            .endMetadata()
-            .withNewSpec()
-                .withTasksMax(1)
-                .withClassName("Dummy")
-            .endSpec()
-            .build());
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectorBuilder()
+                        .withNewMetadata()
+                            .withName(connectorName)
+                            .withNamespace(NAMESPACE)
+                            .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
+                        .endMetadata()
+                        .withNewSpec()
+                            .withTasksMax(1)
+                            .withClassName("Dummy")
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectorReady(connectorName);
         waitForConnectorState(connectorName, "RUNNING");
 
@@ -1338,16 +1346,17 @@ public class ConnectorMockTest {
             .thenAnswer(invocation -> Future.failedFuture(new ConnectRestException("GET", "/foo", 500, "Internal server error", "Bad stuff happened")));
 
         // Create KafkaConnect cluster and wait till it's ready
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectBuilder()
-            .withNewMetadata()
-                .withNamespace(NAMESPACE)
-                .withName(connectName)
-                .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
-            .endMetadata()
-            .withNewSpec()
-                .withReplicas(1)
-            .endSpec()
-            .build());
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectBuilder()
+                        .withNewMetadata()
+                            .withNamespace(NAMESPACE)
+                            .withName(connectName)
+                            .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
+                        .endMetadata()
+                        .withNewSpec()
+                            .withReplicas(1)
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectReady(connectName);
 
         // could be triggered twice (creation followed by status update) but waitForConnectReady could be satisfied with single
@@ -1358,17 +1367,18 @@ public class ConnectorMockTest {
             eq(connectorName), any());
 
         // Create KafkaConnector and wait till it's ready
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectorBuilder()
-            .withNewMetadata()
-                .withName(connectorName)
-                .withNamespace(NAMESPACE)
-                .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
-            .endMetadata()
-            .withNewSpec()
-                .withTasksMax(1)
-                .withClassName("Dummy")
-            .endSpec()
-            .build());
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectorBuilder()
+                        .withNewMetadata()
+                            .withName(connectorName)
+                            .withNamespace(NAMESPACE)
+                            .addToLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName)
+                        .endMetadata()
+                        .withNewSpec()
+                            .withTasksMax(1)
+                            .withClassName("Dummy")
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectorReady(connectorName);
         waitForConnectorState(connectorName, "RUNNING");
 
@@ -1546,16 +1556,17 @@ public class ConnectorMockTest {
         String connectorName = "connector";
 
         // Create KafkaConnect cluster and wait till it's ready
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectBuilder()
-                .withNewMetadata()
-                    .withNamespace(NAMESPACE)
-                    .withName(connectName)
-                    .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
-                .endMetadata()
-                .withNewSpec()
-                    .withReplicas(1)
-                .endSpec()
-                .build());
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectBuilder()
+                        .withNewMetadata()
+                            .withNamespace(NAMESPACE)
+                            .withName(connectName)
+                            .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
+                        .endMetadata()
+                        .withNewSpec()
+                            .withReplicas(1)
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectReady(connectName);
 
         String yaml = "apiVersion: kafka.strimzi.io/v1beta2\n" +
@@ -1574,7 +1585,7 @@ public class ConnectorMockTest {
                 "    topics: timer-topic";
 
         KafkaConnector kcr = TestUtils.fromYamlString(yaml, KafkaConnector.class);
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(kcr);
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(kcr).create();
 
         waitForConnectorReady(connectorName);
         waitForConnectorState(connectorName, "RUNNING");
@@ -1587,16 +1598,17 @@ public class ConnectorMockTest {
         String connectorName = "connector";
 
         // Create KafkaConnect cluster and wait till it's ready
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(new KafkaConnectBuilder()
-                .withNewMetadata()
-                .withNamespace(NAMESPACE)
-                .withName(connectName)
-                .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
-                .endMetadata()
-                .withNewSpec()
-                .withReplicas(1)
-                .endSpec()
-                .build());
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(new KafkaConnectBuilder()
+                        .withNewMetadata()
+                            .withNamespace(NAMESPACE)
+                            .withName(connectName)
+                            .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
+                        .endMetadata()
+                        .withNewSpec()
+                            .withReplicas(1)
+                        .endSpec()
+                        .build())
+                .create();
         waitForConnectReady(connectName);
 
         // paused
@@ -1646,7 +1658,7 @@ public class ConnectorMockTest {
                     .withReplicas(1)
                 .endSpec()
                 .build();
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect);
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect).create();
         waitForConnectReady(connectName);
     }
 
@@ -1674,8 +1686,8 @@ public class ConnectorMockTest {
                 .endMetadata()
                 .build();
 
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect1);
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect2);
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect1).create();
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect2).create();
         waitForConnectReady(connectName1);
         waitForConnectReady(connectName2);
 
@@ -1695,8 +1707,8 @@ public class ConnectorMockTest {
                 .endMetadata()
                 .build();
 
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector1);
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector2);
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector1).create();
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector2).create();
 
         waitForConnectorPaused(connectorName1);
         waitForConnectorPaused(connectorName2);
@@ -1716,7 +1728,7 @@ public class ConnectorMockTest {
             Gauge resourcesPaused = meterRegistry.get("strimzi.resources.paused").tags(tags).gauge();
             assertThat(resourcesPaused.value(), is(2.0));
 
-            Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).delete(connector1);
+            Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector1).delete();
             waitForConnectorDeleted(connectorName1);
 
             kafkaConnectOperator.reconcileAll("test", NAMESPACE, ignored -> reconciled2.complete());
@@ -1745,7 +1757,7 @@ public class ConnectorMockTest {
                     .withReplicas(1)
                 .endSpec()
                 .build();
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect);
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect).create();
         waitForConnectPaused(connectName);
 
         KafkaConnector connector1 = defaultKafkaConnectorBuilder()
@@ -1763,8 +1775,8 @@ public class ConnectorMockTest {
                 .endMetadata()
                 .build();
 
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector1);
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector2);
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector1).create();
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector2).create();
 
         waitForConnectorPaused(connectorName1);
         waitForConnectorReady(connectorName2);
@@ -1803,7 +1815,7 @@ public class ConnectorMockTest {
                 .endSpec()
                 .build();
 
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect);
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect).create();
         waitForConnectReady(connectName);
 
         KafkaConnector connector = defaultKafkaConnectorBuilder()
@@ -1851,7 +1863,7 @@ public class ConnectorMockTest {
                 .endSpec()
                 .build();
 
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect);
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect).create();
         waitForConnectReady(connectName);
 
         KafkaConnector connector = defaultKafkaConnectorBuilder()
@@ -1903,7 +1915,7 @@ public class ConnectorMockTest {
                 .endSpec()
                 .build();
 
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect);
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect).create();
         waitForConnectReady(connectName);
 
         KafkaConnector connector1 = defaultKafkaConnectorBuilder()
@@ -1916,8 +1928,8 @@ public class ConnectorMockTest {
 
         KafkaConnector connector2 = new KafkaConnectorBuilder(connector1).editMetadata().withName(connectorName2).endMetadata().build();
 
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector1);
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector2);
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector1).create();
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector2).create();
 
         waitForConnectorPaused(connectorName1);
         waitForConnectorPaused(connectorName2);
@@ -1937,7 +1949,7 @@ public class ConnectorMockTest {
             Gauge resourcesPaused = meterRegistry.get("strimzi.resources.paused").tags(tags).gauge();
             assertThat(resourcesPaused.value(), is(2.0));
 
-            Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).delete(kafkaConnect);
+            Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect).delete();
             waitForConnectDeleted(connectName);
 
             kafkaConnectOperator.reconcileAll("test", NAMESPACE, ignored -> reconciled2.complete());
@@ -1977,8 +1989,8 @@ public class ConnectorMockTest {
                 .endMetadata()
                 .build();
 
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect1);
-        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).create(kafkaConnect2);
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect1).create();
+        Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).resource(kafkaConnect2).create();
         waitForConnectReady(connectName1);
         waitForConnectReady(connectName2);
 
@@ -1998,8 +2010,8 @@ public class ConnectorMockTest {
                 .endMetadata()
                 .build();
 
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector1);
-        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).create(connector2);
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector1).create();
+        Crds.kafkaConnectorOperation(client).inNamespace(NAMESPACE).resource(connector2).create();
 
         waitForConnectorPaused(connectorName1);
         waitForConnectorPaused(connectorName2);

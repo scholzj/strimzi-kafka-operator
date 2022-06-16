@@ -99,10 +99,9 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
     public void testCreateWhenExistsWithChangeIsAPatch(VertxTestContext context, boolean cascade) {
         T resource = resource();
         Resource mockResource = mock(resourceType());
-        HasMetadata hasMetadata = mock(HasMetadata.class);
         when(mockResource.get()).thenReturn(resource);
 
-        when(mockResource.patch(any(), (T) any())).thenReturn(hasMetadata);
+        when(mockResource.patch(any(), (T) any())).thenReturn(resource);
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(resource.getMetadata().getName()))).thenReturn(mockResource);
@@ -192,11 +191,13 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
     public void testSuccessfulCreation(VertxTestContext context) {
         T resource = resource();
         Resource mockResource = mock(resourceType());
+
         when(mockResource.get()).thenReturn(null);
         when(mockResource.create()).thenReturn(resource);
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(resource.getMetadata().getName()))).thenReturn(mockResource);
+        when(mockNameable.resource(eq(resource))).thenReturn(mockResource);
 
         MixedOperation mockCms = mock(MixedOperation.class);
         when(mockCms.inNamespace(matches(resource.getMetadata().getNamespace()))).thenReturn(mockNameable);
@@ -224,6 +225,7 @@ public abstract class AbstractResourceOperatorTest<C extends KubernetesClient, T
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(resource.getMetadata().getName()))).thenReturn(mockResource);
+        when(mockNameable.resource(eq(resource))).thenReturn(mockResource);
 
         MixedOperation mockCms = mock(MixedOperation.class);
         when(mockCms.inNamespace(matches(resource.getMetadata().getNamespace()))).thenReturn(mockNameable);

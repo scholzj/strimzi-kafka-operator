@@ -238,10 +238,6 @@ public abstract class AbstractResourceOperator<C extends KubernetesClient,
      * and completes the given future accordingly.
      */
     protected Future<ReconcileResult<T>> internalPatch(Reconciliation reconciliation, String namespace, String name, T current, T desired) {
-        return internalPatch(reconciliation, namespace, name, current, desired, true);
-    }
-
-    protected Future<ReconcileResult<T>> internalPatch(Reconciliation reconciliation, String namespace, String name, T current, T desired, boolean cascading) {
         if (needsPatching(reconciliation, name, current, desired))  {
             try {
                 T result = operation().inNamespace(namespace).withName(name).patch(PatchContext.of(PatchType.JSON), desired);

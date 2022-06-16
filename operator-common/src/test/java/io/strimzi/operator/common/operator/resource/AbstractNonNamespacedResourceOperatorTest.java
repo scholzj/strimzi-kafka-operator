@@ -31,6 +31,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.matches;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -194,6 +195,7 @@ public abstract class AbstractNonNamespacedResourceOperatorTest<C extends Kubern
 
         MixedOperation mockCms = mock(MixedOperation.class);
         when(mockCms.withName(matches(RESOURCE_NAME))).thenReturn(mockResource);
+        when(mockCms.resource(eq(resource))).thenReturn(mockResource);
 
         C mockClient = mock(clientType());
         mocker(mockClient, mockCms);
@@ -216,13 +218,14 @@ public abstract class AbstractNonNamespacedResourceOperatorTest<C extends Kubern
 
         Resource mockResource = mock(resourceType());
         when(mockResource.get()).thenReturn(null);
+        when(mockResource.create()).thenThrow(ex);
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(resource.getMetadata().getName()))).thenReturn(mockResource);
 
         MixedOperation mockCms = mock(MixedOperation.class);
         when(mockCms.withName(matches(RESOURCE_NAME))).thenReturn(mockResource);
-        when(mockResource.create()).thenThrow(ex);
+        when(mockCms.resource(eq(resource))).thenReturn(mockResource);
 
         C mockClient = mock(clientType());
         mocker(mockClient, mockCms);
