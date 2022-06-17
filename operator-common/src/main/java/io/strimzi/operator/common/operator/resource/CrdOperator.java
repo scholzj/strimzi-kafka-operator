@@ -107,8 +107,7 @@ public class CrdOperator<C extends KubernetesClient,
             String name = resource.getMetadata().getName();
 
             try {
-                // Changed to patchStatus() due to https://github.com/fabric8io/kubernetes-client/issues/4216
-                T result = operation().inNamespace(namespace).resource(resource).patchStatus();
+                T result = operation().inNamespace(namespace).resource(resource).replaceStatus();
                 LOGGER.infoCr(reconciliation, "Status of {} {} in namespace {} has been updated", resourceKind, name, namespace);
                 future.complete(result);
             } catch (Exception e) {
