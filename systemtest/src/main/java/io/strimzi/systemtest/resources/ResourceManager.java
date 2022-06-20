@@ -258,9 +258,14 @@ public class ResourceManager {
             LOGGER.info("Delete of {} {} in namespace {}",
                 resource.getKind(), resource.getMetadata().getName(), resource.getMetadata().getNamespace() == null ? "(not set)" : resource.getMetadata().getNamespace());
 
-            type.delete(resource);
-            assertTrue(waitResourceCondition(resource, ResourceCondition.deletion()),
-                String.format("Timed out deleting %s %s in namespace %s", resource.getKind(), resource.getMetadata().getName(), resource.getMetadata().getNamespace()));
+            try {
+                type.delete(resource);
+                assertTrue(waitResourceCondition(resource, ResourceCondition.deletion()),
+                        String.format("Timed out deleting %s %s in namespace %s", resource.getKind(), resource.getMetadata().getName(), resource.getMetadata().getNamespace()));
+            } catch (Exception e)   {
+                LOGGER.error("Failed to delete {} {} in namespace {}", resource.getKind(), resource.getMetadata().getName(), resource.getMetadata().getNamespace() == null ? "(not set)" : resource.getMetadata().getNamespace(), e);
+            }
+
         }
     }
 
