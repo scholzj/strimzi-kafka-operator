@@ -937,7 +937,7 @@ public class ConnectorMockTest {
                 .endMetadata()
                 .withNewSpec()
                     .withTasksMax(1)
-                    .withClassName("Dummy")
+                    .withClassName("Dummy2") // <= Class name change is needed to trigger generation change for the wait to work
                 .endSpec()
                 .build());
         waitForConnectorReady(connectorName);

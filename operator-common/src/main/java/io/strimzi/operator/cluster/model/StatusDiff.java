@@ -5,9 +5,6 @@
 package io.strimzi.operator.cluster.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import io.fabric8.kubernetes.client.utils.Serialization;
 import io.fabric8.zjsonpatch.JsonDiff;
 import io.strimzi.api.kafka.model.status.Status;
 import io.strimzi.operator.common.ReconciliationLogger;
@@ -17,9 +14,6 @@ import java.util.regex.Pattern;
 
 public class StatusDiff extends AbstractJsonDiff {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(StatusDiff.class.getName());
-
-    // use SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS just for better human readability in the logs
-    public static final ObjectMapper PATCH_MAPPER = Serialization.jsonMapper().copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private static final Pattern IGNORABLE_PATHS = Pattern.compile(
             "^(/conditions/[0-9]+/lastTransitionTime)$");

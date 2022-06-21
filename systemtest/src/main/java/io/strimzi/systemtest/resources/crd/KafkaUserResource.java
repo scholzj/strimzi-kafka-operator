@@ -31,7 +31,7 @@ public class KafkaUserResource implements ResourceType<KafkaUser> {
     }
     @Override
     public void create(KafkaUser resource) {
-        kafkaUserClient().inNamespace(resource.getMetadata().getNamespace()).createOrReplace(resource);
+        kafkaUserClient().inNamespace(resource.getMetadata().getNamespace()).resource(resource).createOrReplace();
     }
 
     @Override

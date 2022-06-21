@@ -5,9 +5,6 @@
 package io.strimzi.operator.cluster.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import io.fabric8.kubernetes.client.utils.Serialization;
 import io.fabric8.zjsonpatch.JsonDiff;
 import io.strimzi.api.kafka.model.storage.JbodStorage;
 import io.strimzi.api.kafka.model.storage.PersistentClaimStorage;
@@ -32,9 +29,6 @@ import static java.util.Objects.isNull;
  */
 public class StorageDiff extends AbstractJsonDiff {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(StorageDiff.class.getName());
-
-    // use SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS just for better human readability in the logs
-    public static final ObjectMapper PATCH_MAPPER = Serialization.jsonMapper().copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private static final Pattern IGNORABLE_PATHS = Pattern.compile(
             "^(/deleteClaim|/)$");

@@ -4,8 +4,6 @@
  */
 package io.strimzi.systemtest.resources;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.Pod;
@@ -298,7 +296,7 @@ public class ResourceManager {
     }
 
     /**
-     * Auxiliary method for copying {@link Constants.TEST_SUITE_NAME_LABEL} and {@link Constants.TEST_CASE_NAME_LABEL} labels
+     * Auxiliary method for copying {@link Constants#TEST_SUITE_NAME_LABEL} and {@link Constants#TEST_CASE_NAME_LABEL} labels
      * into PodTemplate ensuring that in case of failure {@link io.strimzi.systemtest.logs.LogCollector} will collect all
      * related Pods, which corespondents to such Controller (i.e., Job, Deployment)
      *
@@ -346,20 +344,18 @@ public class ResourceManager {
         }
     }
 
-    private static final ObjectMapper MAPPER = new ObjectMapper(new YAMLFactory());
-
     public static <T extends CustomResource, L extends CustomResourceList<T>> void replaceCrdResource(Class<T> crdClass, Class<L> listClass, String resourceName, Consumer<T> editor, String namespace) {
         Resource<T> namedResource = Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(namespace).withName(resourceName);
         T resource = namedResource.get();
         editor.accept(resource);
-        namedResource.replace(resource);
+        namedResource.replace();
     }
 
     public static <T extends CustomResource, L extends CustomResourceList<T>> void replaceCrdResource(Class<T> crdClass, Class<L> listClass, String resourceName, Consumer<T> editor) {
         Resource<T> namedResource = Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(kubeClient().getNamespace()).withName(resourceName);
         T resource = namedResource.get();
         editor.accept(resource);
-        namedResource.replace(resource);
+        namedResource.replace();
     }
 
     public void deleteResources(ExtensionContext testContext) throws Exception {

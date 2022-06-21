@@ -30,7 +30,7 @@ public class KafkaBridgeResource implements ResourceType<KafkaBridge> {
     }
     @Override
     public void create(KafkaBridge resource) {
-        kafkaBridgeClient().inNamespace(resource.getMetadata().getNamespace()).createOrReplace(resource);
+        kafkaBridgeClient().inNamespace(resource.getMetadata().getNamespace()).resource(resource).createOrReplace();
     }
     @Override
     public void delete(KafkaBridge resource) {

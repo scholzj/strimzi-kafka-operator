@@ -44,7 +44,7 @@ public class DeploymentResource implements ResourceType<Deployment> {
         Resource<Deployment> currentDepResource = ResourceManager.kubeClient().getClient().resources(Deployment.class, DeploymentList.class).inNamespace(namespaceName).withName(deploymentName);
         Deployment currentDep = currentDepResource.get();
         editor.accept(currentDep);
-        currentDepResource.replace(currentDep);
+        currentDepResource.replace();
     }
 
     public static Deployment getDeploymentFromYaml(String yamlPath) {

@@ -302,7 +302,7 @@ public class StrimziPodSetController implements Runnable {
                             .withStatus(desiredStatus)
                             .build();
 
-                    strimziPodSetOperator.client().inNamespace(reconciliation.namespace()).resource(updatedPodSet).patchStatus();
+                    strimziPodSetOperator.client().inNamespace(reconciliation.namespace()).resource(updatedPodSet).replaceStatus();
                 }
             } catch (KubernetesClientException e)   {
                 if (e.getCode() == 409) {
