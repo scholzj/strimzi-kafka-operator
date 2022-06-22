@@ -345,17 +345,15 @@ public class ResourceManager {
     }
 
     public static <T extends CustomResource, L extends CustomResourceList<T>> void replaceCrdResource(Class<T> crdClass, Class<L> listClass, String resourceName, Consumer<T> editor, String namespace) {
-        Resource<T> namedResource = Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(namespace).withName(resourceName);
-        T resource = namedResource.get();
-        editor.accept(resource);
-        namedResource.replace();
+        T toBeReplaced = Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(namespace).withName(resourceName).get();
+        editor.accept(toBeReplaced);
+        Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(namespace).resource(toBeReplaced).replace();
     }
 
     public static <T extends CustomResource, L extends CustomResourceList<T>> void replaceCrdResource(Class<T> crdClass, Class<L> listClass, String resourceName, Consumer<T> editor) {
-        Resource<T> namedResource = Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(kubeClient().getNamespace()).withName(resourceName);
-        T resource = namedResource.get();
-        editor.accept(resource);
-        namedResource.replace();
+        T toBeReplaced = Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(kubeClient().getNamespace()).withName(resourceName).get();
+        editor.accept(toBeReplaced);
+        Crds.operation(kubeClient().getClient(), crdClass, listClass).inNamespace(kubeClient().getNamespace()).resource(toBeReplaced).replace();
     }
 
     public void deleteResources(ExtensionContext testContext) throws Exception {
