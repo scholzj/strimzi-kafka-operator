@@ -89,9 +89,9 @@
         <jacoco.version>0.7.9</jacoco.version>
         <maven-jar-plugin.version>3.1.0</maven-jar-plugin.version>
         <sundrio.version>0.91.1</sundrio.version>
-        <fabric8.kubernetes-client.version>6.0-SNAPSHOT</fabric8.kubernetes-client.version>
-        <fabric8.openshift-client.version>6.0-SNAPSHOT</fabric8.openshift-client.version>
-        <fabric8.kubernetes-model.version>6.0-SNAPSHOT</fabric8.kubernetes-model.version>
+        <fabric8.kubernetes-client.version>6.0.0-RC1</fabric8.kubernetes-client.version>
+        <fabric8.openshift-client.version>6.0.0-RC1</fabric8.openshift-client.version>
+        <fabric8.kubernetes-model.version>6.0.0-RC1</fabric8.kubernetes-model.version>
         <fabric8.zjsonpatch.version>0.3.0</fabric8.zjsonpatch.version>
         <vertx.version>4.2.4</vertx.version>
         <vertx-junit5.version>4.2.4</vertx-junit5.version>
@@ -147,13 +147,6 @@
             <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
         </repository>
     </distributionManagement>
-
-    <repositories>
-        <repository>
-            <id>sonatype-snapshots</id>
-            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
-        </repository>
-    </repositories>
 
     <modules>
         <module>kafka-agent</module>
