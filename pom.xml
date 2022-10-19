@@ -105,7 +105,7 @@
         <fabric8.kubernetes-model.version>6.0.0</fabric8.kubernetes-model.version>
         <fabric8.zjsonpatch.version>0.3.0</fabric8.zjsonpatch.version>
         <fasterxml.jackson-core.version>2.12.6</fasterxml.jackson-core.version>
-        <fasterxml.jackson-databind.version>2.12.6.1</fasterxml.jackson-databind.version>
+        <fasterxml.jackson-databind.version>2.13.4.1</fasterxml.jackson-databind.version>
         <fasterxml.jackson-dataformat.version>2.12.6</fasterxml.jackson-dataformat.version>
         <fasterxml.jackson-annotations.version>2.12.6</fasterxml.jackson-annotations.version>
         <vertx.version>4.2.4</vertx.version>
