@@ -38,7 +38,6 @@ import io.fabric8.kubernetes.api.model.rbac.Subject;
 import io.fabric8.kubernetes.api.model.rbac.SubjectBuilder;
 import io.fabric8.openshift.api.model.Route;
 import io.fabric8.openshift.api.model.RouteBuilder;
-import io.strimzi.api.kafka.model.common.CertAndKeySecretSource;
 import io.strimzi.api.kafka.model.common.Condition;
 import io.strimzi.api.kafka.model.common.Rack;
 import io.strimzi.api.kafka.model.common.template.ContainerTemplate;
@@ -1348,24 +1347,24 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
 
             // Listener specific volumes related to their specific authentication or encryption settings
             for (GenericKafkaListener listener : listeners) {
-                if (listener.isTls()
-                        && listener.getConfiguration() != null
-                        && listener.getConfiguration().getBrokerCertChainAndKey() != null) {
-                    CertAndKeySecretSource secretSource = listener.getConfiguration().getBrokerCertChainAndKey();
-
-                    Map<String, String> items = new HashMap<>(2);
-                    items.put(secretSource.getKey(), "tls.key");
-                    items.put(secretSource.getCertificate(), "tls.crt");
-
-                    volumeList.add(
-                            VolumeUtils.createSecretVolume(
-                                    "custom-" + ListenersUtils.identifier(listener) + "-certs",
-                                    secretSource.getSecretName(),
-                                    items,
-                                    isOpenShift
-                            )
-                    );
-                }
+                //if (listener.isTls()
+                //        && listener.getConfiguration() != null
+                //        && listener.getConfiguration().getBrokerCertChainAndKey() != null) {
+                //    CertAndKeySecretSource secretSource = listener.getConfiguration().getBrokerCertChainAndKey();
+                //
+                //    Map<String, String> items = new HashMap<>(2);
+                //    items.put(secretSource.getKey(), "tls.key");
+                //    items.put(secretSource.getCertificate(), "tls.crt");
+                //
+                //    volumeList.add(
+                //            VolumeUtils.createSecretVolume(
+                //                    "custom-" + ListenersUtils.identifier(listener) + "-certs",
+                //                    secretSource.getSecretName(),
+                //                    items,
+                //                    isOpenShift
+                //            )
+                //    );
+                //}
 
                 if (ListenersUtils.isListenerWithOAuth(listener)) {
                     KafkaListenerAuthenticationOAuth oauth = (KafkaListenerAuthenticationOAuth) listener.getAuth();
@@ -1441,11 +1440,11 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
             for (GenericKafkaListener listener : listeners) {
                 String identifier = ListenersUtils.identifier(listener);
 
-                if (listener.isTls()
-                        && listener.getConfiguration() != null
-                        && listener.getConfiguration().getBrokerCertChainAndKey() != null)  {
-                    volumeMountList.add(VolumeUtils.createVolumeMount("custom-" + identifier + "-certs", "/opt/kafka/certificates/custom-" + identifier + "-certs"));
-                }
+                //if (listener.isTls()
+                //        && listener.getConfiguration() != null
+                //        && listener.getConfiguration().getBrokerCertChainAndKey() != null)  {
+                //    volumeMountList.add(VolumeUtils.createVolumeMount("custom-" + identifier + "-certs", "/opt/kafka/certificates/custom-" + identifier + "-certs"));
+                //}
 
                 if (ListenersUtils.isListenerWithOAuth(listener))   {
                     KafkaListenerAuthenticationOAuth oauth = (KafkaListenerAuthenticationOAuth) listener.getAuth();

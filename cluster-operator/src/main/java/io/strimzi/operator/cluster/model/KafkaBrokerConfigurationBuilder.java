@@ -445,13 +445,14 @@ public class KafkaBrokerConfigurationBuilder {
         String listenerNameInProperty = listenerName.toLowerCase(Locale.ENGLISH);
 
         if (serverCertificate != null)  {
-            writer.println(String.format("listener.name.%s.ssl.keystore.location=/tmp/kafka/custom-%s.keystore.p12", listenerNameInProperty, listenerNameInProperty));
+            writer.println(String.format("listener.name.%s.ssl.keystore.key=${strimzicerts:%s:%s}", listenerNameInProperty, serverCertificate.getSecretName(), serverCertificate.getKey()));
+            writer.println(String.format("listener.name.%s.ssl.keystore.certificate.chain=${strimzicerts:%s:%s}", listenerNameInProperty, serverCertificate.getSecretName(), serverCertificate.getCertificate()));
+            writer.println(String.format("listener.name.%s.ssl.keystore.type=PEM", listenerNameInProperty));
         } else {
             writer.println(String.format("listener.name.%s.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12", listenerNameInProperty));
+            writer.println(String.format("listener.name.%s.ssl.keystore.password=%s", listenerNameInProperty, PLACEHOLDER_CERT_STORE_PASSWORD));
+            writer.println(String.format("listener.name.%s.ssl.keystore.type=PKCS12", listenerNameInProperty));
         }
-
-        writer.println(String.format("listener.name.%s.ssl.keystore.password=%s", listenerNameInProperty, PLACEHOLDER_CERT_STORE_PASSWORD));
-        writer.println(String.format("listener.name.%s.ssl.keystore.type=PKCS12", listenerNameInProperty));
 
         writer.println();
     }

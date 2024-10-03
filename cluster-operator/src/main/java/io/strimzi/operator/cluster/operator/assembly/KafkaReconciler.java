@@ -821,9 +821,9 @@ public class KafkaReconciler {
         podAnnotations.put(ANNO_STRIMZI_SERVER_CERT_HASH, kafkaServerCertificateHash.get(node.nodeId())); // Annotation of broker certificate hash
 
         // Annotations with custom cert thumbprints to help with rolling updates when they change
-        if (node.broker() && !listenerReconciliationResults.customListenerCertificateThumbprints.isEmpty()) {
-            podAnnotations.put(KafkaCluster.ANNO_STRIMZI_CUSTOM_LISTENER_CERT_THUMBPRINTS, listenerReconciliationResults.customListenerCertificateThumbprints.toString());
-        }
+        //if (node.broker() && !listenerReconciliationResults.customListenerCertificateThumbprints.isEmpty()) {
+        //    podAnnotations.put(KafkaCluster.ANNO_STRIMZI_CUSTOM_LISTENER_CERT_THUMBPRINTS, listenerReconciliationResults.customListenerCertificateThumbprints.toString());
+        //}
 
         return podAnnotations;
     }

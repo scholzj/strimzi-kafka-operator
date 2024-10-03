@@ -49,20 +49,30 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
      */
     public static final Pattern IGNORABLE_PROPERTIES = Pattern.compile(
             "^(broker\\.id"
-            + "|.*-[0-9]{2,5}\\.ssl\\.keystore\\.location"
             + "|.*-[0-9]{2,5}\\.ssl\\.keystore\\.password"
-            + "|.*-[0-9]{2,5}\\.ssl\\.keystore\\.type"
-            + "|.*-[0-9]{2,5}\\.ssl\\.truststore\\.location"
             + "|.*-[0-9]{2,5}\\.ssl\\.truststore\\.password"
-            + "|.*-[0-9]{2,5}\\.ssl\\.truststore\\.type"
-            + "|.*-[0-9]{2,5}\\.ssl\\.client\\.auth"
-            + "|.*-[0-9]{2,5}\\.scram-sha-512\\.sasl\\.jaas\\.config"
-            + "|.*-[0-9]{2,5}\\.sasl\\.enabled\\.mechanisms"
             + "|advertised\\.listeners"
-            + "|zookeeper\\.connect"
-            + "|zookeeper\\.ssl\\..*"
-            + "|zookeeper\\.clientCnxnSocket"
+            //+ "|zookeeper\\.connect"
+            //+ "|zookeeper\\.ssl\\..*"
+            //+ "|zookeeper\\.clientCnxnSocket"
+            + "|config\\.providers"
+            + "|config\\.providers\\..*"
             + "|broker\\.rack)$");
+            //"^(broker\\.id"
+            //+ "|.*-[0-9]{2,5}\\.ssl\\.keystore\\.location"
+            //+ "|.*-[0-9]{2,5}\\.ssl\\.keystore\\.password"
+            //+ "|.*-[0-9]{2,5}\\.ssl\\.keystore\\.type"
+            //+ "|.*-[0-9]{2,5}\\.ssl\\.truststore\\.location"
+            //+ "|.*-[0-9]{2,5}\\.ssl\\.truststore\\.password"
+            //+ "|.*-[0-9]{2,5}\\.ssl\\.truststore\\.type"
+            //+ "|.*-[0-9]{2,5}\\.ssl\\.client\\.auth"
+            //+ "|.*-[0-9]{2,5}\\.scram-sha-512\\.sasl\\.jaas\\.config"
+            //+ "|.*-[0-9]{2,5}\\.sasl\\.enabled\\.mechanisms"
+            //+ "|advertised\\.listeners"
+            //+ "|zookeeper\\.connect"
+            //+ "|zookeeper\\.ssl\\..*"
+            //+ "|zookeeper\\.clientCnxnSocket"
+            //+ "|broker\\.rack)$");
 
     /**
      * KRaft controller configuration options are skipped if it is not combined node
@@ -103,7 +113,13 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
      * @return true if the entry is READ_ONLY
      */
     private boolean isEntryReadOnly(ConfigEntry entry) {
-        return configModel.get(entry.name()).getScope().equals(Scope.READ_ONLY);
+        String entryName = entry.name();
+
+        if (entryName.startsWith("listener.name.external-9094.")) {
+            entryName = entryName.substring("listener.name.external-9094.".length());
+        }
+
+        return configModel.get(entryName).getScope().equals(Scope.READ_ONLY);
     }
 
     /**
@@ -191,9 +207,9 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
                 LOGGER.traceCr(reconciliation, "Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
                 LOGGER.traceCr(reconciliation, "Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
             } else {
-                LOGGER.debugCr(reconciliation, "Kafka Broker {} Config Differs : {}", brokerNodeRef.nodeId(), d);
-                LOGGER.debugCr(reconciliation, "Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
-                LOGGER.debugCr(reconciliation, "Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
+                LOGGER.infoCr(reconciliation, "Kafka Broker {} Config Differs : {}", brokerNodeRef.nodeId(), d);
+                LOGGER.infoCr(reconciliation, "Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
+                LOGGER.infoCr(reconciliation, "Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
             }
         }
 
@@ -216,7 +232,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractJsonDiff {
     private void removeProperty(Map<String, ConfigModel> configModel, Collection<AlterConfigOp> updatedCE, String pathValueWithoutSlash, ConfigEntry entry, boolean nodeIsController) {
         if (KafkaConfiguration.isCustomConfigurationOption(entry.name(), configModel)) {
             // we are deleting custom option
-            LOGGER.traceCr(reconciliation, "removing custom property {}", entry.name());
+            LOGGER.infoCr(reconciliation, "removing custom property {}", entry.name());
         } else if (entry.isDefault()) {
             // entry is in current, is not in desired, is default -> it uses default value, skip.
             // Some default properties do not have set ConfigEntry.ConfigSource.DEFAULT_CONFIG and thus

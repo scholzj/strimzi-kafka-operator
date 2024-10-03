@@ -293,7 +293,7 @@ public class KafkaConfiguration extends AbstractConfiguration {
         }
         return result;
     }
-
+    
     /**
      * Return the config properties with their values in this KafkaConfiguration which are known to be relevant for the
      * Kafka controller nodes.
