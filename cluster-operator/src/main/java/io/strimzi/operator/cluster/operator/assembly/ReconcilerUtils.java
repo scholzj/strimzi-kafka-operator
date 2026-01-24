@@ -19,6 +19,7 @@ import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthenticatio
 import io.strimzi.api.kafka.model.kafka.KafkaResources;
 import io.strimzi.api.kafka.model.podset.StrimziPodSet;
 import io.strimzi.certs.CertAndKey;
+import io.strimzi.operator.cluster.model.InPlacePodResizingUtils;
 import io.strimzi.operator.cluster.model.NodeRef;
 import io.strimzi.operator.cluster.model.PodRevision;
 import io.strimzi.operator.cluster.model.PodSetUtils;
@@ -185,6 +186,7 @@ public class ReconcilerUtils {
      *
      * @return empty RestartReasons if restart is not needed, non-empty RestartReasons otherwise
      */
+    @SuppressWarnings("NPathComplexity")
     public static RestartReasons reasonsToRestartPod(Reconciliation reconciliation, StrimziPodSet podSet, Pod pod, Set<String> fsResizingRestartRequest, boolean nodeCertsChange, Ca... cas) {
         RestartReasons restartReasons = RestartReasons.empty();
 
@@ -194,8 +196,35 @@ public class ReconcilerUtils {
             return restartReasons;
         }
 
-        if (PodRevision.hasChanged(pod, podSet)) {
+        if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_REVISION_ANNOTATION)) {
             restartReasons.add(RestartReason.POD_HAS_OLD_REVISION);
+        }
+
+        if (InPlacePodResizingUtils.inPlaceResizingEnabled(podSet))   {
+            // In-place resizing is enabled -> we still might need to restart it in some cases
+
+            if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_RESOURCE_REVISION_ANNOTATION)
+                    && !InPlacePodResizingUtils.canResourcesBeUpdatedInPlace(pod, PodSetUtils.findPodByName(pod.getMetadata().getName(), podSet)))  {
+                // The resources changed and the change is not valid for in-place update
+                restartReasons.add(RestartReason.POD_HAS_OLD_RESOURCE_REVISION);
+            }
+
+            if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_RESOURCE_REVISION_ANNOTATION)
+                    && (pod.getStatus() == null || !"Running".equals(pod.getStatus().getPhase())))  {
+                // The resources changed but the Pod is not in a Running state (could be stuck) -> needs to be rolled
+                // TODO: Use isPodStuck from the KafkaRoller
+                restartReasons.add(RestartReason.POD_HAS_OLD_RESOURCE_REVISION);
+            }
+        } else if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_RESOURCE_REVISION_ANNOTATION))    {
+            // In-place resizing is disabled, and resource revision changed -> we have a restart reason
+            restartReasons.add(RestartReason.POD_HAS_OLD_RESOURCE_REVISION);
+        }
+
+        // We check this regardless whether the in-place resizing is enabled or not as it might have been enabled in the
+        // past and the in-place resizing already failed. But normally, this restart reason should not happen when
+        // in-place resizing is not used.
+        if (InPlacePodResizingUtils.restartForResourceResizingNeeded(reconciliation, pod, InPlacePodResizingUtils.inPlaceResizingWaitForDeferred(podSet))) {
+            restartReasons.add(RestartReason.POD_RESOURCES_CHANGED);
         }
 
         for (Ca ca: cas) {

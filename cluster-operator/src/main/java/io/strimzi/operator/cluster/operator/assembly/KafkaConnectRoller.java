@@ -7,8 +7,10 @@ package io.strimzi.operator.cluster.operator.assembly;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.readiness.Readiness;
 import io.strimzi.api.kafka.model.podset.StrimziPodSet;
+import io.strimzi.operator.cluster.model.InPlacePodResizingUtils;
 import io.strimzi.operator.cluster.model.KafkaConnectCluster;
 import io.strimzi.operator.cluster.model.PodRevision;
+import io.strimzi.operator.cluster.model.PodSetUtils;
 import io.strimzi.operator.cluster.model.RestartReason;
 import io.strimzi.operator.cluster.model.RestartReasons;
 import io.strimzi.operator.cluster.operator.resource.kubernetes.PodOperator;
@@ -156,16 +158,46 @@ public class KafkaConnectRoller {
      * Checks if the Pod needs a rolling restart. This method is used in regular rolling updates and checks if the Pod
      * matches the PodSet or not.
      *
-     * @param podSet    PodSet with the desired Pod definition
-     * @param pod       The current definition of the Pod
+     * @param reconciliation    Reconciliation marker
+     * @param podSet            PodSet with the desired Pod definition
+     * @param pod               The current definition of the Pod
      *
      * @return  RestartReasons object indicating whether a restart is needed and why.
      */
-    public static RestartReasons needsRollingRestart(StrimziPodSet podSet, Pod pod) {
-        if (PodRevision.hasChanged(pod, podSet)) {
-            return RestartReasons.of(RestartReason.POD_HAS_OLD_REVISION);
-        } else {
-            return RestartReasons.empty();
+    public static RestartReasons needsRollingRestart(Reconciliation reconciliation, StrimziPodSet podSet, Pod pod) {
+        RestartReasons restartReasons = RestartReasons.empty();
+
+        if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_REVISION_ANNOTATION)) {
+            restartReasons.add(RestartReason.POD_HAS_OLD_REVISION);
         }
+
+        if (InPlacePodResizingUtils.inPlaceResizingEnabled(podSet))   {
+            // In-place resizing is enabled -> we still might need to restart it in some cases
+
+            if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_RESOURCE_REVISION_ANNOTATION)
+                    && !InPlacePodResizingUtils.canResourcesBeUpdatedInPlace(pod, PodSetUtils.findPodByName(pod.getMetadata().getName(), podSet)))  {
+                // The resources changed and the change is not valid for in-place update
+                restartReasons.add(RestartReason.POD_HAS_OLD_RESOURCE_REVISION);
+            }
+
+            if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_RESOURCE_REVISION_ANNOTATION)
+                    && (pod.getStatus() == null || !"Running".equals(pod.getStatus().getPhase())))  {
+                // The resources changed but the Pod is not in a Running state (could be stuck) -> needs to be rolled
+                // TODO: Use isPodStuck from the KafkaRoller
+                restartReasons.add(RestartReason.POD_HAS_OLD_RESOURCE_REVISION);
+            }
+        } else if (PodRevision.hasChanged(pod, podSet, PodRevision.STRIMZI_RESOURCE_REVISION_ANNOTATION))    {
+            // In-place resizing is disabled, and resource revision changed -> we have a restart reason
+            restartReasons.add(RestartReason.POD_HAS_OLD_RESOURCE_REVISION);
+        }
+
+        // We check this regardless whether the in-place resizing is enabled or not as it might have been enabled in the
+        // past and the in-place resizing already failed. But normally, this restart reason should not happen when
+        // in-place resizing is not used.
+        if (InPlacePodResizingUtils.restartForResourceResizingNeeded(reconciliation, pod, InPlacePodResizingUtils.inPlaceResizingWaitForDeferred(podSet))) {
+            restartReasons.add(RestartReason.POD_RESOURCES_CHANGED);
+        }
+
+        return restartReasons;
     }
 }

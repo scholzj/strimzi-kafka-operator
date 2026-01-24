@@ -187,7 +187,7 @@ public class KafkaConnectRollerTest {
         KafkaConnectRoller roller = new KafkaConnectRoller(RECONCILIATION, CLUSTER, 1_000L, mockPodOps);
 
         Checkpoint async = context.checkpoint();
-        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(podSet, pod), "my-connect-connect-0")
+        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod), "my-connect-connect-0")
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     verify(mockPodOps, never()).deleteAsync(any(), any(), any(), anyBoolean());
 
@@ -213,7 +213,7 @@ public class KafkaConnectRollerTest {
         KafkaConnectRoller roller = new KafkaConnectRoller(RECONCILIATION, CLUSTER, 1_000L, mockPodOps);
 
         Checkpoint async = context.checkpoint();
-        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(podSet, pod), "my-connect-connect-0")
+        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod), "my-connect-connect-0")
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     verify(mockPodOps, never()).deleteAsync(any(), any(), any(), anyBoolean());
 
@@ -240,7 +240,7 @@ public class KafkaConnectRollerTest {
         KafkaConnectRoller roller = new KafkaConnectRoller(RECONCILIATION, CLUSTER, 1_000L, mockPodOps);
 
         Checkpoint async = context.checkpoint();
-        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(podSet, pod), "my-connect-connect-0")
+        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod), "my-connect-connect-0")
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     verify(mockPodOps, times(1)).deleteAsync(any(), eq(NAMESPACE), eq("my-connect-connect-0"), eq(false));
 
@@ -266,7 +266,7 @@ public class KafkaConnectRollerTest {
         KafkaConnectRoller roller = new KafkaConnectRoller(RECONCILIATION, CLUSTER, 1_000L, mockPodOps);
 
         Checkpoint async = context.checkpoint();
-        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(podSet, pod), "my-connect-connect-0")
+        roller.maybeRollPod(pod -> KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod), "my-connect-connect-0")
                 .onComplete(context.failing(v -> context.verify(() -> {
                     verify(mockPodOps, never()).deleteAsync(any(), any(), any(), anyBoolean());
 
@@ -308,7 +308,7 @@ public class KafkaConnectRollerTest {
         KafkaConnectRoller roller = new KafkaConnectRoller(RECONCILIATION, CLUSTER, 1_000L, mockPodOps);
 
         Checkpoint async = context.checkpoint();
-        roller.maybeRoll(POD_NAMES, pod -> KafkaConnectRoller.needsRollingRestart(podSet, pod))
+        roller.maybeRoll(POD_NAMES, pod -> KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod))
                 .onComplete(context.succeeding(v -> context.verify(() -> {
                     verify(mockPodOps, never()).deleteAsync(any(), any(), any(), anyBoolean());
 
@@ -352,7 +352,7 @@ public class KafkaConnectRollerTest {
         KafkaConnectRoller roller = new KafkaConnectRoller(RECONCILIATION, CLUSTER, 1_000L, mockPodOps);
 
         Checkpoint async = context.checkpoint();
-        roller.maybeRoll(POD_NAMES, pod -> KafkaConnectRoller.needsRollingRestart(podSet, pod))
+        roller.maybeRoll(POD_NAMES, pod -> KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod))
                 .onComplete(context.failing(v -> context.verify(() -> {
                     assertThat(v.getMessage(), is("Timeout"));
                     async.flag();
@@ -384,8 +384,8 @@ public class KafkaConnectRollerTest {
                 .endSpec()
                 .build();
 
-        assertThat(KafkaConnectRoller.needsRollingRestart(podSet, pod1).shouldRestart(), is(false));
-        assertThat(KafkaConnectRoller.needsRollingRestart(podSet, pod2).shouldRestart(), is(true));
+        assertThat(KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod1).shouldRestart(), is(false));
+        assertThat(KafkaConnectRoller.needsRollingRestart(RECONCILIATION, podSet, pod2).shouldRestart(), is(true));
     }
 
     /**

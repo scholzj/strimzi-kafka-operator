@@ -87,4 +87,28 @@ public class PodOperator extends AbstractReadyNamespacedResourceOperator<Kuberne
         }
         return resource.getMetadata().getUid();
     }
+
+    /**
+     * Updates custom resource status asynchronously
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param resource          Desired resource with the updated status
+     *
+     * @return  Future which completes when the status is patched
+     */
+    public Future<Pod> resizeAsync(Reconciliation reconciliation, Pod resource) {
+        return vertx.createSharedWorkerExecutor("kubernetes-ops-pool").executeBlocking(() -> {
+            String namespace = resource.getMetadata().getNamespace();
+            String name = resource.getMetadata().getName();
+
+            try {
+                Pod result = operation().inNamespace(namespace).resource(resource).subresource("resize").update();
+                LOGGER.infoCr(reconciliation, "Resize of {} {} in namespace {} has been requested", resourceKind, name, namespace);
+                return result;
+            } catch (Throwable e) {
+                LOGGER.debugCr(reconciliation, "Caught exception while resizing of {} {} in namespace {}", resourceKind, name, namespace, e);
+                throw e;
+            }
+        });
+    }
 }

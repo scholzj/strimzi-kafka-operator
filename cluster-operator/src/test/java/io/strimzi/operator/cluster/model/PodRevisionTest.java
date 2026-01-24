@@ -66,7 +66,7 @@ public class PodRevisionTest {
     @Test
     public void testHasChangedWithPods()    {
         // Two pods without the revision annotation
-        assertThat(PodRevision.hasChanged(POD, new PodBuilder(POD).build()), is(false));
+        assertThat(PodRevision.hasChanged(POD, new PodBuilder(POD).build(), PodRevision.STRIMZI_REVISION_ANNOTATION), is(false));
 
         // Pods with the annotation
         Pod pod1 = new PodBuilder(POD)
@@ -80,15 +80,15 @@ public class PodRevisionTest {
                 .endMetadata()
                 .build();
 
-        assertThat(PodRevision.hasChanged(pod1, new PodBuilder(pod1).build()), is(false));
-        assertThat(PodRevision.hasChanged(pod1, pod2), is(true));
-        assertThat(PodRevision.hasChanged(POD, pod2), is(true));
+        assertThat(PodRevision.hasChanged(pod1, new PodBuilder(pod1).build(), PodRevision.STRIMZI_REVISION_ANNOTATION), is(false));
+        assertThat(PodRevision.hasChanged(pod1, pod2, PodRevision.STRIMZI_REVISION_ANNOTATION), is(true));
+        assertThat(PodRevision.hasChanged(POD, pod2, PodRevision.STRIMZI_REVISION_ANNOTATION), is(true));
     }
 
     @Test
     public void testHasChangedWithPodAndPodSet()    {
         // Two pods without the revision annotation
-        assertThat(PodRevision.hasChanged(POD, podSet(POD)), is(false));
+        assertThat(PodRevision.hasChanged(POD, podSet(POD), PodRevision.STRIMZI_REVISION_ANNOTATION), is(false));
 
         // Pods with the annotation
         Pod pod1 = new PodBuilder(POD)
@@ -108,10 +108,10 @@ public class PodRevisionTest {
                 .endMetadata()
                 .build();
 
-        assertThat(PodRevision.hasChanged(pod1, podSet(pod1)), is(false));
-        assertThat(PodRevision.hasChanged(pod1, podSet(pod1, pod3)), is(false));
-        assertThat(PodRevision.hasChanged(pod1, podSet(pod2)), is(true));
-        assertThat(PodRevision.hasChanged(POD, podSet(pod2)), is(true));
+        assertThat(PodRevision.hasChanged(pod1, podSet(pod1), PodRevision.STRIMZI_REVISION_ANNOTATION), is(false));
+        assertThat(PodRevision.hasChanged(pod1, podSet(pod1, pod3), PodRevision.STRIMZI_REVISION_ANNOTATION), is(false));
+        assertThat(PodRevision.hasChanged(pod1, podSet(pod2), PodRevision.STRIMZI_REVISION_ANNOTATION), is(true));
+        assertThat(PodRevision.hasChanged(POD, podSet(pod2), PodRevision.STRIMZI_REVISION_ANNOTATION), is(true));
     }
 
     /**
