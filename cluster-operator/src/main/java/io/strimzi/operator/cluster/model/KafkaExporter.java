@@ -261,22 +261,21 @@ public class KafkaExporter extends AbstractModel {
     }
 
     private List<Volume> getVolumes(boolean isOpenShift) {
-        List<Volume> volumeList = new ArrayList<>(3);
+        List<Volume> volumeList = new ArrayList<>();
 
         volumeList.add(VolumeUtils.createTempDirVolume(templatePod));
         volumeList.add(VolumeUtils.createSecretVolume(KAFKA_EXPORTER_CERTS_VOLUME_NAME, KafkaExporterResources.secretName(cluster), isOpenShift));
-        volumeList.add(VolumeUtils.createSecretVolume(CLUSTER_CA_CERTS_VOLUME_NAME, AbstractModel.clusterCaCertSecretName(cluster), isOpenShift));
-        
+
         TemplateUtils.addAdditionalVolumes(templatePod, volumeList);
         
         return volumeList;
     }
     
     private List<VolumeMount> getVolumeMounts() {
-        List<VolumeMount> volumeList = new ArrayList<>(3);
+        List<VolumeMount> volumeList = new ArrayList<>();
+
         volumeList.add(VolumeUtils.createTempDirVolumeMount());
         volumeList.add(VolumeUtils.createVolumeMount(KAFKA_EXPORTER_CERTS_VOLUME_NAME, KAFKA_EXPORTER_CERTS_VOLUME_MOUNT));
-        volumeList.add(VolumeUtils.createVolumeMount(CLUSTER_CA_CERTS_VOLUME_NAME, CLUSTER_CA_CERTS_VOLUME_MOUNT));
 
         TemplateUtils.addAdditionalVolumeMounts(volumeList, templateContainer);
 
@@ -295,8 +294,15 @@ public class KafkaExporter extends AbstractModel {
      * @return The generated Secret.
      */
     public Secret generateCertificatesSecret(ClusterCa clusterCa, Secret existingSecret, boolean isMaintenanceTimeWindowsSatisfied) {
-        return CertUtils.buildTrustedCertificateSecret(reconciliation, clusterCa, existingSecret, namespace, KafkaExporterResources.secretName(cluster), componentName,
-                COMPONENT_TYPE, labels, ownerReference, isMaintenanceTimeWindowsSatisfied);
+        Secret certificateSecret = CertUtils.buildTrustedCertificateSecret(reconciliation, clusterCa, existingSecret,
+                namespace, KafkaExporterResources.secretName(cluster), componentName, COMPONENT_TYPE, labels,
+                ownerReference, isMaintenanceTimeWindowsSatisfied);
+
+        Map<String, String> data = new HashMap<>(certificateSecret.getData());
+        data.put("cluster-ca.crt", Util.encodeToBase64(clusterCa.trustedCaCerts()));
+        certificateSecret.setData(data);
+
+        return certificateSecret;
     }
 
     /**

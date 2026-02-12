@@ -1261,15 +1261,26 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
             throw new RuntimeException("Failed to prepare Kafka certificates", e);
         }
 
+        String trustedClusterCas = Util.encodeToBase64(clusterCa.trustedCaCerts());
+        String trustedClientsCas = Util.encodeToBase64(clientsCa.trustedCaCerts());
+
         return updatedCerts.entrySet()
                 .stream()
-                .map(entry -> ModelUtils.createSecret(entry.getKey(), namespace, labels, ownerReference,
-                        CertUtils.buildSecretData(entry.getKey(), entry.getValue()),
-                        Map.ofEntries(
-                                clusterCa.caCertGenerationFullAnnotation(),
-                                clientsCa.caCertGenerationFullAnnotation()
-                        ),
-                        emptyMap()))
+                .map(entry -> {
+                    Map<String, String> data = new HashMap<>(CertUtils.buildSecretData(entry.getKey(), entry.getValue()));
+                    data.put("cluster-ca.crt", trustedClusterCas);
+                    data.put("clients-ca.crt", trustedClientsCas);
+
+                    return ModelUtils.createSecret(
+                            entry.getKey(),
+                            namespace,
+                            labels,
+                            ownerReference,
+                            data,
+                            Map.ofEntries(clusterCa.caCertGenerationFullAnnotation(), clientsCa.caCertGenerationFullAnnotation()),
+                            emptyMap()
+                    );
+                })
                 .toList();
     }
 
