@@ -342,7 +342,7 @@ public class ListenersValidator {
      * @param listener  Listener which needs to be validated
      */
     private static void validateBrokerHostTemplate(Set<String> errors, GenericKafkaListener listener) {
-        if ((!KafkaListenerType.ROUTE.equals(listener.getType()) && !KafkaListenerType.INGRESS.equals(listener.getType()))
+        if ((!KafkaListenerType.ROUTE.equals(listener.getType()) && !KafkaListenerType.INGRESS.equals(listener.getType()) && !KafkaListenerType.TLSROUTE.equals(listener.getType()))
                 && listener.getConfiguration().getHostTemplate() != null)    {
             errors.add("listener " + listener.getName() + " cannot configure hostTemplate because it is not Route or Ingress based listener");
         }
@@ -355,7 +355,7 @@ public class ListenersValidator {
      * @param listener  Listener which needs to be validated
      */
     private static void validateBootstrapHost(Set<String> errors, GenericKafkaListener listener) {
-        if ((!KafkaListenerType.ROUTE.equals(listener.getType()) && !KafkaListenerType.INGRESS.equals(listener.getType()))
+        if ((!KafkaListenerType.ROUTE.equals(listener.getType()) && !KafkaListenerType.INGRESS.equals(listener.getType()) && !KafkaListenerType.TLSROUTE.equals(listener.getType()))
                 && listener.getConfiguration().getBootstrap().getHost() != null)    {
             errors.add("listener " + listener.getName() + " cannot configure bootstrap.host because it is not Route or Ingress based listener");
         }
@@ -402,8 +402,8 @@ public class ListenersValidator {
     }
 
     /**
-     * Validates that bootstrap.annotations and bootstrap.labels are used only with LoadBalancer, NodePort, Route, or
-     * Ingress type listener
+     * Validates that bootstrap.annotations and bootstrap.labels are used only with LoadBalancer, NodePort, Route,
+     * TLSRoute, or Ingress type listener
      *
      * @param errors    List where any found errors will be added
      * @param listener  Listener which needs to be validated
@@ -412,6 +412,7 @@ public class ListenersValidator {
         if (!KafkaListenerType.LOADBALANCER.equals(listener.getType())
                 && !KafkaListenerType.NODEPORT.equals(listener.getType())
                 && !KafkaListenerType.ROUTE.equals(listener.getType())
+                && !KafkaListenerType.TLSROUTE.equals(listener.getType())
                 && !KafkaListenerType.INGRESS.equals(listener.getType())
                 && !KafkaListenerType.CLUSTER_IP.equals(listener.getType())) {
             if (listener.getConfiguration().getBootstrap().getLabels() != null
@@ -434,7 +435,7 @@ public class ListenersValidator {
      * @param broker    Broker configuration which needs to be validated
      */
     private static void validateBrokerHost(Set<String> errors, GenericKafkaListener listener, GenericKafkaListenerConfigurationBroker broker) {
-        if ((!KafkaListenerType.ROUTE.equals(listener.getType()) && !KafkaListenerType.INGRESS.equals(listener.getType()))
+        if ((!KafkaListenerType.ROUTE.equals(listener.getType()) && !KafkaListenerType.INGRESS.equals(listener.getType()) && !KafkaListenerType.TLSROUTE.equals(listener.getType()))
                 && broker.getHost() != null)    {
             errors.add("listener " + listener.getName() + " cannot configure brokers[].host because it is not Route or Ingress based listener");
         }
@@ -484,8 +485,8 @@ public class ListenersValidator {
     }
 
     /**
-     * Validates that brokers[].annotations and brokers[].labels are used only with LoadBalancer, NodePort, Route or
-     * Ingress type listener
+     * Validates that brokers[].annotations and brokers[].labels are used only with LoadBalancer, NodePort, Route,
+     * TLSRoute or Ingress type listener
      *
      * @param errors    List where any found errors will be added
      * @param listener  Listener which needs to be validated
@@ -495,6 +496,7 @@ public class ListenersValidator {
         if (!KafkaListenerType.LOADBALANCER.equals(listener.getType())
                 && !KafkaListenerType.NODEPORT.equals(listener.getType())
                 && !KafkaListenerType.ROUTE.equals(listener.getType())
+                && !KafkaListenerType.TLSROUTE.equals(listener.getType())
                 && !KafkaListenerType.INGRESS.equals(listener.getType())
                 && !KafkaListenerType.CLUSTER_IP.equals(listener.getType()))  {
             if (broker.getLabels() != null

@@ -5,6 +5,7 @@
 package io.strimzi.operator.cluster;
 
 import io.fabric8.kubernetes.api.model.APIGroup;
+import io.fabric8.kubernetes.api.model.APIResourceList;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.VersionInfo;
 import io.strimzi.operator.common.Util;
@@ -28,6 +29,7 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
     private boolean routes = false;
     private boolean builds = false;
     private boolean images = false;
+    private boolean tlsRoutes = false;
     private KubernetesVersion kubernetesVersion;
 
     /**
@@ -59,6 +61,9 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
             return checkApiAvailability(vertx, client, "image.openshift.io", "v1");
         }).compose(supported -> {
             pfa.setImages(supported);
+            return checkApiAvailability(vertx, client, "gateway.networking.k8s.io", "v1alpha3", "TLSRoute");
+        }).compose(supported -> {
+            pfa.setTLSRoutes(supported);
             return Future.succeededFuture(pfa);
         }).onComplete(pfaPromise);
 
@@ -162,6 +167,27 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
         });
     }
 
+    private static Future<Boolean> checkApiAvailability(Vertx vertx, KubernetesClient client, String group, String version, String kind)   {
+        return vertx.executeBlocking(() -> {
+            try {
+                APIResourceList apiGroupResources = client.getApiResources(group + "/" + version);
+                boolean supported;
+
+                if (apiGroupResources != null)   {
+                    supported = apiGroupResources.getResources().stream().anyMatch(r -> kind.equals(r.getKind()));
+                } else {
+                    supported = false;
+                }
+
+                LOGGER.warn("Kind {} in API Group {} is {}supported", kind, group, supported ? "" : "not ");
+                return supported;
+            } catch (Exception e) {
+                LOGGER.error("Detection of API availability failed.", e);
+                throw e;
+            }
+        });
+    }
+
     private PlatformFeaturesAvailability() {}
 
     /**
@@ -239,6 +265,19 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
         return hasBuilds() && hasImages();
     }
 
+    /**
+     * Checks if Gateway API v1 TLSRoutes are supported on this cluster.
+     *
+     * @return  True if Gateway API v1 TLSRoutes are supported on this cluster
+     */
+    public boolean hasTLSRoutes() {
+        return tlsRoutes;
+    }
+
+    private void setTLSRoutes(boolean tlsRoutes) {
+        this.tlsRoutes = tlsRoutes;
+    }
+
     @Override
     public String toString() {
         return "PlatformFeaturesAvailability(" +
@@ -246,6 +285,7 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
                 ",OpenShiftRoutes=" + routes +
                 ",OpenShiftBuilds=" + builds +
                 ",OpenShiftImageStreams=" + images +
+                ",TLSRoutes=" + tlsRoutes +
                 ")";
     }
 }

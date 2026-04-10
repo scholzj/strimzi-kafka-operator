@@ -83,6 +83,7 @@ spec:
                           enum:
                           - internal
                           - route
+                          - tlsroute
                           - loadbalancer
                           - nodeport
                           - ingress
@@ -231,6 +232,23 @@ spec:
                               type: string
                             allocateLoadBalancerNodePorts:
                               type: boolean
+                            parentRefs:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                  group:
+                                    type: string
+                                  name:
+                                    type: string
+                                  namespace:
+                                    type: string
+                                  port:
+                                    type: integer
+                                  sectionName:
+                                    type: string
                         networkPolicyPeers:
                           type: array
                           items:
@@ -5036,6 +5054,7 @@ spec:
                           enum:
                           - internal
                           - route
+                          - tlsroute
                           - loadbalancer
                           - nodeport
                           - ingress
@@ -5308,6 +5327,23 @@ spec:
                               type: string
                             allocateLoadBalancerNodePorts:
                               type: boolean
+                            parentRefs:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                  group:
+                                    type: string
+                                  name:
+                                    type: string
+                                  namespace:
+                                    type: string
+                                  port:
+                                    type: integer
+                                  sectionName:
+                                    type: string
                         networkPolicyPeers:
                           type: array
                           items:
