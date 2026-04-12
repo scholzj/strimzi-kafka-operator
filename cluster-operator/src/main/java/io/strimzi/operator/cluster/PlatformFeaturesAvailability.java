@@ -167,6 +167,18 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
         });
     }
 
+    /**
+     * Checks whether a specific resource kind is supported or not. This check is useful for APIs where different
+     * resources use different API versions and chercking the group support is not sufficient (such as Gateway API).
+     *
+     * @param vertx     Vert.x instance
+     * @param client    Kubernetes client
+     * @param group     API group to check
+     * @param version   API version to check
+     * @param kind      Resource kind to check
+     *
+     * @return  Future that completes with true when the resource kind is supported in version or false when not.
+     */
     private static Future<Boolean> checkApiAvailability(Vertx vertx, KubernetesClient client, String group, String version, String kind)   {
         return vertx.executeBlocking(() -> {
             try {
