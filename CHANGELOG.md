@@ -2,13 +2,13 @@
 
 ## 1.1.0
 
+* New Cluster operator configuration option `STRIMZI_PKCS12_KEYSTORE_GENERATION` to disable generating PKCS12 stores in CA and User Secrets
 * Support for dependency scope configuration of Maven artifacts in Kafka Connect Build
 * Add `UseBackgroundPodDeletion` feature gate (alpha, disabled by default) to use background deletion propagation when deleting pods during rolling updates. 
 
 ### Major changes, deprecations, and removals
 
 * n/a
-
 
 ## 1.0.0
 

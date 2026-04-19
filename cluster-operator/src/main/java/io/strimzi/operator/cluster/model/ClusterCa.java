@@ -54,34 +54,37 @@ public class ClusterCa extends Ca {
      * @param caKeySecret           Name of the CA private key secret
      */
     public ClusterCa(Reconciliation reconciliation, CertManager certManager, PasswordGenerator passwordGenerator, Secret caCertSecret, Secret caKeySecret) {
-        this(reconciliation, certManager, passwordGenerator, caCertSecret, caKeySecret, CertificateAuthority.DEFAULT_CERTS_VALIDITY_DAYS, CertificateAuthority.DEFAULT_CERTS_RENEWAL_DAYS, true, null);
+        this(reconciliation, certManager, passwordGenerator, caCertSecret, caKeySecret, CertificateAuthority.DEFAULT_CERTS_VALIDITY_DAYS, CertificateAuthority.DEFAULT_CERTS_RENEWAL_DAYS, true, null, true);
     }
 
     /**
      * Constructor
      *
-     * @param reconciliation        Reconciliation marker
-     * @param certManager           Certificate manager instance
-     * @param passwordGenerator     Password generator instance
-     * @param clusterCaCert         Secret with the public key
-     * @param clusterCaKey          Secret with the private key
-     * @param validityDays          Validity days
-     * @param renewalDays           Renewal days (how many days before expiration should the CA be renewed)
-     * @param generateCa            Flag indicating if Strimzi CA should be generated or custom CA is used
-     * @param policy                Renewal policy
+     * @param reconciliation       Reconciliation marker
+     * @param certManager          Certificate manager instance
+     * @param passwordGenerator    Password generator instance
+     * @param clusterCaCert        Secret with the public key
+     * @param clusterCaKey         Secret with the private key
+     * @param validityDays         Validity days
+     * @param renewalDays          Renewal days (how many days before expiration should the CA be renewed)
+     * @param generateCa           Flag indicating if Strimzi CA should be generated or custom CA is used
+     * @param policy               Renewal policy
+     * @param generatePkcs12Stores Flag indicating whether PKCS12 keystores should be generated for the CA and the signed certificates
      */
-    public ClusterCa(Reconciliation reconciliation, CertManager certManager,
-                     PasswordGenerator passwordGenerator,
-                     Secret clusterCaCert,
-                     Secret clusterCaKey,
-                     int validityDays,
-                     int renewalDays,
-                     boolean generateCa,
-                     CertificateExpirationPolicy policy) {
-        super(reconciliation, certManager, passwordGenerator,
-                "cluster-ca",
-                clusterCaCert,
-                clusterCaKey, validityDays, renewalDays, generateCa, policy);
+    public ClusterCa(
+            Reconciliation reconciliation,
+            CertManager certManager,
+            PasswordGenerator passwordGenerator,
+            Secret clusterCaCert,
+            Secret clusterCaKey,
+            int validityDays,
+            int renewalDays,
+            boolean generateCa,
+            CertificateExpirationPolicy policy,
+            boolean generatePkcs12Stores
+    ) {
+        super(reconciliation, certManager, passwordGenerator, "cluster-ca", clusterCaCert, clusterCaKey,
+                validityDays, renewalDays, generateCa, policy, generatePkcs12Stores);
     }
 
     @Override

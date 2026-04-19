@@ -57,7 +57,7 @@ class CaTest {
          * @param caKeySecret       Kubernetes Secret where the CA private key will be stored
          */
         public MockCa(Reconciliation reconciliation, CertManager certManager, PasswordGenerator passwordGenerator, Secret caCertSecret, Secret caKeySecret, boolean generateCa) {
-            super(reconciliation, certManager, passwordGenerator, "mock", caCertSecret, caKeySecret, CertificateAuthority.DEFAULT_CERTS_VALIDITY_DAYS, CertificateAuthority.DEFAULT_CERTS_RENEWAL_DAYS, generateCa, null);
+            super(reconciliation, certManager, passwordGenerator, "mock", caCertSecret, caKeySecret, CertificateAuthority.DEFAULT_CERTS_VALIDITY_DAYS, CertificateAuthority.DEFAULT_CERTS_RENEWAL_DAYS, generateCa, null, true);
         }
 
         @Override

@@ -209,8 +209,8 @@ public class KafkaAssemblyOperatorWithKRaftTest {
             365,
             30,
             true,
-            null
-    );
+            null,
+            true);
 
     protected static Vertx vertx;
     private static WorkerExecutor sharedWorkerExecutor;
