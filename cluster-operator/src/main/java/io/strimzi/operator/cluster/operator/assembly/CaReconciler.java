@@ -73,6 +73,7 @@ public class CaReconciler {
 
     /* test */ final Reconciliation reconciliation;
     private final long operationTimeoutMs;
+    private final boolean generatePkcs12Stores;
 
     /* test */ final DeploymentOperator deploymentOperator;
     private final StrimziPodSetOperator strimziPodSetOperator;
@@ -124,6 +125,7 @@ public class CaReconciler {
     ) {
         this.reconciliation = reconciliation;
         this.operationTimeoutMs = config.getOperationTimeoutMs();
+        this.generatePkcs12Stores = config.isPkcs12KeystoreGeneration();
 
         this.deploymentOperator = supplier.deploymentOperations;
         this.strimziPodSetOperator = supplier.strimziPodSetOperator;
@@ -259,7 +261,8 @@ public class CaReconciler {
                             ModelUtils.getCertificateValidity(clusterCaConfig),
                             ModelUtils.getRenewalDays(clusterCaConfig),
                             generateClusterCa,
-                            clusterCaConfig != null ? clusterCaConfig.getCertificateExpirationPolicy() : null);
+                            clusterCaConfig != null ? clusterCaConfig.getCertificateExpirationPolicy() : null,
+                            generatePkcs12Stores);
 
 
                     clientsCa = new ClientsCa(reconciliation, certManager, passwordGenerator,
@@ -268,7 +271,8 @@ public class CaReconciler {
                             ModelUtils.getCertificateValidity(clientsCaConfig),
                             ModelUtils.getRenewalDays(clientsCaConfig),
                             generateClientsCa,
-                            clientsCaConfig != null ? clientsCaConfig.getCertificateExpirationPolicy() : null);
+                            clientsCaConfig != null ? clientsCaConfig.getCertificateExpirationPolicy() : null,
+                            generatePkcs12Stores);
 
                     List<Future<ReconcileResult<Secret>>> secretReconciliations = new ArrayList<>(4);
 

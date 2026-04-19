@@ -677,8 +677,8 @@ public class KubernetesRestartEventsMockTest {
                 365,
                 30,
                 true,
-                null
-        );
+                null,
+                true);
     }
 
     private void patchClusterCaKeySecretWithAnnotation(String annotation, String value) {

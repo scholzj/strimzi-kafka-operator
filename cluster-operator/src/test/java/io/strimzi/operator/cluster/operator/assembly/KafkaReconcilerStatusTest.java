@@ -90,8 +90,8 @@ public class KafkaReconcilerStatusTest {
             365,
             30,
             true,
-            null
-    );
+            null,
+            true);
     private final static Kafka KAFKA = new KafkaBuilder()
                 .withNewMetadata()
                     .withName(CLUSTER_NAME)
