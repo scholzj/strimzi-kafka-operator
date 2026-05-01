@@ -2,6 +2,7 @@
 
 ## 1.1.0
 
+* Support for Apache Kafka 4.3.0
 * Support for dependency scope configuration of Maven artifacts in Kafka Connect Build
 
 ### Major changes, deprecations, and removals
