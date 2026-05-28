@@ -4,9 +4,16 @@
  */
 package io.strimzi.operator.cluster.model;
 
-import com.fathzer.soft.javaluator.BracketPair;
-import com.fathzer.soft.javaluator.DoubleEvaluator;
-import com.fathzer.soft.javaluator.Parameters;
+import com.ezylang.evalex.EvaluationException;
+import com.ezylang.evalex.Expression;
+import com.ezylang.evalex.config.ExpressionConfiguration;
+import com.ezylang.evalex.config.MapBasedFunctionDictionary;
+import com.ezylang.evalex.config.MapBasedOperatorDictionary;
+import com.ezylang.evalex.data.EvaluationValue;
+import com.ezylang.evalex.operators.arithmetic.InfixMinusOperator;
+import com.ezylang.evalex.operators.arithmetic.InfixMultiplicationOperator;
+import com.ezylang.evalex.operators.arithmetic.InfixPlusOperator;
+import com.ezylang.evalex.parser.ParseException;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.strimzi.api.kafka.model.common.template.ExternalTrafficPolicy;
 import io.strimzi.api.kafka.model.common.template.IpFamily;
@@ -605,16 +612,29 @@ public class ListenersUtils {
 
         // Restrict the operations we support in the template to only basic math operations to what makes sense in our
         // context and to prevent any possible security issues.
-        Parameters params = new Parameters();
-        params.add(DoubleEvaluator.PLUS);
-        params.add(DoubleEvaluator.MINUS);
-        params.add(DoubleEvaluator.MULTIPLY);
-        params.addExpressionBracket(BracketPair.PARENTHESES);
+        @SuppressWarnings("unchecked")
+        ExpressionConfiguration configuration = ExpressionConfiguration.builder()
+                .operatorDictionary(
+                        MapBasedOperatorDictionary.ofOperators(
+                                Map.entry("+", new InfixPlusOperator()),
+                                Map.entry("-", new InfixMinusOperator()),
+                                Map.entry("*", new InfixMultiplicationOperator())
+                        ))
+                .functionDictionary(MapBasedFunctionDictionary.ofFunctions())
+                .decimalPlacesRounding(0)
+                .defaultConstants(Map.of())
+                .implicitMultiplicationAllowed(false)
+                .arraysAllowed(false)
+                .structuresAllowed(false)
+                .binaryAllowed(false)
+                .build();
 
         // Evaluate the template
         try {
-            return new DoubleEvaluator(params).evaluate(renderedTemplate).intValue();
-        } catch (IllegalArgumentException e) {
+            Expression expression = new Expression(renderedTemplate, configuration);
+            EvaluationValue result = expression.evaluate();
+            return result.getNumberValue().intValue();
+        } catch (EvaluationException | ParseException e) {
             throw new InvalidConfigurationException("Invalid advertised port template: " + template, e);
         }
     }

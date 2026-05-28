@@ -247,9 +247,9 @@
             <artifactId>vertx-micrometer-metrics</artifactId>
         </dependency>
         <dependency>
-            <!-- Javaluator is mathematical expression evaluator used for the advertised port template -->
-            <groupId>com.fathzer</groupId>
-            <artifactId>javaluator</artifactId>
+            <!-- EvalEx is mathematical expression evaluator used for the advertised port template -->
+            <groupId>com.ezylang</groupId>
+            <artifactId>EvalEx</artifactId>
         </dependency>
         <dependency>
             <groupId>org.wiremock</groupId>

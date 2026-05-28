@@ -4,6 +4,8 @@
  */
 package io.strimzi.operator.cluster.model;
 
+import com.ezylang.evalex.BaseException;
+import com.ezylang.evalex.parser.ParseException;
 import io.strimzi.api.kafka.model.common.template.ExternalTrafficPolicy;
 import io.strimzi.api.kafka.model.common.template.IpFamily;
 import io.strimzi.api.kafka.model.common.template.IpFamilyPolicy;
@@ -841,13 +843,18 @@ public class ListenersUtilsTest {
 
         // Disabled operators
         InvalidConfigurationException e = assertThrows(InvalidConfigurationException.class, () -> ListenersUtils.renderPortTemplate("9000 + ({nodeId} / 10)", 7));
-        assertThat(e.getCause(), is(instanceOf(IllegalArgumentException.class)));
+        assertThat(e.getCause(), is(instanceOf(ParseException.class)));
         assertThat(e.getMessage(), is("Invalid advertised port template: 9000 + ({nodeId} / 10)"));
 
         // Unknown variable
         e = assertThrows(InvalidConfigurationException.class, () -> ListenersUtils.renderPortTemplate("9000 + {podId}", 7));
-        assertThat(e.getCause(), is(instanceOf(IllegalArgumentException.class)));
+        assertThat(e.getCause(), is(instanceOf(ParseException.class)));
         assertThat(e.getMessage(), is("Invalid advertised port template: 9000 + {podId}"));
+
+        // String operations
+        e = assertThrows(InvalidConfigurationException.class, () -> ListenersUtils.renderPortTemplate("babovka + 9000", 7));
+        assertThat(e.getCause(), is(instanceOf(BaseException.class)));
+        assertThat(e.getMessage(), is("Invalid advertised port template: babovka + 9000"));
     }
 
     @Test
