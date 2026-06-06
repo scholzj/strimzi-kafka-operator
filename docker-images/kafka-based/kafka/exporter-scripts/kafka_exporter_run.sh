@@ -46,7 +46,9 @@ kafkaserver="--kafka.server="$KAFKA_EXPORTER_KAFKA_SERVER
 
 listenaddress="--web.listen-address=:9404"
 
-tls="--tls.enabled --tls.ca-file=/etc/kafka-exporter/cluster-ca-certs/cluster-ca.crt --tls.cert-file=/etc/kafka-exporter/kafka-exporter-certs/kafka-exporter.crt  --tls.key-file=/etc/kafka-exporter/kafka-exporter-certs/kafka-exporter.key"
+# Disable TLS
+# tls="--tls.enabled --tls.ca-file=/etc/kafka-exporter/cluster-ca-certs/cluster-ca.crt --tls.cert-file=/etc/kafka-exporter/kafka-exporter-certs/kafka-exporter.crt  --tls.key-file=/etc/kafka-exporter/kafka-exporter-certs/kafka-exporter.key"
+tls=""
 
 # starting Kafka Exporter with final configuration
 cat <<EOT > /tmp/run.sh

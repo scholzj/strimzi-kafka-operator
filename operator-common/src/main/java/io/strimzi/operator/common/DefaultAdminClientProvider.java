@@ -8,7 +8,6 @@ import io.strimzi.operator.common.auth.PemAuthIdentity;
 import io.strimzi.operator.common.auth.PemTrustSet;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.common.config.SslConfigs;
 
 import java.util.Properties;
 
@@ -78,20 +77,21 @@ public class DefaultAdminClientProvider implements AdminClientProvider {
             throw new InvalidConfigurationException("The config parameter should not be null");
         }
 
-        // configuring TLS encryption if requested
-        if (kafkaCaTrustSet != null) {
-            config.putIfAbsent(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, "SSL");
-            config.setProperty(SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG, "PEM");
-            config.setProperty(SslConfigs.SSL_TRUSTSTORE_CERTIFICATES_CONFIG, kafkaCaTrustSet.trustedCertificatesString());
-        }
-
-        // configuring TLS client authentication
-        if (authIdentity != null) {
-            config.putIfAbsent(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, "SSL");
-            config.setProperty(SslConfigs.SSL_KEYSTORE_TYPE_CONFIG, "PEM");
-            config.setProperty(SslConfigs.SSL_KEYSTORE_CERTIFICATE_CHAIN_CONFIG, authIdentity.certificateChainAsPem());
-            config.setProperty(SslConfigs.SSL_KEYSTORE_KEY_CONFIG, authIdentity.privateKeyAsPem());
-        }
+        // Disable TLS
+        //// configuring TLS encryption if requested
+        //if (kafkaCaTrustSet != null) {
+        //    config.putIfAbsent(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, "SSL");
+        //    config.setProperty(SslConfigs.SSL_TRUSTSTORE_TYPE_CONFIG, "PEM");
+        //    config.setProperty(SslConfigs.SSL_TRUSTSTORE_CERTIFICATES_CONFIG, kafkaCaTrustSet.trustedCertificatesString());
+        //}
+        //
+        //// configuring TLS client authentication
+        //if (authIdentity != null) {
+        //    config.putIfAbsent(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, "SSL");
+        //    config.setProperty(SslConfigs.SSL_KEYSTORE_TYPE_CONFIG, "PEM");
+        //    config.setProperty(SslConfigs.SSL_KEYSTORE_CERTIFICATE_CHAIN_CONFIG, authIdentity.certificateChainAsPem());
+        //    config.setProperty(SslConfigs.SSL_KEYSTORE_KEY_CONFIG, authIdentity.privateKeyAsPem());
+        //}
 
         config.putIfAbsent(AdminClientConfig.METADATA_MAX_AGE_CONFIG, "30000");
         config.putIfAbsent(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "10000");

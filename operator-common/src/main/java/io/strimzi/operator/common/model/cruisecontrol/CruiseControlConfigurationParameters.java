@@ -220,7 +220,9 @@ public enum CruiseControlConfigurationParameters {
     /**
      * Default value for enabling webserver security
      */
-    public static final boolean DEFAULT_WEBSERVER_SSL_ENABLED = true;
+    // Disable TLS
+    //public static final boolean DEFAULT_WEBSERVER_SSL_ENABLED = true;
+    public static final boolean DEFAULT_WEBSERVER_SSL_ENABLED = false;
 
     /**
      * Default topic name for the partition samples

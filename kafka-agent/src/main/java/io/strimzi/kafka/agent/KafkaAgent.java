@@ -17,14 +17,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.Handler;
-import org.eclipse.jetty.server.HttpConfiguration;
-import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Response;
-import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.eclipse.jetty.util.Callback;
@@ -202,11 +198,13 @@ public class KafkaAgent {
     private void startHttpServer() throws Exception {
         Server server = new Server();
 
-        HttpConfiguration https = new HttpConfiguration();
-        https.addCustomizer(new SecureRequestCustomizer());
-        ServerConnector httpsConn = new ServerConnector(server,
-                new SslConnectionFactory(getSSLContextFactory(caCertSecret, nodeCertSecret), "http/1.1"),
-                new HttpConnectionFactory(https));
+        // Disable TLS
+        //HttpConfiguration https = new HttpConfiguration();
+        //https.addCustomizer(new SecureRequestCustomizer());
+        //ServerConnector httpsConn = new ServerConnector(server,
+        //        new SslConnectionFactory(getSSLContextFactory(caCertSecret, nodeCertSecret), "http/1.1"),
+        //        new HttpConnectionFactory(https));
+        ServerConnector httpsConn  = new ServerConnector(server);
         httpsConn.setHost("0.0.0.0");
         httpsConn.setPort(HTTPS_PORT);
 

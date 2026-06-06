@@ -103,16 +103,17 @@ public class KafkaBrokerConfigurationBuilder {
             printSectionHeader("Cruise Control configuration");
             writer.println(CruiseControlConfigurationParameters.METRICS_TOPIC_NAME + "=" + ccMetricsReporter.topicName());
 
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_ENDPOINT_ID_ALGO + "=HTTPS");
-            // using the brokers service because the Admin client, in the Cruise Control metrics reporter, is not able to connect
-            // to the pods behind the bootstrap one when they are not ready during startup.
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_BOOTSTRAP_SERVERS + "=" + KafkaResources.brokersServiceName(clusterName) + ":9091");
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SECURITY_PROTOCOL + "=SSL");
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_TYPE + "=PEM");
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_CERTIFICATE_CHAIN + "=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_KEY + "=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_TYPE + "=PEM");
-            writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_CERTIFICATES + "=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
+            // Disable TLS
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_ENDPOINT_ID_ALGO + "=HTTPS");
+            //// using the brokers service because the Admin client, in the Cruise Control metrics reporter, is not able to connect
+            //// to the pods behind the bootstrap one when they are not ready during startup.
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_BOOTSTRAP_SERVERS + "=" + KafkaResources.brokersServiceName(clusterName) + ":9091");
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SECURITY_PROTOCOL + "=SSL");
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_TYPE + "=PEM");
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_CERTIFICATE_CHAIN + "=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_KEY + "=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_TYPE + "=PEM");
+            //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_CERTIFICATES + "=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
             writer.println(CruiseControlConfigurationParameters.METRICS_TOPIC_AUTO_CREATE + "=true");
 
             if (ccMetricsReporter.numPartitions() != null) {
@@ -243,7 +244,9 @@ public class KafkaBrokerConfigurationBuilder {
 
         // Control plane listener is configured for all nodes. Even brokers need to connect and talk to controllers, so
         // they need to know what is the security protocol and security configuration
-        securityProtocol.add(CONTROL_PLANE_LISTENER_NAME + ":SSL");
+        // Disable TLS
+        //securityProtocol.add(CONTROL_PLANE_LISTENER_NAME + ":SSL");
+        securityProtocol.add(CONTROL_PLANE_LISTENER_NAME + ":PLAINTEXT");
         configureControlPlaneListener(clusterName);
 
         ////////////////////
@@ -266,7 +269,9 @@ public class KafkaBrokerConfigurationBuilder {
 
         if (node.broker()) {
             // Replication Listener to be configured only on brokers
-            securityProtocol.add(REPLICATION_LISTENER_NAME + ":SSL");
+            // Disable TLS
+            //securityProtocol.add(REPLICATION_LISTENER_NAME + ":SSL");
+            securityProtocol.add(REPLICATION_LISTENER_NAME + ":PLAINTEXT");
             listeners.add(REPLICATION_LISTENER_NAME + "://0.0.0.0:9091");
             advertisedListeners.add(String.format("%s://%s:9091",
                     REPLICATION_LISTENER_NAME,
@@ -351,13 +356,14 @@ public class KafkaBrokerConfigurationBuilder {
      * @param listenerName  Name of the listener
      */
     private void configureListener(String listenerName, String clusterName) {
-        writer.println("listener.name." + listenerName + ".ssl.keystore.certificate.chain=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
-        writer.println("listener.name." + listenerName + ".ssl.keystore.key=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
-        writer.println("listener.name." + listenerName + ".ssl.keystore.type=PEM");
-        writer.println("listener.name." + listenerName + ".ssl.truststore.certificates=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
-        writer.println("listener.name." + listenerName + ".ssl.truststore.type=PEM");
-        writer.println("listener.name." + listenerName + ".ssl.client.auth=required");
-        writer.println();
+        // Disable TLS
+        //writer.println("listener.name." + listenerName + ".ssl.keystore.certificate.chain=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
+        //writer.println("listener.name." + listenerName + ".ssl.keystore.key=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
+        //writer.println("listener.name." + listenerName + ".ssl.keystore.type=PEM");
+        //writer.println("listener.name." + listenerName + ".ssl.truststore.certificates=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
+        //writer.println("listener.name." + listenerName + ".ssl.truststore.type=PEM");
+        //writer.println("listener.name." + listenerName + ".ssl.client.auth=required");
+        //writer.println();
     }
 
     /**
@@ -752,14 +758,14 @@ public class KafkaBrokerConfigurationBuilder {
         writer.println("remote.log.metadata.manager.impl.prefix=rlmm.config.");
         writer.println("remote.log.metadata.manager.class.name=org.apache.kafka.server.log.remote.metadata.storage.TopicBasedRemoteLogMetadataManager");
         writer.println("remote.log.metadata.manager.listener.name=" + REPLICATION_LISTENER_NAME);
-        writer.println("rlmm.config.remote.log.metadata.common.client.bootstrap.servers="
-            + clusterName + "-kafka-brokers:9091");
-        writer.println("rlmm.config.remote.log.metadata.common.client.security.protocol=SSL");
-        writer.println("rlmm.config.remote.log.metadata.common.client.ssl.keystore.certificate.chain=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
-        writer.println("rlmm.config.remote.log.metadata.common.client.ssl.keystore.key=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
-        writer.println("rlmm.config.remote.log.metadata.common.client.ssl.keystore.type=PEM");
-        writer.println("rlmm.config.remote.log.metadata.common.client.ssl.truststore.certificates=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
-        writer.println("rlmm.config.remote.log.metadata.common.client.ssl.truststore.type=PEM");
+        writer.println("rlmm.config.remote.log.metadata.common.client.bootstrap.servers=" + clusterName + "-kafka-brokers:9091");
+        // Disable TLS
+        //writer.println("rlmm.config.remote.log.metadata.common.client.security.protocol=SSL");
+        //writer.println("rlmm.config.remote.log.metadata.common.client.ssl.keystore.certificate.chain=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
+        //writer.println("rlmm.config.remote.log.metadata.common.client.ssl.keystore.key=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
+        //writer.println("rlmm.config.remote.log.metadata.common.client.ssl.keystore.type=PEM");
+        //writer.println("rlmm.config.remote.log.metadata.common.client.ssl.truststore.certificates=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
+        //writer.println("rlmm.config.remote.log.metadata.common.client.ssl.truststore.type=PEM");
 
         writer.println("# RSM configs set by the operator and by the user");
 
@@ -816,12 +822,13 @@ public class KafkaBrokerConfigurationBuilder {
 
         // configuration of Admin client that will check the cluster
         writer.println("client.quota.callback.static.kafka.admin.bootstrap.servers=" + KafkaResources.brokersServiceName(clusterName) + ":9091");
-        writer.println("client.quota.callback.static.kafka.admin.security.protocol=SSL");
-        writer.println("client.quota.callback.static.kafka.admin.ssl.keystore.certificate.chain=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
-        writer.println("client.quota.callback.static.kafka.admin.ssl.keystore.key=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
-        writer.println("client.quota.callback.static.kafka.admin.ssl.keystore.type=PEM");
-        writer.println("client.quota.callback.static.kafka.admin.ssl.truststore.certificates=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
-        writer.println("client.quota.callback.static.kafka.admin.ssl.truststore.type=PEM");
+        // Disable TLS
+        //writer.println("client.quota.callback.static.kafka.admin.security.protocol=SSL");
+        //writer.println("client.quota.callback.static.kafka.admin.ssl.keystore.certificate.chain=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".crt"));
+        //writer.println("client.quota.callback.static.kafka.admin.ssl.keystore.key=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), node.podName(), node.podName() + ".key"));
+        //writer.println("client.quota.callback.static.kafka.admin.ssl.keystore.type=PEM");
+        //writer.println("client.quota.callback.static.kafka.admin.ssl.truststore.certificates=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
+        //writer.println("client.quota.callback.static.kafka.admin.ssl.truststore.type=PEM");
 
         // configuration of user specified settings
         addOptionIfNotNull(writer, "client.quota.callback.static.produce", quotasPluginStrimzi.getProducerByteRate());

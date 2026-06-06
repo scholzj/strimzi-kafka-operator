@@ -30,7 +30,6 @@ import io.strimzi.operator.cluster.model.logging.LoggingModel;
 import io.strimzi.operator.cluster.model.logging.SupportsLogging;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
 import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.model.Ca;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -194,11 +193,12 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
             varList.add(ContainerUtils.createEnvVar(ENV_VAR_FULL_RECONCILIATION_INTERVAL_MS, Long.toString(reconciliationIntervalMs)));
         }
 
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_SECURITY_PROTOCOL, EntityTopicOperatorSpec.DEFAULT_SECURITY_PROTOCOL));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_TRUSTED_CERTS_SECRET_NAME, AbstractModel.clusterCaCertSecretName(cluster)));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_SECRET_NAME, KafkaResources.entityTopicOperatorSecretName(cluster)));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_KEY_NAME, Ca.SecretEntry.KEY.asKey(EntityOperator.COMPONENT_TYPE)));
-        varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_CERT_NAME, Ca.SecretEntry.CRT.asKey(EntityOperator.COMPONENT_TYPE)));
+        // Disable TLS
+        //varList.add(ContainerUtils.createEnvVar(ENV_VAR_SECURITY_PROTOCOL, EntityTopicOperatorSpec.DEFAULT_SECURITY_PROTOCOL));
+        //varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_TRUSTED_CERTS_SECRET_NAME, AbstractModel.clusterCaCertSecretName(cluster)));
+        //varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_SECRET_NAME, KafkaResources.entityTopicOperatorSecretName(cluster)));
+        //varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_KEY_NAME, Ca.SecretEntry.KEY.asKey(EntityOperator.COMPONENT_TYPE)));
+        //varList.add(ContainerUtils.createEnvVar(ENV_VAR_TLS_CERT_NAME, Ca.SecretEntry.CRT.asKey(EntityOperator.COMPONENT_TYPE)));
 
         varList.add(ContainerUtils.createEnvVar(ENV_VAR_STRIMZI_GC_LOG_ENABLED, Boolean.toString(gcLoggingEnabled)));
 

@@ -92,8 +92,11 @@ public class KafkaAgentClient {
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(keyManagerFactory.getKeyManagers(), trustManagerFactory.getTrustManagers(), null);
 
+            // Disable TLS
+            //return HttpClient.newBuilder()
+            //        .sslContext(sslContext)
+            //        .build();
             return HttpClient.newBuilder()
-                    .sslContext(sslContext)
                     .build();
         } catch (GeneralSecurityException | IOException e) {
             throw new RuntimeException("Failed to configure HTTP client", e);
