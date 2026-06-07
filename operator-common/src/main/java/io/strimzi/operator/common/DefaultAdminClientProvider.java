@@ -93,6 +93,14 @@ public class DefaultAdminClientProvider implements AdminClientProvider {
         //    config.setProperty(SslConfigs.SSL_KEYSTORE_KEY_CONFIG, authIdentity.privateKeyAsPem());
         //}
 
+        System.setProperty("org.apache.kafka.sasl.oauthbearer.allowed.urls", "file:///var/run/secrets/strimzi.io/token");
+
+        config.putIfAbsent("security.protocol", "SASL_PLAINTEXT");
+        config.setProperty("sasl.mechanism", "OAUTHBEARER");
+        config.setProperty("sasl.login.callback.handler.class", "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
+        config.setProperty("sasl.oauthbearer.token.endpoint.url", "file:///var/run/secrets/strimzi.io/token");
+        config.setProperty("sasl.jaas.config", "org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;");
+
         config.putIfAbsent(AdminClientConfig.METADATA_MAX_AGE_CONFIG, "30000");
         config.putIfAbsent(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "10000");
         config.putIfAbsent(AdminClientConfig.RETRIES_CONFIG, "3");

@@ -17,6 +17,7 @@ import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeBuilder;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.VolumeMountBuilder;
+import io.fabric8.kubernetes.api.model.VolumeProjectionBuilder;
 import io.strimzi.api.kafka.model.common.template.PodTemplate;
 import io.strimzi.api.kafka.model.kafka.EphemeralStorage;
 import io.strimzi.api.kafka.model.kafka.JbodStorage;
@@ -203,6 +204,31 @@ public class VolumeUtils {
         return new VolumeBuilder()
                 .withName(validName)
                 .withEmptyDir(emptyDirVolumeSource)
+                .build();
+    }
+
+    /**
+     * Creates a Service Account projection volume
+     *
+     * @param name          Name of the Volume
+     * @param audience      Audience for the Service Account token
+     * @param path          Path where the token will be stored in the volume
+     * @param expiration    Expiration time of the token in seconds
+     *
+     * @return The Service Account projection volume
+     */
+    public static Volume createServiceAccountProjection(String name, String audience, String path, long expiration) {
+        return new VolumeBuilder()
+                .withName(name)
+                .withNewProjected()
+                    .withSources(new VolumeProjectionBuilder()
+                            .withNewServiceAccountToken()
+                                .withAudience(audience)
+                                .withExpirationSeconds(expiration)
+                                .withPath(path)
+                            .endServiceAccountToken()
+                            .build())
+                .endProjected()
                 .build();
     }
 

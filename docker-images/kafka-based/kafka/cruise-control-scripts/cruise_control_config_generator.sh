@@ -26,6 +26,11 @@ webserver.http.cors.allowmethods=OPTIONS,GET
 #ssl.truststore.type=PKCS12
 #ssl.truststore.location=/tmp/cruise-control/replication.truststore.p12
 #ssl.truststore.password=$CERTS_STORE_PASSWORD
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=OAUTHBEARER
+sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler
+sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token
+sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;
 kafka.broker.failure.detection.enable=true
 capacity.config.file=/opt/cruise-control/custom-config/capacity.json
 ${CRUISE_CONTROL_CONFIGURATION}

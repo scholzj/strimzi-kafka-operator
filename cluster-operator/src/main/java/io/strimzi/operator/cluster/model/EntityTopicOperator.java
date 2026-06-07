@@ -252,6 +252,8 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
             result.add(VolumeUtils.createVolumeMount(ETO_CC_API_VOLUME_NAME, ETO_CC_API_VOLUME_MOUNT));
         }
 
+        result.add(VolumeUtils.createVolumeMount("strimzi-token", "/var/run/secrets/strimzi.io"));
+
         TemplateUtils.addAdditionalVolumeMounts(result, templateContainer);
 
         return Collections.unmodifiableList(result);

@@ -334,6 +334,7 @@ public class CruiseControl extends AbstractModel implements SupportsMetrics, Sup
         volumes.add(VolumeUtils.createSecretVolume(TLS_CA_CERTS_VOLUME_NAME, AbstractModel.clusterCaCertSecretName(cluster), isOpenShift));
         volumes.add(VolumeUtils.createSecretVolume(API_AUTH_CONFIG_VOLUME_NAME, CruiseControlResources.apiSecretName(cluster), isOpenShift));
         volumes.add(VolumeUtils.createConfigMapVolume(CONFIG_VOLUME_NAME, CruiseControlResources.configMapName(cluster)));
+        volumes.add(VolumeUtils.createServiceAccountProjection("strimzi-token", "strimzi.io", "token", 3600L));
 
         TemplateUtils.addAdditionalVolumes(templatePod, volumes);
 
@@ -347,6 +348,7 @@ public class CruiseControl extends AbstractModel implements SupportsMetrics, Sup
         volumeMounts.add(VolumeUtils.createVolumeMount(CruiseControl.TLS_CA_CERTS_VOLUME_NAME, CruiseControl.TLS_CA_CERTS_VOLUME_MOUNT));
         volumeMounts.add(VolumeUtils.createVolumeMount(CruiseControl.API_AUTH_CONFIG_VOLUME_NAME, CruiseControl.API_AUTH_CONFIG_VOLUME_MOUNT));
         volumeMounts.add(VolumeUtils.createVolumeMount(CONFIG_VOLUME_NAME, CONFIG_VOLUME_MOUNT));
+        volumeMounts.add(VolumeUtils.createVolumeMount("strimzi-token", "/var/run/secrets/strimzi.io"));
 
         TemplateUtils.addAdditionalVolumeMounts(volumeMounts, templateContainer);
 

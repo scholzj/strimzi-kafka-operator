@@ -221,6 +221,11 @@
             <artifactId>kafka-server-common</artifactId>
         </dependency>
         <dependency>
+            <!-- Needed for Service Account based authentication -->
+            <groupId>org.bitbucket.b_c</groupId>
+            <artifactId>jose4j</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-transport</artifactId>
         </dependency>
@@ -305,6 +310,8 @@
                                 <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-client</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>io.fabric8:openshift-client</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-httpclient-jdk</ignoredUnusedDeclaredDependency>
+                                <!-- Needed for Service Account based authentication -->
+                                <ignoredUnusedDeclaredDependency>org.bitbucket.b_c:jose4j</ignoredUnusedDeclaredDependency>
                                 <!-- Needed for logging -->
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-core</ignoredUnusedDeclaredDependency>
                                 <!-- Needed for logging using the Kubernetes Client (uses SLF4J) -->

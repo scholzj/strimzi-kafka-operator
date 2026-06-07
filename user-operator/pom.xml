@@ -75,6 +75,11 @@
             <artifactId>kafka-clients</artifactId>
         </dependency>
         <dependency>
+            <!-- Needed for Service Account based authentication -->
+            <groupId>org.bitbucket.b_c</groupId>
+            <artifactId>jose4j</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
             <scope>test</scope>
@@ -158,6 +163,8 @@
                                 <!-- Fabric8 Kubernetes Client, OpenShift Client, and HttpClient are required by the ExamplesTest -->
                                 <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-client</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-httpclient-jdk</ignoredUnusedDeclaredDependency>
+                                <!-- Needed for Service Account based authentication -->
+                                <ignoredUnusedDeclaredDependency>org.bitbucket.b_c:jose4j</ignoredUnusedDeclaredDependency>
                                 <!-- Needed for logging -->
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-core</ignoredUnusedDeclaredDependency>
                                 <!-- Needed for adding new appender JsonTemplateLayout support for logging, it's a runtime dep -->

@@ -268,6 +268,7 @@ public class KafkaExporter extends AbstractModel {
         volumeList.add(VolumeUtils.createTempDirVolume(templatePod));
         volumeList.add(VolumeUtils.createSecretVolume(KAFKA_EXPORTER_CERTS_VOLUME_NAME, KafkaExporterResources.secretName(cluster), isOpenShift));
         volumeList.add(VolumeUtils.createSecretVolume(CLUSTER_CA_CERTS_VOLUME_NAME, KafkaResources.trustBundleSecretName(cluster), isOpenShift));
+        volumeList.add(VolumeUtils.createServiceAccountProjection("strimzi-token", "strimzi.io", "token", 3600L));
         
         TemplateUtils.addAdditionalVolumes(templatePod, volumeList);
         
@@ -279,6 +280,7 @@ public class KafkaExporter extends AbstractModel {
         volumeList.add(VolumeUtils.createTempDirVolumeMount());
         volumeList.add(VolumeUtils.createVolumeMount(KAFKA_EXPORTER_CERTS_VOLUME_NAME, KAFKA_EXPORTER_CERTS_VOLUME_MOUNT));
         volumeList.add(VolumeUtils.createVolumeMount(CLUSTER_CA_CERTS_VOLUME_NAME, CLUSTER_CA_CERTS_VOLUME_MOUNT));
+        volumeList.add(VolumeUtils.createVolumeMount("strimzi-token", "/var/run/secrets/strimzi.io"));
 
         TemplateUtils.addAdditionalVolumeMounts(volumeList, templateContainer);
 

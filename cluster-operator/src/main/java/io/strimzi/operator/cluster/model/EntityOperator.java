@@ -220,7 +220,9 @@ public class EntityOperator extends AbstractModel {
         if (userOperator != null) {
             volumeList.addAll(userOperator.getVolumes(templatePod));
         }
-        
+
+        volumeList.add(VolumeUtils.createServiceAccountProjection("strimzi-token", "strimzi.io", "token", 3600L));
+
         addAdditionalVolumes(templatePod, volumeList);
 
         return volumeList;

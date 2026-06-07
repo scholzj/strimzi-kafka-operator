@@ -243,6 +243,7 @@ public class EntityUserOperator extends AbstractModel implements SupportsLogging
         List<VolumeMount> volumeMounts = new ArrayList<>();
         volumeMounts.add(VolumeUtils.createTempDirVolumeMount(USER_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME));
         volumeMounts.add(VolumeUtils.createVolumeMount(LOG_AND_METRICS_CONFIG_VOLUME_NAME, LOG_AND_METRICS_CONFIG_VOLUME_MOUNT));
+        volumeMounts.add(VolumeUtils.createVolumeMount("strimzi-token", "/var/run/secrets/strimzi.io"));
 
         TemplateUtils.addAdditionalVolumeMounts(volumeMounts, templateContainer);
 

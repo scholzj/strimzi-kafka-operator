@@ -1442,6 +1442,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         volumeList.add(VolumeUtils.createTempDirVolume(templatePod));
         volumeList.add(VolumeUtils.createConfigMapVolume(LOG_AND_METRICS_CONFIG_VOLUME_NAME, node.podName()));
         volumeList.add(VolumeUtils.createEmptyDirVolume("ready-files", "1Ki", "Memory"));
+        volumeList.add(VolumeUtils.createServiceAccountProjection("strimzi-token", "strimzi.io", "token", 3600L));
 
         // Some volumes are used only on nodes with broker role and are not needed on controller-only nodes
         if (node.broker()) {
@@ -1489,6 +1490,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         volumeMountList.add(VolumeUtils.createTempDirVolumeMount());
         volumeMountList.add(VolumeUtils.createVolumeMount(LOG_AND_METRICS_CONFIG_VOLUME_NAME, LOG_AND_METRICS_CONFIG_VOLUME_MOUNT));
         volumeMountList.add(VolumeUtils.createVolumeMount("ready-files", "/var/opt/kafka"));
+        volumeMountList.add(VolumeUtils.createVolumeMount("strimzi-token", "/var/run/secrets/strimzi.io"));
 
         // Some volumes are used only on nodes with broker role and are not needed on controller-only nodes
         if (isBroker)   {

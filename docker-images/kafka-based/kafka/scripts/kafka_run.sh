@@ -88,7 +88,7 @@ namespace=${NAMESPACE}
 EOF
 echo ""
 
-KAFKA_OPTS="${KAFKA_OPTS} -javaagent:$(ls "$KAFKA_HOME"/libs/kafka-agent*.jar)=/tmp/kafka-agent.properties"
+KAFKA_OPTS="${KAFKA_OPTS} -Dorg.apache.kafka.sasl.oauthbearer.allowed.urls=file:///var/run/secrets/strimzi.io/token -javaagent:$(ls "$KAFKA_HOME"/libs/kafka-agent*.jar)=/tmp/kafka-agent.properties"
 export KAFKA_OPTS
 
 # Configure Garbage Collection logging
