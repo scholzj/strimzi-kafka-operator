@@ -64,13 +64,6 @@ spec:
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
       volumes:
-        - name: strimzi-token
-          projected:
-            sources:
-              - serviceAccountToken:
-                  audience: strimzi.io
-                  expirationSeconds: 3600
-                  path: token
         - name: strimzi-tmp
           emptyDir:
             medium: Memory
@@ -94,8 +87,6 @@ spec:
               mountPath: /tmp
             - name: {{ .Values.logVolume }}
               mountPath: /opt/strimzi/custom-config/
-            - mountPath: /var/run/secrets/strimzi.io/
-              name: strimzi-token
           env:
             - name: STRIMZI_NAMESPACE
               {{- if .Values.watchAnyNamespace }}

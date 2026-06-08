@@ -511,7 +511,7 @@ public class KafkaBrokerConfigurationBuilder {
             superUsers.add(String.format("User:system:serviceaccount:myproject:%s-%s", clusterName, "entity-operator"));
             superUsers.add(String.format("User:system:serviceaccount:myproject:%s-%s", clusterName, "kafka-exporter"));
             superUsers.add(String.format("User:system:serviceaccount:myproject:%s-%s", clusterName, "cruise-control"));
-            superUsers.add(String.format("User:system:serviceaccount:myproject:strimzi-cluster-operator"));
+            superUsers.add(String.format("User:system:serviceaccount:myproject:%s-%s", clusterName, "cluster-operator"));
 
             printSectionHeader("Authorization");
             configureAuthorization(superUsers, authorization);

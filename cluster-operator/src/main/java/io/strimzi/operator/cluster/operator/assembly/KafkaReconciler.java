@@ -250,6 +250,7 @@ public class KafkaReconciler {
     public Future<Void> reconcile(KafkaStatus kafkaStatus, Clock clock)    {
         return modelWarnings(kafkaStatus)
                 .compose(i -> initClientAuthenticationCertificates())
+                .compose(i -> clusterOperatorServiceAccount())
                 .compose(i -> manualPodCleaning())
                 .compose(i -> networkPolicy())
                 .compose(i -> updateKafkaAutoRebalanceStatus(kafkaStatus))
@@ -522,6 +523,17 @@ public class KafkaReconciler {
     protected Future<Void> serviceAccount() {
         return serviceAccountOperator
                 .reconcile(reconciliation, reconciliation.namespace(), KafkaResources.kafkaComponentName(reconciliation.name()), kafka.generateServiceAccount())
+                .mapEmpty();
+    }
+
+    /**
+     * Manages the Cluster Operator service account
+     *
+     * @return  Completes when the service account was successfully created or updated
+     */
+    protected Future<Void> clusterOperatorServiceAccount() {
+        return serviceAccountOperator
+                .reconcile(reconciliation, reconciliation.namespace(), reconciliation.name() + "-cluster-operator", kafka.generateCoServiceAccount())
                 .mapEmpty();
     }
 

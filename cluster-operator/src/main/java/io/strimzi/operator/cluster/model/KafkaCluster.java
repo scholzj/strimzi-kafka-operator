@@ -14,6 +14,7 @@ import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.Service;
+import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.ServicePort;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
@@ -2012,5 +2013,20 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         public NodePoolNotFoundException(String message) {
             super(message);
         }
+    }
+
+    /**
+     * Generates the Kubernetes service account.
+     *
+     * @return The service account.
+     */
+    public ServiceAccount generateCoServiceAccount() {
+        return ServiceAccountUtils.createServiceAccount(
+                reconciliation.name() + "-cluster-operator",
+                namespace,
+                labels,
+                ownerReference,
+                null
+        );
     }
 }

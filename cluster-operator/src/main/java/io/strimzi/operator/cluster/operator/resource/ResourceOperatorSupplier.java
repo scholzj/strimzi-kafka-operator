@@ -48,7 +48,6 @@ import io.strimzi.operator.cluster.operator.resource.kubernetes.StorageClassOper
 import io.strimzi.operator.cluster.operator.resource.kubernetes.StrimziPodSetOperator;
 import io.strimzi.operator.cluster.operator.resource.kubernetes.TLSRouteOperator;
 import io.strimzi.operator.common.AdminClientProvider;
-import io.strimzi.operator.common.DefaultAdminClientProvider;
 import io.strimzi.operator.common.MetricsProvider;
 import io.strimzi.operator.common.featuregates.FeatureGates;
 import io.vertx.core.Vertx;
@@ -241,8 +240,8 @@ public class ResourceOperatorSupplier {
     public ResourceOperatorSupplier(Vertx vertx, KubernetesClient client, MetricsProvider metricsProvider, PlatformFeaturesAvailability pfa, String operatorName, FeatureGates featureGates) {
         this(vertx,
             client,
-            new DefaultAdminClientProvider(),
-            new DefaultKafkaAgentClientProvider(),
+            new DefaultTokenizedAdminClientProvider(),
+            new DefaultKafkaAgentClientProvider(client),
             metricsProvider,
             pfa,
             new KubernetesRestartEventPublisher(client, operatorName),

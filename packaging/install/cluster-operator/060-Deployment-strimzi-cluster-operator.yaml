@@ -18,13 +18,6 @@ spec:
     spec:
       serviceAccountName: strimzi-cluster-operator
       volumes:
-        - name: strimzi-token
-          projected:
-            sources:
-              - serviceAccountToken:
-                  audience: strimzi.io
-                  expirationSeconds: 3600
-                  path: token
         - name: strimzi-tmp
           emptyDir:
             medium: Memory
@@ -45,8 +38,6 @@ spec:
               mountPath: /tmp
             - name: co-config-volume
               mountPath: /opt/strimzi/custom-config/
-            - mountPath: /var/run/secrets/strimzi.io/
-              name: strimzi-token
           env:
             - name: STRIMZI_NAMESPACE
               valueFrom:

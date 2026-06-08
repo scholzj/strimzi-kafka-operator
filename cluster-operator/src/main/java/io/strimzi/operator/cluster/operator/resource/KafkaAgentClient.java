@@ -6,6 +6,9 @@ package io.strimzi.operator.cluster.operator.resource;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.fabric8.kubernetes.api.model.authentication.TokenRequest;
+import io.fabric8.kubernetes.api.model.authentication.TokenRequestBuilder;
+import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.model.kafka.KafkaResources;
 import io.strimzi.operator.cluster.model.DnsNameGenerator;
 import io.strimzi.operator.common.Reconciliation;
@@ -22,11 +25,8 @@ import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
+import java.time.Instant;
 
 /**
  * Creates HTTP client and interacts with Kafka Agent's REST endpoint
@@ -38,28 +38,44 @@ public class KafkaAgentClient {
     private static final String BROKER_STATE_REST_PATH = "/v1/broker-state/";
     private static final int KAFKA_AGENT_HTTPS_PORT = 8443;
     private static final char[] KEYSTORE_PASSWORD = "changeit".toCharArray();
-    // Path of the projected Service Account token mounted into the cluster-operator Pod.
-    // The Kafka Agent validates this token to authenticate the operator's requests.
-    private static final Path SA_TOKEN_PATH = Paths.get("/var/run/secrets/strimzi.io/token");
+    // The Service Account whose identity we present to the Kafka Agent. It lives in the Kafka
+    // cluster's own namespace, so the resulting principal does not depend on where the operator
+    // is installed.
+    private static final String CO_SA_NAME_SUFFIX = "-cluster-operator";
+    // Audience the Kafka Agent checks on the minted token. Must match the agent's allowedSubjects config.
+    private static final String SA_TOKEN_AUDIENCE = "strimzi.io";
+    private static final long SA_TOKEN_EXPIRATION_SECONDS = 3600L;
+    // Refresh slightly before the API server's expiration time to avoid using a token that
+    // expires mid-request.
+    private static final long SA_TOKEN_REFRESH_BUFFER_MS = 60_000L;
+
     private final String namespace;
     private final Reconciliation reconciliation;
     private final String cluster;
+    private final String serviceAccountName;
+    private final KubernetesClient kubernetesClient;
     private TlsPemIdentity tlsPemIdentity;
     private HttpClient httpClient;
+
+    private String cachedToken;
+    private long cachedTokenRefreshAt;
 
     /**
      * Constructor
      *
      * @param reconciliation    Reconciliation marker
-     * @param cluster   Cluster name
-     * @param namespace Cluster namespace
-     * @param tlsPemIdentity Trust set and identity for TLS client authentication for connecting to the Kafka cluster
+     * @param cluster           Cluster name
+     * @param namespace         Cluster namespace
+     * @param tlsPemIdentity    Trust set and identity for TLS client authentication for connecting to the Kafka cluster
+     * @param kubernetesClient  Kubernetes client used to mint Service Account tokens via the TokenRequest API
      */
-    public KafkaAgentClient(Reconciliation reconciliation, String cluster, String namespace, TlsPemIdentity tlsPemIdentity) {
+    public KafkaAgentClient(Reconciliation reconciliation, String cluster, String namespace, TlsPemIdentity tlsPemIdentity, KubernetesClient kubernetesClient) {
         this.reconciliation = reconciliation;
         this.cluster = cluster;
         this.namespace = namespace;
         this.tlsPemIdentity = tlsPemIdentity;
+        this.kubernetesClient = kubernetesClient;
+        this.serviceAccountName = cluster + CO_SA_NAME_SUFFIX;
         this.httpClient = createHttpClient();
     }
 
@@ -74,6 +90,16 @@ public class KafkaAgentClient {
         this.reconciliation = reconciliation;
         this.namespace = namespace;
         this.cluster =  cluster;
+        this.serviceAccountName = cluster + CO_SA_NAME_SUFFIX;
+        this.kubernetesClient = null;
+    }
+
+    /* test */ KafkaAgentClient(Reconciliation reconciliation, String cluster, String namespace, KubernetesClient kubernetesClient) {
+        this.reconciliation = reconciliation;
+        this.namespace = namespace;
+        this.cluster = cluster;
+        this.kubernetesClient = kubernetesClient;
+        this.serviceAccountName = cluster + CO_SA_NAME_SUFFIX;
     }
 
     private HttpClient createHttpClient() {
@@ -114,7 +140,7 @@ public class KafkaAgentClient {
         try {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(uri)
-                    .header("Authorization", "Bearer " + readServiceAccountToken(SA_TOKEN_PATH))
+                    .header("Authorization", "Bearer " + currentToken())
                     .GET()
                     .build();
 
@@ -129,18 +155,32 @@ public class KafkaAgentClient {
     }
 
     /**
-     * Reads the current Service Account token from the projected token volume. The token is
-     * re-read on every request because the kubelet rotates projected tokens on disk before they expire.
+     * Returns a valid Service Account token for the per-cluster cluster-operator SA, minting a fresh
+     * one via the Kubernetes TokenRequest API when no cached token is available or it is about to expire.
      *
-     * @param path  Filesystem path of the token file
-     * @return      Trimmed token contents
+     * @return  JWT token string suitable for use in an HTTP Authorization Bearer header
      */
-    static String readServiceAccountToken(Path path) {
-        try {
-            return Files.readString(path, StandardCharsets.UTF_8).trim();
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read Service Account token from " + path, e);
+    synchronized String currentToken() {
+        if (cachedToken == null || System.currentTimeMillis() >= cachedTokenRefreshAt) {
+            TokenRequest request = new TokenRequestBuilder()
+                    .withNewSpec()
+                        .withAudiences(SA_TOKEN_AUDIENCE)
+                        .withExpirationSeconds(SA_TOKEN_EXPIRATION_SECONDS)
+                    .endSpec()
+                    .build();
+            TokenRequest response = kubernetesClient.serviceAccounts()
+                    .inNamespace(namespace)
+                    .withName(serviceAccountName)
+                    .tokenRequest(request);
+
+            if (response == null || response.getStatus() == null || response.getStatus().getToken() == null) {
+                throw new RuntimeException("Kubernetes API did not return a token for ServiceAccount " + namespace + "/" + serviceAccountName);
+            }
+
+            cachedToken = response.getStatus().getToken();
+            cachedTokenRefreshAt = Instant.parse(response.getStatus().getExpirationTimestamp()).toEpochMilli() - SA_TOKEN_REFRESH_BUFFER_MS;
         }
+        return cachedToken;
     }
 
     /**
