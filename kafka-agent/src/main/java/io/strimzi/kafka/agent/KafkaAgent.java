@@ -35,10 +35,13 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 /**
  * A very simple Java agent which polls the value of the {@code kafka.server:type=KafkaServer,name=BrokerState}
@@ -73,9 +76,17 @@ public class KafkaAgent {
     private static final byte BROKER_RUNNING_STATE = 3;
     private static final byte BROKER_RECOVERY_STATE = 2;
     private static final byte BROKER_UNKNOWN_STATE = 127;
+
+    // Defaults for Service Account token validation against the in-cluster Kubernetes API server.
+    private static final String DEFAULT_SA_TOKEN_ISSUER = "https://kubernetes.default.svc.cluster.local";
+    private static final String DEFAULT_SA_TOKEN_AUDIENCE = "strimzi.io";
+    private static final String DEFAULT_SA_TOKEN_JWKS_URI = "https://kubernetes.default.svc.cluster.local/openid/v1/jwks";
+    private static final String DEFAULT_SA_TOKEN_JWKS_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt";
+
     static final SecureRandom RANDOM = new SecureRandom();
     private final Secret caCertSecret;
     private final Secret nodeCertSecret;
+    private final KafkaAgentAuthenticator authenticator;
     private MetricName brokerStateName;
     private Gauge brokerState;
     private Gauge remainingLogsToRecover;
@@ -88,10 +99,12 @@ public class KafkaAgent {
      * @param caCertSecretName      CA certificate Secret name
      * @param nodeCertSecretName    Node certificate Secret name
      * @param namespace             Namespace where the Kafka cluster is running
+     * @param authenticator         Authenticator used to validate Service Account tokens on the public connector
      */
-    /* test */ KafkaAgent(KubernetesClient client, String caCertSecretName, String nodeCertSecretName, String namespace) {
+    /* test */ KafkaAgent(KubernetesClient client, String caCertSecretName, String nodeCertSecretName, String namespace, KafkaAgentAuthenticator authenticator) {
         this.caCertSecret = getKubernetesSecret(client, caCertSecretName, namespace);
         this.nodeCertSecret = getKubernetesSecret(client, nodeCertSecretName, namespace);
+        this.authenticator = authenticator;
     }
 
     private Secret getKubernetesSecret(KubernetesClient client, String caCertSecretName, String namespace) {
@@ -108,11 +121,26 @@ public class KafkaAgent {
      * @param remainingSegmentsToRecover    Number of remaining segments to recover
      */
     /* test */ KafkaAgent(Secret caCertSecret, Secret nodeCertSecret, Gauge brokerState, Gauge remainingLogsToRecover, Gauge remainingSegmentsToRecover) {
+        this(caCertSecret, nodeCertSecret, brokerState, remainingLogsToRecover, remainingSegmentsToRecover, null);
+    }
+
+    /**
+     * Constructor of the KafkaAgent
+     *
+     * @param caCertSecret                  CA certificate Secret
+     * @param nodeCertSecret                Node certificate Secret
+     * @param brokerState                   Current state of the broker
+     * @param remainingLogsToRecover        Number of remaining logs to recover
+     * @param remainingSegmentsToRecover    Number of remaining segments to recover
+     * @param authenticator                 Authenticator used to validate Service Account tokens on the public connector
+     */
+    /* test */ KafkaAgent(Secret caCertSecret, Secret nodeCertSecret, Gauge brokerState, Gauge remainingLogsToRecover, Gauge remainingSegmentsToRecover, KafkaAgentAuthenticator authenticator) {
         this.caCertSecret = caCertSecret;
         this.nodeCertSecret = nodeCertSecret;
         this.brokerState = brokerState;
         this.remainingLogsToRecover = remainingLogsToRecover;
         this.remainingSegmentsToRecover = remainingSegmentsToRecover;
+        this.authenticator = authenticator;
     }
 
     private void run() {
@@ -220,11 +248,66 @@ public class KafkaAgent {
         readinessContext.setHandler(getReadinessHandler());
 
         server.setConnectors(new Connector[] {httpsConn, httpConn});
-        server.setHandler(new ContextHandlerCollection(brokerStateContext, readinessContext));
+        // The public connector requires Service Account token authentication for every endpoint;
+        // the localhost connector is left unauthenticated since it serves the kubelet readiness probe.
+        server.setHandler(authHandler(new ContextHandlerCollection(brokerStateContext, readinessContext), httpsConn));
 
         server.setStopTimeout(GRACEFUL_SHUTDOWN_TIMEOUT_MS);
         server.setStopAtShutdown(true);
         server.start();
+    }
+
+    /**
+     * Wraps the supplied handler in an {@link AuthHandler} that authenticates
+     * any request arriving on {@code authenticatedConnector}, and lets other
+     * connectors through unauthenticated.
+     *
+     * @param wrapped                   Handler to delegate to once auth succeeds
+     * @param authenticatedConnector    Connector whose traffic must present a valid Service Account token
+     * @return                          The wrapping handler
+     */
+    /* test */ Handler authHandler(Handler wrapped, Connector authenticatedConnector) {
+        AuthHandler handler = new AuthHandler(authenticator, authenticatedConnector);
+        handler.setHandler(wrapped);
+        return handler;
+    }
+
+    /**
+     * Jetty handler that gates traffic on a specific connector behind
+     * {@link KafkaAgentAuthenticator}. Requests on other connectors pass
+     * through to the wrapped handler unchanged.
+     */
+    static class AuthHandler extends Handler.Wrapper {
+        private final KafkaAgentAuthenticator authenticator;
+        private final Connector authenticatedConnector;
+
+        AuthHandler(KafkaAgentAuthenticator authenticator, Connector authenticatedConnector) {
+            this.authenticator = authenticator;
+            this.authenticatedConnector = authenticatedConnector;
+        }
+
+        @Override
+        public boolean handle(Request request, Response response, Callback callback) throws Exception {
+            if (request.getConnectionMetaData().getConnector() == authenticatedConnector) {
+                if (authenticator == null) {
+                    LOGGER.error("Request received on the authenticated connector but no authenticator is configured");
+                    response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                    response.write(true, StandardCharsets.UTF_8.encode("Authenticator not configured"), callback);
+                    return true;
+                }
+                String header = request.getHeaders().get(HttpHeader.AUTHORIZATION);
+                try {
+                    authenticator.authenticate(header);
+                } catch (KafkaAgentAuthenticator.AuthenticationException e) {
+                    LOGGER.debug("Rejected unauthenticated request to {}: {}", request.getHttpURI(), e.getMessage());
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.getHeaders().put(HttpHeader.WWW_AUTHENTICATE, "Bearer realm=\"kafka-agent\"");
+                    response.write(true, StandardCharsets.UTF_8.encode("Unauthorized"), callback);
+                    return true;
+                }
+            }
+            return super.handle(request, response, callback);
+        }
     }
 
     /**
@@ -337,13 +420,29 @@ public class KafkaAgent {
             final String caCertSecretName = agentConfigs.get("sslTrustStoreSecretName");
             final String nodeCertSecretName = agentConfigs.get("sslKeyStoreSecretName");
             final String namespace = agentConfigs.get("namespace");
+            final String allowedSubjectsRaw = agentConfigs.get("allowedSubjects");
             if (caCertSecretName.isEmpty() || nodeCertSecretName.isEmpty() || namespace.isEmpty()) {
                 LOGGER.error("Missing the required Secret information: sslTrustStoreSecretName={} sslKeyStoreSecretName={} namespace={}", caCertSecretName, nodeCertSecretName, namespace);
                 System.exit(1);
+            } else if (allowedSubjectsRaw == null || allowedSubjectsRaw.isEmpty()) {
+                LOGGER.error("Missing required configuration: allowedSubjects must list one or more Service Account subjects permitted to call the agent");
+                System.exit(1);
             } else {
-                LOGGER.info("Starting KafkaAgent with sslTrustStoreSecretName={} sslKeyStoreSecretName={} namespace={}", caCertSecretName, nodeCertSecretName, namespace);
+                final String issuer = agentConfigs.getOrDefault("saTokenIssuer", DEFAULT_SA_TOKEN_ISSUER);
+                final String audience = agentConfigs.getOrDefault("saTokenAudience", DEFAULT_SA_TOKEN_AUDIENCE);
+                final String jwksUri = agentConfigs.getOrDefault("saTokenJwksUri", DEFAULT_SA_TOKEN_JWKS_URI);
+                final String jwksCaPath = agentConfigs.getOrDefault("saTokenJwksCaPath", DEFAULT_SA_TOKEN_JWKS_CA_PATH);
+                final List<String> allowedSubjects = Arrays.stream(allowedSubjectsRaw.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
+
+                LOGGER.info("Starting KafkaAgent with sslTrustStoreSecretName={} sslKeyStoreSecretName={} namespace={} saTokenIssuer={} saTokenAudience={} saTokenJwksUri={} allowedSubjects={}",
+                        caCertSecretName, nodeCertSecretName, namespace, issuer, audience, jwksUri, allowedSubjects);
+
+                KafkaAgentAuthenticator authenticator = new KafkaAgentAuthenticator(issuer, audience, jwksUri, jwksCaPath, allowedSubjects);
                 KubernetesClient client = new KubernetesClientBuilder().build();
-                new KafkaAgent(client, caCertSecretName, nodeCertSecretName, namespace).run();
+                new KafkaAgent(client, caCertSecretName, nodeCertSecretName, namespace, authenticator).run();
             }
         }
     }

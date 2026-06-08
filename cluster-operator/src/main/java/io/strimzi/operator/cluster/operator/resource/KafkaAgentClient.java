@@ -22,6 +22,10 @@ import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 
 /**
@@ -34,6 +38,9 @@ public class KafkaAgentClient {
     private static final String BROKER_STATE_REST_PATH = "/v1/broker-state/";
     private static final int KAFKA_AGENT_HTTPS_PORT = 8443;
     private static final char[] KEYSTORE_PASSWORD = "changeit".toCharArray();
+    // Path of the projected Service Account token mounted into the cluster-operator Pod.
+    // The Kafka Agent validates this token to authenticate the operator's requests.
+    private static final Path SA_TOKEN_PATH = Paths.get("/var/run/secrets/strimzi.io/token");
     private final String namespace;
     private final Reconciliation reconciliation;
     private final String cluster;
@@ -107,6 +114,7 @@ public class KafkaAgentClient {
         try {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(uri)
+                    .header("Authorization", "Bearer " + readServiceAccountToken(SA_TOKEN_PATH))
                     .GET()
                     .build();
 
@@ -117,6 +125,21 @@ public class KafkaAgentClient {
             return response.body();
         } catch (IOException | InterruptedException e) {
             throw new RuntimeException("Failed to send HTTP request to Kafka Agent", e);
+        }
+    }
+
+    /**
+     * Reads the current Service Account token from the projected token volume. The token is
+     * re-read on every request because the kubelet rotates projected tokens on disk before they expire.
+     *
+     * @param path  Filesystem path of the token file
+     * @return      Trimmed token contents
+     */
+    static String readServiceAccountToken(Path path) {
+        try {
+            return Files.readString(path, StandardCharsets.UTF_8).trim();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read Service Account token from " + path, e);
         }
     }
 

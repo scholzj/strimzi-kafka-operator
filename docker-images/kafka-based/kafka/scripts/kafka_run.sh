@@ -85,6 +85,7 @@ cat <<EOF > /tmp/kafka-agent.properties
 sslTrustStoreSecretName=${KAFKA_CLUSTER_NAME}-cluster-ca-cert
 sslKeyStoreSecretName=${HOSTNAME}
 namespace=${NAMESPACE}
+allowedSubjects=system:serviceaccount:${NAMESPACE}:strimzi-cluster-operator
 EOF
 echo ""
 

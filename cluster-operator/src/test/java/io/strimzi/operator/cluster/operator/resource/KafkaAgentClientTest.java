@@ -6,8 +6,14 @@ package io.strimzi.operator.cluster.operator.resource;
 
 import io.strimzi.operator.common.Reconciliation;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -59,5 +65,21 @@ public class KafkaAgentClientTest {
         assertEquals(-1, actual.code());
         assertEquals(0, actual.remainingLogsToRecover());
         assertEquals(0, actual.remainingSegmentsToRecover());
+    }
+
+    @Test
+    public void testReadServiceAccountToken(@TempDir Path tempDir) throws Exception {
+        Path tokenFile = tempDir.resolve("token");
+        Files.writeString(tokenFile, "eyJhbGciOi.theclaims.thesignature\n", StandardCharsets.UTF_8);
+
+        assertEquals("eyJhbGciOi.theclaims.thesignature", KafkaAgentClient.readServiceAccountToken(tokenFile));
+    }
+
+    @Test
+    public void testReadServiceAccountTokenMissingFileFails(@TempDir Path tempDir) {
+        Path tokenFile = tempDir.resolve("does-not-exist");
+
+        RuntimeException e = assertThrows(RuntimeException.class, () -> KafkaAgentClient.readServiceAccountToken(tokenFile));
+        assertTrue(e.getMessage().contains(tokenFile.toString()));
     }
 }
