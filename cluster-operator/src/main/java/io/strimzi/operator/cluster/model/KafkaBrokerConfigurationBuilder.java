@@ -116,9 +116,10 @@ public class KafkaBrokerConfigurationBuilder {
             //writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_CERTIFICATES + "=" + String.format(PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER, reconciliation.namespace(), KafkaResources.trustBundleSecretName(clusterName), "cluster-ca.crt"));
             writer.println(CruiseControlConfigurationParameters.METRICS_REPORTER_SECURITY_PROTOCOL + "=SASL_PLAINTEXT");
             writer.println("cruise.control.metrics.reporter.sasl.mechanism=OAUTHBEARER");
-            writer.println("cruise.control.metrics.reporter.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
-            writer.println("cruise.control.metrics.reporter.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
-            writer.println("cruise.control.metrics.reporter.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;");
+            //writer.println("cruise.control.metrics.reporter.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
+            //writer.println("cruise.control.metrics.reporter.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
+            writer.println("cruise.control.metrics.reporter.sasl.login.callback.handler.class=io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler");
+            writer.println("cruise.control.metrics.reporter.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required oauth.access.token.location=\"/var/run/secrets/strimzi.io/token\";");
 
             writer.println(CruiseControlConfigurationParameters.METRICS_TOPIC_AUTO_CREATE + "=true");
 
@@ -375,10 +376,11 @@ public class KafkaBrokerConfigurationBuilder {
 
         writer.println("listener.name." + listenerName + ".sasl.enabled.mechanisms=OAUTHBEARER");
         writer.println("listener.name." + listenerName + ".oauthbearer.sasl.server.callback.handler.class=io.strimzi.kafka.oauth.server.JaasServerOauthValidatorCallbackHandler");
-        writer.println("listener.name." + listenerName + ".oauthbearer.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required unsecuredLoginStringClaim_sub=\"unused\" oauth.check.access.token.type=\"false\" oauth.custom.claim.check=\"@.aud anyof ['strimzi.io']\" oauth.valid.issuer.uri=\"https://kubernetes.default.svc.cluster.local\" oauth.jwks.endpoint.uri=\"https://kubernetes.default.svc.cluster.local/openid/v1/jwks\" oauth.jwks.refresh.seconds=\"300\" oauth.username.claim=\"sub\" oauth.ssl.truststore.location=\"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\" oauth.ssl.truststore.type=\"PEM\" oauth.include.accept.header=\"false\" oauth.server.bearer.token.location=\"/var/run/secrets/kubernetes.io/serviceaccount/token\";");
+        writer.println("listener.name." + listenerName + ".oauthbearer.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required unsecuredLoginStringClaim_sub=\"unused\" oauth.check.access.token.type=\"false\" oauth.custom.claim.check=\"@.aud anyof ['strimzi.io']\" oauth.valid.issuer.uri=\"https://kubernetes.default.svc.cluster.local\" oauth.jwks.endpoint.uri=\"https://kubernetes.default.svc.cluster.local/openid/v1/jwks\" oauth.jwks.refresh.seconds=\"300\" oauth.username.claim=\"sub\" oauth.ssl.truststore.location=\"/var/run/secrets/kubernetes.io/serviceaccount/ca.crt\" oauth.ssl.truststore.type=\"PEM\" oauth.include.accept.header=\"false\" oauth.server.bearer.token.location=\"/var/run/secrets/kubernetes.io/serviceaccount/token\" oauth.access.token.location=\"/var/run/secrets/strimzi.io/token\";");
         writer.println("listener.name." + listenerName + ".oauthbearer.sasl.mechanism=OAUTHBEARER");
-        writer.println("listener.name." + listenerName + ".oauthbearer.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
-        writer.println("listener.name." + listenerName + ".oauthbearer.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
+        //writer.println("listener.name." + listenerName + ".oauthbearer.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
+        //writer.println("listener.name." + listenerName + ".oauthbearer.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
+        writer.println("listener.name." + listenerName + ".oauthbearer.sasl.login.callback.handler.class=io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler");
         //writer.println("listener.name." + listenerName + ".sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;");
 
         writer.println();
@@ -793,9 +795,10 @@ public class KafkaBrokerConfigurationBuilder {
         //writer.println("rlmm.config.remote.log.metadata.common.client.ssl.truststore.type=PEM");
         writer.println("rlmm.config.remote.log.metadata.common.client.security.protocol=SASL_PLAINTEXT");
         writer.println("rlmm.config.remote.log.metadata.common.client.sasl.mechanism=OAUTHBEARER");
-        writer.println("rlmm.config.remote.log.metadata.common.client.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
-        writer.println("rlmm.config.remote.log.metadata.common.client.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
-        writer.println("rlmm.config.remote.log.metadata.common.client.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;");
+        //writer.println("rlmm.config.remote.log.metadata.common.client.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
+        //writer.println("rlmm.config.remote.log.metadata.common.client.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
+        writer.println("rlmm.config.remote.log.metadata.common.client.sasl.login.callback.handler.class=io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler");
+        writer.println("rlmm.config.remote.log.metadata.common.client.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required oauth.access.token.location=\"/var/run/secrets/strimzi.io/token\";");
 
         writer.println("# RSM configs set by the operator and by the user");
 
@@ -861,9 +864,10 @@ public class KafkaBrokerConfigurationBuilder {
         //writer.println("client.quota.callback.static.kafka.admin.ssl.truststore.type=PEM");
         writer.println("client.quota.callback.static.kafka.admin.security.protocol=SASL_PLAINTEXT");
         writer.println("client.quota.callback.static.kafka.admin.sasl.mechanism=OAUTHBEARER");
-        writer.println("client.quota.callback.static.kafka.admin.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
-        writer.println("client.quota.callback.static.kafka.admin.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
-        writer.println("client.quota.callback.static.kafka.admin.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;");
+        //writer.println("client.quota.callback.static.kafka.admin.sasl.login.callback.handler.class=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginCallbackHandler");
+        //writer.println("client.quota.callback.static.kafka.admin.sasl.oauthbearer.token.endpoint.url=file:///var/run/secrets/strimzi.io/token");
+        writer.println("client.quota.callback.static.kafka.admin.sasl.login.callback.handler.class=io.strimzi.kafka.oauth.client.JaasClientOauthLoginCallbackHandler");
+        writer.println("client.quota.callback.static.kafka.admin.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required oauth.access.token.location=\"/var/run/secrets/strimzi.io/token\";");
 
         // configuration of user specified settings
         addOptionIfNotNull(writer, "client.quota.callback.static.produce", quotasPluginStrimzi.getProducerByteRate());

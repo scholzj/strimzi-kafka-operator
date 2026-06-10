@@ -98,7 +98,6 @@ public class DefaultTokenizedAdminClientProvider implements AdminClientProvider 
         config.putIfAbsent("security.protocol", "SASL_PLAINTEXT");
         config.setProperty("sasl.mechanism", "OAUTHBEARER");
         config.setProperty("sasl.login.callback.handler.class", KubernetesServiceAccountTokenLoginCallbackHandler.class.getName());
-        config.setProperty("sasl.oauthbearer.token.endpoint.url", "file:///var/run/secrets/strimzi.io/token");
 
         String jaasConfig = String.format("org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required "
                         + "%s=\"%s\" "

@@ -101,6 +101,7 @@
         <snakeyaml.version>2.5</snakeyaml.version>
         <javaluator.version>3.0.6</javaluator.version>
         <jose4j.version>0.9.6</jose4j.version>
+        <strimzi-oauth.version>0.17.1</strimzi-oauth.version>
 
         <!-- Test only dependencies -->
         <hamcrest.version>2.2</hamcrest.version>
@@ -599,6 +600,11 @@
                 <groupId>org.bitbucket.b_c</groupId>
                 <artifactId>jose4j</artifactId>
                 <version>${jose4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>kafka-oauth-client</artifactId>
+                <version>${strimzi-oauth.version}</version>
             </dependency>
             <!-- The skodjob dependency is required at compile time, not solely in the test scope, due to the creation of custom metrics components. -->
             <dependency>

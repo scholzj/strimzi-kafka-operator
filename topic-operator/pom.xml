@@ -91,6 +91,10 @@
         </dependency>
         <dependency>
             <groupId>io.strimzi</groupId>
+            <artifactId>kafka-oauth-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.strimzi</groupId>
             <artifactId>strimzi-test-container</artifactId>
         </dependency>
         <dependency>
@@ -195,6 +199,8 @@
                                 <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-httpclient-jdk</ignoredUnusedDeclaredDependency>
                                 <!-- Needed for Service Account based authentication -->
                                 <ignoredUnusedDeclaredDependency>org.bitbucket.b_c:jose4j</ignoredUnusedDeclaredDependency>
+                                <!-- Strimzi OAuth library is used through Kafka client callback -->
+                                <ignoredUnusedDeclaredDependency>io.strimzi:kafka-oauth-client</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-slf4j2-impl</ignoredUnusedDeclaredDependency>
                                 <!-- Needed for adding new appender JsonTemplateLayout support for logging, it's a runtime dep -->
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-layout-template-json</ignoredUnusedDeclaredDependency>
