@@ -7,6 +7,7 @@ package io.strimzi.operator.cluster.model;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import io.fabric8.kubernetes.api.model.Container;
+import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.Volume;
@@ -381,5 +382,26 @@ public class EntityOperator extends AbstractModel {
                 templatePodDisruptionBudget,
                 1
         );
+    }
+
+    /**
+     * Adds the Gatekeeper custom and default plugin lists as environment variables to the given list, if they are
+     * configured on the Cluster Operator. They are passed through unchanged from the Cluster Operator configuration to
+     * the User and Topic Operators, each of which adds its own default and mandatory plugins. Only the custom and default
+     * plugins are forwarded; the mandatory plugins are hardcoded in each operator and are not passed through. When a list
+     * is empty, its environment variable is not set (the operator then uses its own defaults).
+     *
+     * @param varList           The list of environment variables to which the Gatekeeper plugin variables are added
+     * @param customPlugins     The custom Gatekeeper plugins configured on the Cluster Operator
+     * @param defaultPlugins    The default Gatekeeper plugins configured on the Cluster Operator
+     */
+    /* test */ static void maybeAddGatekeeperPluginEnvVars(List<EnvVar> varList, List<String> customPlugins, List<String> defaultPlugins) {
+        if (customPlugins != null && !customPlugins.isEmpty()) {
+            varList.add(ContainerUtils.createEnvVar(ClusterOperatorConfig.GATEKEEPER_CUSTOM_PLUGINS.key(), String.join(",", customPlugins)));
+        }
+
+        if (defaultPlugins != null && !defaultPlugins.isEmpty()) {
+            varList.add(ContainerUtils.createEnvVar(ClusterOperatorConfig.GATEKEEPER_DEFAULT_PLUGINS.key(), String.join(",", defaultPlugins)));
+        }
     }
 }

@@ -8,12 +8,17 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.strimzi.api.kafka.model.common.Condition;
 import io.strimzi.api.kafka.model.common.ConditionBuilder;
 import io.strimzi.api.kafka.model.topic.KafkaTopic;
+import io.strimzi.api.kafka.model.topic.KafkaTopicStatus;
 import io.strimzi.api.kafka.model.topic.KafkaTopicStatusBuilder;
 import io.strimzi.api.kafka.model.topic.ReplicasChangeState;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaTopicDeletionContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaTopicEntryContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaTopicExitContextImpl;
 import io.strimzi.operator.common.model.StatusUtils;
 import io.strimzi.operator.topic.cruisecontrol.CruiseControlHandler;
+import io.strimzi.operator.topic.gatekeeper.TopicOperatorGatekeeperPluginInvoker;
 import io.strimzi.operator.topic.metrics.TopicOperatorMetricsHolder;
 import io.strimzi.operator.topic.model.Either;
 import io.strimzi.operator.topic.model.KubeRef;
@@ -44,6 +49,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
@@ -132,7 +138,26 @@ public class BatchingTopicController {
 
     private void deleteInternal(List<ReconcilableTopic> reconcilableTopics, boolean onDeletePath) {
         metricsHolder.reconciliationsCounter(config.watchedNamespace()).increment(reconcilableTopics.size());
-        var managedToDelete = reconcilableTopics.stream().filter(reconcilableTopic -> {
+
+        // There is no resource to mutate on a deletion, so the Gatekeeper plugins' deletion hooks are invoked instead of
+        // the entry and exit phases. They run before the deletion and can react to it or veto it by completing
+        // exceptionally. A vetoed topic is recorded as failed and is not deleted.
+        var allowedToDelete = new ArrayList<ReconcilableTopic>(reconcilableTopics.size());
+        for (var reconcilableTopic : reconcilableTopics) {
+            try {
+                TopicOperatorGatekeeperPluginInvoker.kafkaTopicDeletion(new GatekeeperKafkaTopicDeletionContextImpl(),
+                        reconcilableTopic.reconciliation().namespace(), reconcilableTopic.reconciliation().name())
+                    .toCompletableFuture().get();
+                allowedToDelete.add(reconcilableTopic);
+            } catch (InterruptedException e) {
+                throw new UncheckedInterruptedException(e);
+            } catch (ExecutionException e) {
+                LOGGER.warnCr(reconcilableTopic.reconciliation(), "Gatekeeper deletion plugins vetoed the deletion", e.getCause());
+                updateStatusForException(reconcilableTopic, new TopicOperatorException.InternalError(e.getCause()));
+            }
+        }
+
+        var managedToDelete = allowedToDelete.stream().filter(reconcilableTopic -> {
             if (TopicOperatorUtil.isManaged(reconcilableTopic.kt())) {
                 var e = validate(reconcilableTopic);
                 if (e.isRightEqual(true)) {
@@ -151,7 +176,7 @@ public class BatchingTopicController {
             }
         });
 
-        deleteManagedTopics(reconcilableTopics, onDeletePath, managedToDelete);
+        deleteManagedTopics(allowedToDelete, onDeletePath, managedToDelete);
     }
 
     private Either<TopicOperatorException, Boolean> validate(ReconcilableTopic reconcilableTopic) {
@@ -301,7 +326,24 @@ public class BatchingTopicController {
 
         // process managed non paused
         var managedNonPaused = partitionedByPaused.get(false);
-        results.merge(updateManagedNonPausedTopics(reconcilableTopics, managedNonPaused));
+
+        // Gatekeeper entry: for each managed non-paused topic the plugins can mutate the KafkaTopic before it is
+        // reconciled or reject its reconciliation by completing exceptionally. The mutated topics are used only for this
+        // reconciliation and are never persisted; rejected topics are recorded as failures and are not reconciled.
+        var gatekeptManagedNonPaused = new ArrayList<ReconcilableTopic>(managedNonPaused.size());
+        for (var reconcilableTopic : managedNonPaused) {
+            try {
+                var gatekeptKt = TopicOperatorGatekeeperPluginInvoker.kafkaTopicEntry(new GatekeeperKafkaTopicEntryContextImpl(), reconcilableTopic.kt())
+                    .toCompletableFuture().get();
+                gatekeptManagedNonPaused.add(new ReconcilableTopic(reconcilableTopic.reconciliation(), gatekeptKt, reconcilableTopic.topicName()));
+            } catch (InterruptedException e) {
+                throw new UncheckedInterruptedException(e);
+            } catch (ExecutionException e) {
+                LOGGER.warnCr(reconcilableTopic.reconciliation(), "Gatekeeper entry plugins rejected the reconciliation", e.getCause());
+                results.addLeftResults(Stream.of(new Pair<>(reconcilableTopic, new TopicOperatorException.InternalError(e.getCause()))));
+            }
+        }
+        results.merge(updateManagedNonPausedTopics(reconcilableTopics, gatekeptManagedNonPaused));
 
         // update status and metrics
         updateStatuses(results);
@@ -895,7 +937,8 @@ public class BatchingTopicController {
                 .withConditions(conditions)
                 .withReplicasChange(results.getReplicasChange(reconcilableTopic))
                 .build());
-        
+
+        maybeInvokeGatekeeperExit(reconcilableTopic);
         kubernetesHandler.updateStatus(reconcilableTopic);
         metricsHolder.successfulReconciliationsCounter(config.watchedNamespace()).increment();
     }
@@ -934,8 +977,37 @@ public class BatchingTopicController {
                 )
                 .withConditions(conditions)
                 .build());
-        
+
+        maybeInvokeGatekeeperExit(reconcilableTopic);
         kubernetesHandler.updateStatus(reconcilableTopic);
         metricsHolder.failedReconciliationsCounter(config.watchedNamespace()).increment();
+    }
+
+    /**
+     * Runs the Gatekeeper exit phase for a managed, non-paused topic and lets the plugins mutate the computed status
+     * before it is persisted. The exit phase is not invoked for unmanaged or paused topics, which are not reconciled. If
+     * the plugins fail (for example a validating plugin rejects the status), the failure is logged and the status
+     * computed before the exit phase is kept so that it can still be persisted.
+     *
+     * @param reconcilableTopic     The topic whose status is about to be persisted
+     */
+    private void maybeInvokeGatekeeperExit(ReconcilableTopic reconcilableTopic) {
+        var kt = reconcilableTopic.kt();
+        // The exit phase is only for the create/update reconciliation of a managed, non-paused topic. Unmanaged, paused
+        // and being-deleted topics are not reconciled, so their status is persisted without invoking the exit plugins
+        // (a deletion instead triggers the deletion hooks).
+        if (!TopicOperatorUtil.isManaged(kt) || TopicOperatorUtil.isPaused(kt) || isForDeletion(kt)) {
+            return;
+        }
+
+        try {
+            KafkaTopicStatus gatekeptStatus = TopicOperatorGatekeeperPluginInvoker.kafkaTopicExit(new GatekeeperKafkaTopicExitContextImpl(), kt, kt.getStatus())
+                .toCompletableFuture().get();
+            kt.setStatus(gatekeptStatus);
+        } catch (InterruptedException e) {
+            throw new UncheckedInterruptedException(e);
+        } catch (ExecutionException e) {
+            LOGGER.warnCr(reconcilableTopic.reconciliation(), "Gatekeeper exit plugins failed, keeping the status computed before the exit phase", e.getCause());
+        }
     }
 }

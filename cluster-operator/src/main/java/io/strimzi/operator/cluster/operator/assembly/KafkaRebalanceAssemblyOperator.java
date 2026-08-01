@@ -31,6 +31,7 @@ import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceState;
 import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceStatus;
 import io.strimzi.api.kafka.model.rebalance.KafkaRebalanceStatusBuilder;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
+import io.strimzi.operator.cluster.gatekeeper.ClusterOperatorGatekeeperPluginInvoker;
 import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.cluster.model.ConfigMapUtils;
 import io.strimzi.operator.cluster.model.CruiseControl;
@@ -53,6 +54,9 @@ import io.strimzi.operator.cluster.operator.resource.kubernetes.ConfigMapOperato
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaRebalanceDeletionContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaRebalanceEntryContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaRebalanceExitContextImpl;
 import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.StatusUtils;
@@ -1458,12 +1462,25 @@ public class KafkaRebalanceAssemblyOperator
 
     @Override
     protected Future<KafkaRebalanceStatus> createOrUpdate(Reconciliation reconciliation, KafkaRebalance resource) {
-        return reconcileKafkaRebalance(reconciliation, resource);
+        // The Gatekeeper plugins are invoked at the boundaries of the reconciliation. The entry phase runs before the
+        // reconciliation and can mutate the KafkaRebalance or reject the reconciliation; its mutations are used only
+        // within this reconciliation and are never persisted. The exit phase runs afterwards and can mutate the computed
+        // status before it is persisted. Deletions are handled separately in the delete(...) method.
+        return GatekeeperReconciliation.createOrUpdate(
+                reconciliation,
+                resource,
+                KafkaRebalanceStatus::new,
+                gatekept -> ClusterOperatorGatekeeperPluginInvoker.kafkaRebalanceEntry(new GatekeeperKafkaRebalanceEntryContextImpl(), gatekept),
+                gatekept -> reconcileKafkaRebalance(reconciliation, gatekept),
+                (original, status) -> ClusterOperatorGatekeeperPluginInvoker.kafkaRebalanceExit(new GatekeeperKafkaRebalanceExitContextImpl(), original, status));
     }
 
     @Override
     protected Future<Boolean> delete(Reconciliation reconciliation) {
-        return reconcileKafkaRebalance(reconciliation, null).map(v -> Boolean.TRUE);
+        // There is no resource to mutate on a deletion, so the Gatekeeper plugins' deletion hooks are invoked instead of
+        // the entry and exit phases. They run before the deletion and can react to it or reject it.
+        return VertxUtil.toFuture(ClusterOperatorGatekeeperPluginInvoker.kafkaRebalanceDeletion(new GatekeeperKafkaRebalanceDeletionContextImpl(), reconciliation.namespace(), reconciliation.name()))
+                .compose(i -> reconcileKafkaRebalance(reconciliation, null).map(v -> Boolean.TRUE));
     }
 
     @Override

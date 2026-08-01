@@ -18,13 +18,16 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.apache.kafka.common.config.SslConfigs;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 
+import static io.strimzi.operator.common.config.ConfigParameterParser.COMMA_SEPARATED_LIST;
 import static io.strimzi.operator.common.config.ConfigParameterParser.INTEGER;
 
 /**
@@ -104,6 +107,25 @@ public class TopicOperatorConfig {
     public static final ConfigParameter<String> CRUISE_CONTROL_API_PASS_PATH = new ConfigParameter<>("STRIMZI_CRUISE_CONTROL_API_PASS_PATH", ConfigParameterParser.STRING, "/etc/eto-cc-api/" + CruiseControlApiProperties.TOPIC_OPERATOR_PASSWORD_KEY, CONFIG_VALUES);
     /** Size of the thread pool for Kubernetes operations done by Topic Operator and the classes used by it */
     public static final ConfigParameter<Integer> TOPIC_OPERATIONS_THREAD_POOL_SIZE = new ConfigParameter<>("STRIMZI_TOPIC_OPERATIONS_THREAD_POOL_SIZE", INTEGER, "4", CONFIG_VALUES);
+    /**
+     * Comma-separated, ordered list of the canonical class names of the custom Gatekeeper plugins which should be
+     * enabled. Custom plugins are disabled by default and are user-provided or third-party. They are invoked first
+     * during the entry phase of a reconciliation.
+     */
+    public static final ConfigParameter<List<String>> GATEKEEPER_CUSTOM_PLUGINS = new ConfigParameter<>("STRIMZI_GATEKEEPER_CUSTOM_PLUGINS", COMMA_SEPARATED_LIST, "", CONFIG_VALUES);
+    /**
+     * Comma-separated, ordered list of the canonical class names of the default Gatekeeper plugins which should be
+     * enabled. When set, it completely replaces the hardcoded list of default plugins. They are invoked after the custom
+     * plugins and before the mandatory plugins during the entry phase of a reconciliation.
+     */
+    public static final ConfigParameter<List<String>> GATEKEEPER_DEFAULT_PLUGINS = new ConfigParameter<>("STRIMZI_GATEKEEPER_DEFAULT_PLUGINS", COMMA_SEPARATED_LIST, "", CONFIG_VALUES);
+
+    /**
+     * Ordered list of the mandatory Gatekeeper plugins which are hardcoded in Strimzi and always enabled. They are
+     * invoked last during the entry phase of a reconciliation (closest to the reconciliation logic). The Topic Operator
+     * currently has no mandatory plugins.
+     */
+    private static final List<String> MANDATORY_GATEKEEPER_PLUGINS = List.of();
 
     private final Map<String, Object> map;
 
@@ -136,6 +158,31 @@ public class TopicOperatorConfig {
     @SuppressWarnings("unchecked")
     private <T> T get(ConfigParameter<T> value) {
         return (T) map.get(value.key());
+    }
+
+    /**
+     * Gets the ordered list of the canonical class names of the Gatekeeper plugins which should be enabled. The list is
+     * assembled in the order in which the plugins are invoked during the entry phase of a reconciliation: first the
+     * custom plugins, then the default plugins and finally the mandatory plugins (closest to the reconciliation logic).
+     *
+     * @return  Ordered list of the canonical class names of the Gatekeeper plugins which should be enabled
+     */
+    public List<String> getGatekeeperPlugins() {
+        List<String> plugins = new ArrayList<>();
+
+        List<String> customPlugins = get(GATEKEEPER_CUSTOM_PLUGINS);
+        if (customPlugins != null) {
+            plugins.addAll(customPlugins);
+        }
+
+        List<String> defaultPlugins = get(GATEKEEPER_DEFAULT_PLUGINS);
+        if (defaultPlugins != null) {
+            plugins.addAll(defaultPlugins);
+        }
+
+        plugins.addAll(MANDATORY_GATEKEEPER_PLUGINS);
+
+        return plugins;
     }
 
     /**
@@ -577,6 +624,7 @@ public class TopicOperatorConfig {
             "\n\tcruiseControlApiUserPath=" + cruiseControlApiUserPath() +
             "\n\tcruiseControlApiPassPath=" + cruiseControlApiPassPath() +
             "\n\ttopicOperationsThreadPoolSize=" + topicOperationsThreadPoolSize() +
+            "\n\tgatekeeperPlugins='" + getGatekeeperPlugins() + '\'' +
             '}';
     }
 }

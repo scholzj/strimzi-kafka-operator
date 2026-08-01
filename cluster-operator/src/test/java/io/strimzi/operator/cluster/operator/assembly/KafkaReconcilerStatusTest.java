@@ -21,6 +21,7 @@ import io.strimzi.api.kafka.model.kafka.listener.ListenerStatusBuilder;
 import io.strimzi.api.kafka.model.kafka.listener.NodeAddressType;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePool;
 import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolBuilder;
+import io.strimzi.api.kafka.model.nodepool.KafkaNodePoolStatus;
 import io.strimzi.api.kafka.model.nodepool.ProcessRoles;
 import io.strimzi.certs.OpenSslCertIssuer;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
@@ -39,10 +40,14 @@ import io.strimzi.operator.common.auth.TlsPemIdentity;
 import io.strimzi.operator.common.ca.Ca;
 import io.strimzi.operator.common.ca.CaConfig;
 import io.strimzi.operator.common.ca.InternalCa;
+import io.strimzi.operator.common.gatekeeper.GatekeeperPluginFactory;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.PasswordGenerator;
 import io.strimzi.operator.common.operator.MockCertIssuer;
 import io.strimzi.platform.KubernetesVersion;
+import io.strimzi.plugin.gatekeeper.GatekeeperKafkaExitContext;
+import io.strimzi.plugin.gatekeeper.GatekeeperKafkaMutatingPlugin;
+import io.strimzi.plugin.gatekeeper.GatekeeperPluginConfigurationContext;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.WorkerExecutor;
@@ -53,17 +58,20 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -919,6 +927,62 @@ public class KafkaReconcilerStatusTest {
         when(mockNodeOps.getAsync(eq("node-2"))).thenReturn(CompletableFuture.completedFuture(node2));
         when(mockNodeOps.getAsync(eq("node-3"))).thenReturn(CompletableFuture.completedFuture(node3));
         when(mockNodeOps.getAsync(eq("node-999"))).thenReturn(CompletableFuture.completedFuture(null)); // Node that does not exist
+    }
+
+    @Test
+    public void testGatekeeperNodePoolExitMutatesTheNodePoolStatus() {
+        Reconciliation reconciliation = new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, CLUSTER_NAME);
+        ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
+
+        // Node pools coming from Kubernetes always have a generation, which the operator copies to the status
+        KafkaNodePool nodePool = new KafkaNodePoolBuilder(KAFKA_NODE_POOL)
+                .editMetadata()
+                    .withGeneration(1L)
+                .endMetadata()
+                .build();
+
+        ArgumentCaptor<KafkaNodePool> captor = ArgumentCaptor.forClass(KafkaNodePool.class);
+        when(supplier.kafkaNodePoolOperator.updateStatusAsync(any(), captor.capture())).thenReturn(CompletableFuture.completedFuture(null));
+
+        KafkaCluster kafkaCluster = KafkaClusterCreator.createKafkaCluster(
+                reconciliation,
+                KAFKA,
+                List.of(nodePool),
+                Map.of(),
+                KafkaVersionTestUtils.DEFAULT_KRAFT_VERSION_CHANGE,
+                VERSIONS,
+                supplier.sharedEnvironmentProvider);
+
+        KafkaReconciler reconciler = new KafkaReconciler(reconciliation, KAFKA, List.of(nodePool), kafkaCluster, CLUSTER_CA, CLIENTS_CA, CO_CONFIG, supplier, PFA, vertx);
+
+        try {
+            GatekeeperPluginFactory.initializeForTests(List.of(new ClusterIdSettingNodePoolExitPlugin()));
+
+            // The method is called directly on the test thread with mocks which complete synchronously, so the
+            // thread-local test plugins are visible to it and the returned Future is already completed.
+            Future<Void> result = reconciler.updateNodePoolStatuses(new KafkaStatus());
+
+            assertThat(result.succeeded(), is(true));
+            // The node pool status which was persisted must carry the cluster ID set by the node pool exit plugin
+            assertThat(captor.getAllValues(), hasSize(1));
+            assertThat(captor.getValue().getStatus().getClusterId(), is("set-by-node-pool-exit"));
+        } finally {
+            GatekeeperPluginFactory.clearTestPlugins();
+        }
+    }
+
+    /**
+     * Mutating plugin which sets the cluster ID on the node pool status during the KafkaNodePool exit phase.
+     */
+    private static final class ClusterIdSettingNodePoolExitPlugin implements GatekeeperKafkaMutatingPlugin {
+        @Override
+        public void configure(GatekeeperPluginConfigurationContext context) { }
+
+        @Override
+        public CompletionStage<KafkaNodePoolStatus> kafkaNodePoolExit(GatekeeperKafkaExitContext context, Kafka kafka, KafkaNodePool kafkaNodePool, KafkaNodePoolStatus newKafkaNodePoolStatus) {
+            newKafkaNodePoolStatus.setClusterId("set-by-node-pool-exit");
+            return CompletableFuture.completedFuture(newKafkaNodePoolStatus);
+        }
     }
 
     static class MockKafkaReconcilerStatusTasks extends KafkaReconciler {

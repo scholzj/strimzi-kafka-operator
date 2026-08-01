@@ -82,6 +82,8 @@ public class EntityUserOperator extends AbstractModel implements SupportsLogging
     /* test */ int clientsCaRenewalDays;
     private ResourceTemplate templateRoleBinding;
     private String featureGatesEnvVarValue;
+    private List<String> gatekeeperCustomPlugins;
+    private List<String> gatekeeperDefaultPlugins;
 
     private boolean aclsAdminApiSupported = false;
     private List<String> maintenanceWindows;
@@ -144,6 +146,8 @@ public class EntityUserOperator extends AbstractModel implements SupportsLogging
             result.readinessProbeOptions = ProbeUtils.extractReadinessProbeOptionsOrDefault(userOperatorSpec, EntityOperator.DEFAULT_HEALTHCHECK_OPTIONS);
             result.livenessProbeOptions = ProbeUtils.extractLivenessProbeOptionsOrDefault(userOperatorSpec, EntityOperator.DEFAULT_HEALTHCHECK_OPTIONS);
             result.featureGatesEnvVarValue = config.featureGates().toEnvironmentVariable();
+            result.gatekeeperCustomPlugins = config.getGatekeeperCustomPlugins();
+            result.gatekeeperDefaultPlugins = config.getGatekeeperDefaultPlugins();
             result.generatePkcs12Stores = config.isPkcs12KeystoreGeneration();
 
             if (kafkaAssembly.getSpec().getEntityOperator().getTemplate() != null)  {
@@ -217,6 +221,9 @@ public class EntityUserOperator extends AbstractModel implements SupportsLogging
         if (featureGatesEnvVarValue != null && !featureGatesEnvVarValue.isEmpty()) {
             varList.add(ContainerUtils.createEnvVar(ClusterOperatorConfig.FEATURE_GATES.key(), featureGatesEnvVarValue));
         }
+
+        // Pass the Gatekeeper plugins configured on the Cluster Operator through to the User Operator
+        EntityOperator.maybeAddGatekeeperPluginEnvVars(varList, gatekeeperCustomPlugins, gatekeeperDefaultPlugins);
 
         // Add shared environment variables used for all containers
         varList.addAll(sharedEnvironmentProvider.variables());

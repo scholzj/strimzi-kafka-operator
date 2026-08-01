@@ -26,6 +26,12 @@ fullReconciliationIntervalMs: 120000
 operationTimeoutMs: 300000
 kubernetesServiceDnsDomain: cluster.local
 featureGates: ""
+# Comma-separated, ordered list of the canonical class names of the custom and default Gatekeeper plugins which should
+# be enabled. Custom plugins are user-provided or third-party and are disabled by default. Setting the default plugins
+# replaces the hardcoded list of default plugins. The lists configured here are used by the Cluster Operator and are
+# also passed through to the User and Topic Operators.
+gatekeeperCustomPlugins: ""
+gatekeeperDefaultPlugins: ""
 tmpDirSizeLimit: 1Mi
 
 # Example on how to configure extraEnvs

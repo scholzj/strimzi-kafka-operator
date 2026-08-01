@@ -25,6 +25,7 @@ import io.strimzi.api.kafka.model.podset.StrimziPodSet;
 import io.strimzi.certs.CertIssuer;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.gatekeeper.ClusterOperatorGatekeeperPluginInvoker;
 import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.KafkaVersionChange;
 import io.strimzi.operator.cluster.model.ModelUtils;
@@ -39,6 +40,9 @@ import io.strimzi.operator.common.ReconciliationException;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.ca.Ca;
 import io.strimzi.operator.common.config.ConfigParameter;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaDeletionContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaEntryContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaExitContextImpl;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.NamespaceAndName;
 import io.strimzi.operator.common.model.PasswordGenerator;
@@ -209,7 +213,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 // successful reconcile, write operator version to successful reconcile field
                 status.setOperatorLastSuccessfulVersion(OPERATOR_VERSION);
                 status.addCondition(condition);
-                createOrUpdatePromise.complete(status);
             } else {
                 condition = new ConditionBuilder()
                         .withLastTransitionTime(StatusUtils.iso8601(clock.instant()))
@@ -220,11 +223,42 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         .build();
 
                 status.addCondition(condition);
-                createOrUpdatePromise.fail(new ReconciliationException(status, reconcileResult.cause()));
             }
+
+            // The Gatekeeper Kafka exit phase runs after the reconciliation - whether it succeeded or failed - and can
+            // mutate the computed Kafka status before it is persisted. It is passed the (possibly mutated) Kafka and the
+            // node pools captured during the reconciler creation. If the exit plugins fail, the failure is logged and
+            // the status computed before the exit phase is used so that it can still be persisted.
+            invokeGatekeeperKafkaExit(reconcileState, status).onComplete(gatekeptStatusResult -> {
+                KafkaStatus gatekeptStatus = gatekeptStatusResult.result();
+
+                if (reconcileResult.succeeded())    {
+                    createOrUpdatePromise.complete(gatekeptStatus);
+                } else {
+                    createOrUpdatePromise.fail(new ReconciliationException(gatekeptStatus, reconcileResult.cause()));
+                }
+            });
         });
 
         return createOrUpdatePromise.future();
+    }
+
+    /**
+     * Invokes the Gatekeeper Kafka exit phase for the given reconciliation and lets the plugins mutate the computed
+     * Kafka status. If the plugins fail (for example a validating plugin rejects the status), the failure is logged and
+     * the status computed before the exit phase is returned so that it can still be persisted.
+     *
+     * @param reconcileState    The reconciliation state holding the (possibly mutated) Kafka and its node pools
+     * @param status            The Kafka status computed by the reconciliation
+     *
+     * @return  Future which completes with the status after the exit phase (or the original status if the plugins failed)
+     */
+    private Future<KafkaStatus> invokeGatekeeperKafkaExit(ReconciliationState reconcileState, KafkaStatus status) {
+        return VertxUtil.toFuture(ClusterOperatorGatekeeperPluginInvoker.kafkaExit(new GatekeeperKafkaExitContextImpl(), reconcileState.kafkaAssembly, reconcileState.nodePools, status))
+                .recover(error -> {
+                    LOGGER.errorCr(reconcileState.reconciliation, "Gatekeeper exit plugins failed", error);
+                    return Future.succeededFuture(status);
+                });
     }
 
     Future<Void> reconcile(ReconciliationState reconcileState)  {
@@ -260,8 +294,15 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     class ReconciliationState {
         private final String namespace;
         private final String name;
-        private final Kafka kafkaAssembly;
+        // Not final: the Gatekeeper entry phase (invoked once the node pools are available) can replace it with a
+        // mutated Kafka resource which is then used for the rest of this reconciliation but never persisted.
+        private Kafka kafkaAssembly;
         private final Reconciliation reconciliation;
+
+        // The KafkaNodePool resources belonging to this Kafka, captured (after the Gatekeeper entry phase) when the
+        // reconciler is created, so that the Gatekeeper Kafka exit phase can be passed the same node pools. Defaults to
+        // an empty list for the case where the reconciliation fails before the node pools are listed.
+        private List<KafkaNodePool> nodePools = List.of();
 
         /* test */ KafkaVersionChange versionChange;
 
@@ -498,36 +539,47 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return Future.join(podSetFuture, nodePoolFuture)
                     .compose(res -> {
                         List<StrimziPodSet> podSets = res.resultAt(0);
-                        List<KafkaNodePool> nodePools = res.resultAt(1);
+                        List<KafkaNodePool> initialNodePools = res.resultAt(1);
 
-                        if (nodePools.isEmpty()) {
+                        if (initialNodePools.isEmpty()) {
                             throw new InvalidConfigurationException("No KafkaNodePools found for Kafka cluster " + name);
                         }
 
-                        Map<String, Storage> oldStorage = new HashMap<>();
+                        // The Gatekeeper entry phase runs here rather than at the very start of the reconciliation
+                        // because the node pools which the plugins receive are only listed at this point. Mutating
+                        // plugins can modify the Kafka resource and its node pools; the mutated resources are used for
+                        // the rest of this reconciliation but are never persisted. Validating plugins can reject the
+                        // reconciliation by completing the returned stage exceptionally.
+                        return VertxUtil.toFuture(ClusterOperatorGatekeeperPluginInvoker.kafkaEntry(new GatekeeperKafkaEntryContextImpl(), kafkaAssembly, initialNodePools))
+                                .compose(gatekept -> {
+                                    kafkaAssembly = gatekept.kafka();
+                                    nodePools = gatekept.kafkaNodePools();
 
-                        if (podSets != null) {
-                            // One or more PodSets exist => we go on and use them
-                            for (StrimziPodSet podSet : podSets) {
-                                oldStorage.put(podSet.getMetadata().getName(), getOldStorage(podSet));
-                            }
-                        }
+                                    Map<String, Storage> oldStorage = new HashMap<>();
 
-                        KafkaClusterCreator kafkaClusterCreator =
-                                new KafkaClusterCreator(reconciliation, config, supplier);
-                        return VertxUtil.toFuture(kafkaClusterCreator
-                                .prepareKafkaCluster(kafkaAssembly, nodePools, oldStorage, versionChange, kafkaStatus, true))
-                                .compose(kafkaCluster -> {
-                                    // We store this for use with Cruise Control later. As these configurations might
-                                    // not be exactly the same as in the original custom resource (for example because
-                                    // of un-allowed storage changes being reverted) they are passed this way from the
-                                    // KafkaCluster object and not from the custom resource.
-                                    kafkaBrokerNodes = kafkaCluster.brokerNodes();
-                                    kafkaBrokerStorage = kafkaCluster.getStorageByPoolName();
-                                    kafkaBrokerResources = kafkaCluster.getBrokerResourceRequirementsByPoolName();
-                                    scalingDownBlockedNodes = kafkaClusterCreator.scalingDownBlockedNodes();
+                                    if (podSets != null) {
+                                        // One or more PodSets exist => we go on and use them
+                                        for (StrimziPodSet podSet : podSets) {
+                                            oldStorage.put(podSet.getMetadata().getName(), getOldStorage(podSet));
+                                        }
+                                    }
 
-                                    return Future.succeededFuture(kafkaReconciler(nodePools, kafkaCluster));
+                                    KafkaClusterCreator kafkaClusterCreator =
+                                            new KafkaClusterCreator(reconciliation, config, supplier);
+                                    return VertxUtil.toFuture(kafkaClusterCreator
+                                            .prepareKafkaCluster(kafkaAssembly, nodePools, oldStorage, versionChange, kafkaStatus, true))
+                                            .compose(kafkaCluster -> {
+                                                // We store this for use with Cruise Control later. As these configurations might
+                                                // not be exactly the same as in the original custom resource (for example because
+                                                // of un-allowed storage changes being reverted) they are passed this way from the
+                                                // KafkaCluster object and not from the custom resource.
+                                                kafkaBrokerNodes = kafkaCluster.brokerNodes();
+                                                kafkaBrokerStorage = kafkaCluster.getStorageByPoolName();
+                                                kafkaBrokerResources = kafkaCluster.getBrokerResourceRequirementsByPoolName();
+                                                scalingDownBlockedNodes = kafkaClusterCreator.scalingDownBlockedNodes();
+
+                                                return Future.succeededFuture(kafkaReconciler(nodePools, kafkaCluster));
+                                            });
                                 });
                     });
         }
@@ -699,7 +751,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
      */
     @Override
     protected Future<Boolean> delete(Reconciliation reconciliation) {
-        return ReconcilerUtils.withIgnoreRbacError(reconciliation, VertxUtil.toFuture(clusterRoleBindingOperations.reconcile(reconciliation, KafkaResources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null)), null)
+        // There is no resource to mutate on a deletion, so the Gatekeeper plugins' deletion hooks are invoked instead of
+        // the entry and exit phases. They run before the deletion and can react to it or reject it.
+        return VertxUtil.toFuture(ClusterOperatorGatekeeperPluginInvoker.kafkaDeletion(new GatekeeperKafkaDeletionContextImpl(), reconciliation.namespace(), reconciliation.name()))
+                .compose(i -> ReconcilerUtils.withIgnoreRbacError(reconciliation, VertxUtil.toFuture(clusterRoleBindingOperations.reconcile(reconciliation, KafkaResources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null)), null))
                 .map(Boolean.FALSE); // Return FALSE since other resources are still deleted by garbage collection
     }
 

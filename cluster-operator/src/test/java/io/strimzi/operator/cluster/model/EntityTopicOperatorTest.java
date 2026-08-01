@@ -19,6 +19,8 @@ import io.strimzi.api.kafka.model.kafka.entityoperator.EntityTopicOperatorSpec;
 import io.strimzi.api.kafka.model.kafka.entityoperator.EntityTopicOperatorSpecBuilder;
 import io.strimzi.api.kafka.model.kafka.listener.GenericKafkaListenerBuilder;
 import io.strimzi.api.kafka.model.kafka.listener.KafkaListenerType;
+import io.strimzi.operator.cluster.ClusterOperatorConfig;
+import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.common.Reconciliation;
@@ -339,5 +341,31 @@ public class EntityTopicOperatorTest {
         expected.add(new EnvVarBuilder().withName(EntityTopicOperator.ENV_VAR_STRIMZI_JAVA_OPTS).withValue("-Xms128m").build());
         expected.add(new EnvVarBuilder().withName(EntityTopicOperator.ENV_VAR_STRIMZI_JAVA_SYSTEM_PROPERTIES).withValue("-Djavax.net.debug=verbose -Dsomething.else=42").build());
         return expected;
+    }
+
+    @Test
+    public void testGatekeeperPluginsArePassedThroughFromClusterOperatorConfig() {
+        ClusterOperatorConfig config = new ClusterOperatorConfig.ClusterOperatorConfigBuilder(ResourceUtils.dummyClusterOperatorConfig(), KafkaVersionTestUtils.getKafkaVersionLookup())
+                .with(ClusterOperatorConfig.GATEKEEPER_CUSTOM_PLUGINS.key(), "custom-plugin-1,custom-plugin-2")
+                .with(ClusterOperatorConfig.GATEKEEPER_DEFAULT_PLUGINS.key(), "default-plugin-1")
+                .build();
+
+        EntityTopicOperator eto = EntityTopicOperator.fromCrd(new Reconciliation("test", KAFKA.getKind(), KAFKA.getMetadata().getNamespace(), KAFKA.getMetadata().getName()), KAFKA, SHARED_ENV_PROVIDER, config);
+        List<EnvVar> envVars = eto.getEnvVars();
+
+        assertThat(findEnvVarValue(envVars, ClusterOperatorConfig.GATEKEEPER_CUSTOM_PLUGINS.key()), is("custom-plugin-1,custom-plugin-2"));
+        assertThat(findEnvVarValue(envVars, ClusterOperatorConfig.GATEKEEPER_DEFAULT_PLUGINS.key()), is("default-plugin-1"));
+    }
+
+    @Test
+    public void testGatekeeperPluginEnvVarsAreNotSetWhenNotConfigured() {
+        List<EnvVar> envVars = ETO.getEnvVars();
+
+        assertThat(findEnvVarValue(envVars, ClusterOperatorConfig.GATEKEEPER_CUSTOM_PLUGINS.key()), is(nullValue()));
+        assertThat(findEnvVarValue(envVars, ClusterOperatorConfig.GATEKEEPER_DEFAULT_PLUGINS.key()), is(nullValue()));
+    }
+
+    private static String findEnvVarValue(List<EnvVar> envVars, String name) {
+        return envVars.stream().filter(envVar -> name.equals(envVar.getName())).map(EnvVar::getValue).findFirst().orElse(null);
     }
 }

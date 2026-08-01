@@ -12,6 +12,8 @@ import io.strimzi.operator.common.OperatorKubernetesClientBuilder;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.auth.PemAuthIdentity;
 import io.strimzi.operator.common.auth.PemTrustSet;
+import io.strimzi.operator.common.gatekeeper.GatekeeperPluginFactory;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperPluginConfigurationContextImpl;
 import io.strimzi.operator.common.operator.resource.kubernetes.SecretOperator;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.logging.log4j.LogManager;
@@ -53,6 +55,12 @@ public class Main {
         // Create KubernetesClient, AdminClient and TopicOperator classes
         ExecutorService topicOperatorExecutor = Executors.newFixedThreadPool(config.topicOperationsThreadPoolSize(), new OperatorWorkThreadFactory());
         KubernetesClient client = new OperatorKubernetesClientBuilder("strimzi-topic-operator", Main.class.getPackage().getImplementationVersion()).build();
+
+        // Load and configure the Gatekeeper plugins. The Topic Operator does not detect the platform features, so it
+        // passes null for them. If any of the configured plugins is missing or fails to configure, this throws and the
+        // operator startup fails.
+        GatekeeperPluginFactory.initialize(config.getGatekeeperPlugins(), new GatekeeperPluginConfigurationContextImpl(client));
+
         SecretOperator secretOperator = new SecretOperator(topicOperatorExecutor, client);
         Admin kafkaAdmin = createAdminClient(config, secretOperator, new DefaultAdminClientProvider());
 

@@ -1,2 +1,6 @@
 io.strimzi.operator.common.gatekeeper.plugin.DebugGatekeeperPlugin
+io.strimzi.operator.common.gatekeeper.plugin.ImagePullSecretsGatekeeperPlugin
+io.strimzi.operator.common.gatekeeper.plugin.SampleMutatingGatekeeperPlugin
+io.strimzi.operator.common.gatekeeper.plugin.SharedEnvironmentGatekeeperPlugin
+io.strimzi.operator.common.gatekeeper.plugin.DiscoveryLabelsGatekeeperPlugin
 io.strimzi.operator.common.gatekeeper.plugin.InjectedFailureGatekeeperPlugin

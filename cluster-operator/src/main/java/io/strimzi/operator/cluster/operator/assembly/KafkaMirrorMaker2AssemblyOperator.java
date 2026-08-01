@@ -22,6 +22,7 @@ import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2Spec;
 import io.strimzi.api.kafka.model.mirrormaker2.KafkaMirrorMaker2Status;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.gatekeeper.ClusterOperatorGatekeeperPluginInvoker;
 import io.strimzi.operator.cluster.model.KafkaConnectCluster;
 import io.strimzi.operator.cluster.model.KafkaConnectorOffsetsAnnotation;
 import io.strimzi.operator.cluster.model.KafkaMirrorMaker2Cluster;
@@ -32,6 +33,9 @@ import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationException;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaMirrorMaker2DeletionContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaMirrorMaker2EntryContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaMirrorMaker2ExitContextImpl;
 import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.common.model.StatusUtils;
 import io.vertx.core.Future;
@@ -101,6 +105,20 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
 
     @Override
     protected Future<KafkaMirrorMaker2Status> createOrUpdate(Reconciliation reconciliation, KafkaMirrorMaker2 kafkaMirrorMaker2) {
+        // The Gatekeeper plugins are invoked at the boundaries of the reconciliation. The entry phase runs before the
+        // reconciliation and can mutate the KafkaMirrorMaker2 or reject the reconciliation; its mutations are used only
+        // within this reconciliation and are never persisted. The exit phase runs afterwards and can mutate the computed
+        // status before it is persisted. Deletions are handled separately in the delete(...) method.
+        return GatekeeperReconciliation.createOrUpdate(
+                reconciliation,
+                kafkaMirrorMaker2,
+                KafkaMirrorMaker2Status::new,
+                gatekept -> ClusterOperatorGatekeeperPluginInvoker.kafkaMirrorMaker2Entry(new GatekeeperKafkaMirrorMaker2EntryContextImpl(), gatekept),
+                gatekept -> reconcileKafkaMirrorMaker2(reconciliation, gatekept),
+                (original, status) -> ClusterOperatorGatekeeperPluginInvoker.kafkaMirrorMaker2Exit(new GatekeeperKafkaMirrorMaker2ExitContextImpl(), original, status));
+    }
+
+    private Future<KafkaMirrorMaker2Status> reconcileKafkaMirrorMaker2(Reconciliation reconciliation, KafkaMirrorMaker2 kafkaMirrorMaker2) {
         KafkaMirrorMaker2Cluster mirrorMaker2Cluster;
         KafkaMirrorMaker2Status kafkaMirrorMaker2Status = new KafkaMirrorMaker2Status();
         try {
@@ -182,7 +200,10 @@ public class KafkaMirrorMaker2AssemblyOperator extends AbstractConnectOperator<K
      */
     @Override
     protected Future<Boolean> delete(Reconciliation reconciliation) {
-        return ReconcilerUtils.withIgnoreRbacError(reconciliation, VertxUtil.toFuture(clusterRoleBindingOperations.reconcile(reconciliation, KafkaMirrorMaker2Resources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null)), null)
+        // There is no resource to mutate on a deletion, so the Gatekeeper plugins' deletion hooks are invoked instead of
+        // the entry and exit phases. They run before the deletion and can react to it or reject it.
+        return VertxUtil.toFuture(ClusterOperatorGatekeeperPluginInvoker.kafkaMirrorMaker2Deletion(new GatekeeperKafkaMirrorMaker2DeletionContextImpl(), reconciliation.namespace(), reconciliation.name()))
+                .compose(i -> ReconcilerUtils.withIgnoreRbacError(reconciliation, VertxUtil.toFuture(clusterRoleBindingOperations.reconcile(reconciliation, KafkaMirrorMaker2Resources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null)), null))
                 .map(Boolean.FALSE); // Return FALSE since other resources are still deleted by garbage collection
     }
 

@@ -33,6 +33,7 @@ import io.strimzi.api.kafka.model.podset.StrimziPodSet;
 import io.strimzi.api.kafka.model.podset.StrimziPodSetBuilder;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.gatekeeper.ClusterOperatorGatekeeperPluginInvoker;
 import io.strimzi.operator.cluster.model.CertSecretUtils;
 import io.strimzi.operator.cluster.model.ImagePullPolicy;
 import io.strimzi.operator.cluster.model.KafkaCluster;
@@ -74,6 +75,7 @@ import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.auth.TlsPemIdentity;
 import io.strimzi.operator.common.ca.Ca;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaExitContextImpl;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.NodeUtils;
 import io.strimzi.operator.common.model.StatusDiff;
@@ -128,6 +130,9 @@ public class KafkaReconciler {
     // Objects used during the reconciliation
     /* test */ final Reconciliation reconciliation;
     private final KafkaCluster kafka;
+    // The Kafka custom resource being reconciled. Kept so that the Gatekeeper KafkaNodePool exit phase can be passed the
+    // Kafka resource together with each node pool.
+    private final Kafka kafkaCr;
     private final List<KafkaNodePool> kafkaNodePoolCrs;
     private final Ca clusterCa;
     private final Ca clientsCa;
@@ -199,6 +204,7 @@ public class KafkaReconciler {
         this.operationTimeoutMs = config.getOperationTimeoutMs();
         this.kafkaNodePoolCrs = nodePools;
         this.kafka = kafka;
+        this.kafkaCr = kafkaCr;
 
         this.clusterCa = clusterCa;
         this.clientsCa = clientsCa;
@@ -1251,35 +1257,46 @@ public class KafkaReconciler {
      * @return  Future which completes when the statuses are set
      */
     protected Future<Void> updateNodePoolStatuses(KafkaStatus kafkaStatus) {
-        List<KafkaNodePool> updatedNodePools = new ArrayList<>();
         List<UsedNodePoolStatus> statusesForKafka = new ArrayList<>();
         Map<String, KafkaNodePoolStatus> statuses = kafka.nodePoolStatuses();
 
         for (KafkaNodePool nodePool : kafkaNodePoolCrs) {
             statusesForKafka.add(new UsedNodePoolStatusBuilder().withName(nodePool.getMetadata().getName()).build());
-
-            KafkaNodePool updatedNodePool = new KafkaNodePoolBuilder(nodePool)
-                    .withStatus(
-                            new KafkaNodePoolStatusBuilder(statuses.get(nodePool.getMetadata().getName()))
-                                    .withObservedGeneration(nodePool.getMetadata().getGeneration())
-                                    .build())
-                    .build();
-
-            StatusDiff diff = new StatusDiff(nodePool.getStatus(), updatedNodePool.getStatus());
-
-            if (!diff.isEmpty()) {
-                // Status changed => we will update it
-                updatedNodePools.add(updatedNodePool);
-            }
         }
 
         // Sets the list of used Node Pools in the Kafka CR status
         kafkaStatus.setKafkaNodePools(statusesForKafka.stream().sorted(Comparator.comparing(UsedNodePoolStatus::getName)).toList());
 
+        // For each node pool we compute its status, let the Gatekeeper KafkaNodePool exit phase mutate it, and update
+        // the resource if the status changed. The exit phase runs for every node pool; if it fails, the failure is
+        // logged and the status computed before the exit phase is used so that it can still be persisted.
         List<Future<KafkaNodePool>> statusUpdateFutures = new ArrayList<>();
 
-        for (KafkaNodePool updatedNodePool : updatedNodePools) {
-            statusUpdateFutures.add(VertxUtil.toFuture(kafkaNodePoolOperator.updateStatusAsync(reconciliation, updatedNodePool)));
+        for (KafkaNodePool nodePool : kafkaNodePoolCrs) {
+            KafkaNodePoolStatus computedStatus = new KafkaNodePoolStatusBuilder(statuses.get(nodePool.getMetadata().getName()))
+                    .withObservedGeneration(nodePool.getMetadata().getGeneration())
+                    .build();
+
+            statusUpdateFutures.add(
+                    VertxUtil.toFuture(ClusterOperatorGatekeeperPluginInvoker.kafkaNodePoolExit(new GatekeeperKafkaExitContextImpl(), kafkaCr, nodePool, computedStatus))
+                            .recover(error -> {
+                                LOGGER.errorCr(reconciliation, "Gatekeeper KafkaNodePool exit plugins for {} failed", nodePool.getMetadata().getName(), error);
+                                return Future.succeededFuture(computedStatus);
+                            })
+                            .compose(gatekeptStatus -> {
+                                KafkaNodePool updatedNodePool = new KafkaNodePoolBuilder(nodePool)
+                                        .withStatus(gatekeptStatus)
+                                        .build();
+
+                                StatusDiff diff = new StatusDiff(nodePool.getStatus(), updatedNodePool.getStatus());
+
+                                if (!diff.isEmpty()) {
+                                    // Status changed => we will update it
+                                    return VertxUtil.toFuture(kafkaNodePoolOperator.updateStatusAsync(reconciliation, updatedNodePool));
+                                } else {
+                                    return Future.succeededFuture(nodePool);
+                                }
+                            }));
         }
 
         // Return future

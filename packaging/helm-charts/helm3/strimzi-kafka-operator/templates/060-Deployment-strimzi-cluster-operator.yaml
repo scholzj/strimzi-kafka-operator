@@ -147,6 +147,14 @@ spec:
               value: {{ .Values.kubernetesServiceDnsDomain | quote }}{{ end }}
             - name: STRIMZI_FEATURE_GATES
               value: {{ .Values.featureGates | quote }}
+            {{- if .Values.gatekeeperCustomPlugins }}
+            - name: STRIMZI_GATEKEEPER_CUSTOM_PLUGINS
+              value: {{ .Values.gatekeeperCustomPlugins | quote }}
+            {{- end }}
+            {{- if .Values.gatekeeperDefaultPlugins }}
+            - name: STRIMZI_GATEKEEPER_DEFAULT_PLUGINS
+              value: {{ .Values.gatekeeperDefaultPlugins | quote }}
+            {{- end }}
             {{- if .Values.labelsExclusionPattern }}
             - name: STRIMZI_LABELS_EXCLUSION_PATTERN
               value: {{ .Values.labelsExclusionPattern | quote }}

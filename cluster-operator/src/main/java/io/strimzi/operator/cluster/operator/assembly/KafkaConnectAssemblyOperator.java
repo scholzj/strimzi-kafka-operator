@@ -157,6 +157,12 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
         final boolean hasZeroReplicas = connect.getReplicas() == 0;
         final boolean useConnectorResources = isUseResources(kafkaConnect);
         final AtomicReference<String> image = new AtomicReference<>();
+        // The (possibly mutated) KafkaConnect and its connectors as they are reconciled by the Gatekeeper entry phase.
+        // They are captured during the connector reconciliation so that the Gatekeeper KafkaConnect exit phase can be
+        // passed the same resources. They default to the original KafkaConnect and an empty connector list for the case
+        // where connector resources are disabled and the connectors are therefore never reconciled.
+        final AtomicReference<KafkaConnect> reconciledConnect = new AtomicReference<>(kafkaConnect);
+        final AtomicReference<List<KafkaConnector>> reconciledConnectors = new AtomicReference<>(List.of());
         String initCrbName = KafkaConnectResources.initContainerClusterRoleBindingName(kafkaConnect.getMetadata().getName(), namespace);
         ClusterRoleBinding initCrb = connect.generateClusterRoleBinding();
 
@@ -196,7 +202,7 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
                 .compose(i -> connectPodDisruptionBudget(reconciliation, namespace, connect))
                 .compose(i -> reconcilePodSet(reconciliation, connect, podAnnotations, controllerAnnotations, image.get()))
                 .compose(i -> useConnectorResources && !hasZeroReplicas ? reconcileAvailableConnectorPlugins(reconciliation, KafkaConnectResources.qualifiedServiceName(reconciliation.name(), namespace), kafkaConnectStatus) : Future.succeededFuture())
-                .compose(i -> useConnectorResources ? reconcileConnectors(reconciliation, kafkaConnect, hasZeroReplicas) : Future.succeededFuture())
+                .compose(i -> useConnectorResources ? reconcileConnectors(reconciliation, kafkaConnect, hasZeroReplicas, reconciledConnect, reconciledConnectors) : Future.succeededFuture())
                 .onComplete(reconciliationResult -> {
                     StatusUtils.setStatusConditionAndObservedGeneration(kafkaConnect, kafkaConnectStatus, reconciliationResult.cause());
 
@@ -207,14 +213,43 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
                     kafkaConnectStatus.setReplicas(connect.getReplicas());
                     kafkaConnectStatus.setLabelSelector(connect.getSelectorLabels().toSelectorString());
 
-                    if (reconciliationResult.succeeded())   {
-                        createOrUpdatePromise.complete(kafkaConnectStatus);
-                    } else {
-                        createOrUpdatePromise.fail(new ReconciliationException(kafkaConnectStatus, reconciliationResult.cause()));
-                    }
+                    // The Gatekeeper KafkaConnect exit phase runs after the reconciliation - whether it succeeded or
+                    // failed - and can mutate the computed KafkaConnect status before it is persisted. It is passed the
+                    // (possibly mutated) KafkaConnect and connectors captured during the connector reconciliation. If the
+                    // exit plugins fail, the failure is logged and the status computed before the exit phase is used.
+                    invokeGatekeeperKafkaConnectExit(reconciliation, reconciledConnect.get(), reconciledConnectors.get(), kafkaConnectStatus)
+                            .onComplete(gatekeptStatusResult -> {
+                                KafkaConnectStatus gatekeptStatus = gatekeptStatusResult.result();
+
+                                if (reconciliationResult.succeeded())   {
+                                    createOrUpdatePromise.complete(gatekeptStatus);
+                                } else {
+                                    createOrUpdatePromise.fail(new ReconciliationException(gatekeptStatus, reconciliationResult.cause()));
+                                }
+                            });
                 });
 
         return createOrUpdatePromise.future();
+    }
+
+    /**
+     * Invokes the Gatekeeper KafkaConnect exit phase and lets the plugins mutate the computed KafkaConnect status. If the
+     * plugins fail (for example a validating plugin rejects the status), the failure is logged and the status computed
+     * before the exit phase is returned so that it can still be persisted.
+     *
+     * @param reconciliation    Reconciliation identifier used for logging
+     * @param kafkaConnect      The (possibly mutated) KafkaConnect resource which was reconciled
+     * @param kafkaConnectors   The (possibly mutated) connectors which were reconciled
+     * @param status            The KafkaConnect status computed by the reconciliation
+     *
+     * @return  Future which completes with the status after the exit phase (or the original status if the plugins failed)
+     */
+    private Future<KafkaConnectStatus> invokeGatekeeperKafkaConnectExit(Reconciliation reconciliation, KafkaConnect kafkaConnect, List<KafkaConnector> kafkaConnectors, KafkaConnectStatus status) {
+        return GatekeeperKafkaConnectHooks.exit(kafkaConnect, kafkaConnectors, status)
+                .recover(error -> {
+                    LOGGER.errorCr(reconciliation, "Gatekeeper exit plugins failed", error);
+                    return Future.succeededFuture(status);
+                });
     }
 
     @Override
@@ -257,7 +292,10 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
      */
     @Override
     protected Future<Boolean> delete(Reconciliation reconciliation) {
-        return updateConnectorsThatConnectClusterWasDeleted(reconciliation)
+        // There is no resource to mutate on a deletion, so the Gatekeeper plugins' deletion hooks are invoked instead of
+        // the entry and exit phases. They run before the deletion and can react to it or reject it.
+        return GatekeeperKafkaConnectHooks.deletion(reconciliation.namespace(), reconciliation.name())
+                .compose(i -> updateConnectorsThatConnectClusterWasDeleted(reconciliation))
                 .compose(i -> ReconcilerUtils.withIgnoreRbacError(reconciliation, VertxUtil.toFuture(clusterRoleBindingOperations.reconcile(reconciliation, KafkaConnectResources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null)), null))
                 .map(Boolean.FALSE); // Return FALSE since other resources are still deleted by garbage collection
     }
@@ -275,7 +313,9 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
         return VertxUtil.toFuture(connectorOperator.listAsync(reconciliation.namespace(), Labels.forStrimziCluster(reconciliation.name()))).compose(connectors -> {
             List<Future<Void>> connectorFutures = new ArrayList<>();
             for (KafkaConnector connector : connectors) {
-                connectorFutures.add(maybeUpdateConnectorStatus(reconciliation, connector, null,
+                // The KafkaConnect cluster is being deleted, so there is no KafkaConnect resource to pass to the
+                // Gatekeeper KafkaConnector exit phase.
+                connectorFutures.add(maybeUpdateConnectorStatus(reconciliation, null, connector, null,
                         noConnectCluster(reconciliation.namespace(), reconciliation.name())));
             }
             return Future.join(connectorFutures);
@@ -310,54 +350,65 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
      *
      * @return A future, failed if any of the connectors' statuses could not be updated.
      */
-    private Future<Void> reconcileConnectors(Reconciliation reconciliation, KafkaConnect connect, boolean scaledToZero) {
+    private Future<Void> reconcileConnectors(Reconciliation reconciliation, KafkaConnect connect, boolean scaledToZero,
+                                             AtomicReference<KafkaConnect> reconciledConnect, AtomicReference<List<KafkaConnector>> reconciledConnectors) {
         String connectName = connect.getMetadata().getName();
         String namespace = connect.getMetadata().getNamespace();
 
-        if (scaledToZero)   {
-            return VertxUtil.toFuture(connectorOperator.listAsync(namespace, new LabelSelectorBuilder().addToMatchLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName).build()))
-                .compose(connectors -> Future.join(
-                    connectors.stream().map(connector -> Annotations.isReconciliationPausedWithAnnotation(connector)
-                            ? maybeUpdateConnectorStatus(reconciliation, connector, null, null)
-                            : maybeUpdateConnectorStatus(reconciliation, connector, null, zeroReplicas(namespace, connectName)))
-                        .collect(Collectors.toList())
-                )).mapEmpty();
-        } else {
-            String host = KafkaConnectResources.qualifiedServiceName(connectName, namespace);
-            KafkaConnectApi apiClient = connectClientProvider.apply(vertx);
+        // The connectors are listed and the Gatekeeper entry phase is run here rather than at the very start of the
+        // reconciliation because the connectors which the plugins receive are only listed at this point. Mutating
+        // plugins can modify the KafkaConnect and its connectors; the mutated resources are used for the connector
+        // reconciliation but are never persisted. Validating plugins can reject the reconciliation by completing the
+        // returned stage exceptionally.
+        return VertxUtil.toFuture(connectorOperator.listAsync(namespace, new LabelSelectorBuilder().addToMatchLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName).build()))
+                .compose(initialConnectors -> GatekeeperKafkaConnectHooks.entry(connect, initialConnectors))
+                .compose(gatekept -> {
+                    KafkaConnect gatekeptConnect = gatekept.kafkaConnect();
+                    List<KafkaConnector> desiredConnectors = gatekept.kafkaConnectors();
 
-            return Future.join(
-                    Future.fromCompletionStage(apiClient.list(reconciliation, host, port)),
-                    VertxUtil.toFuture(connectorOperator.listAsync(namespace, new LabelSelectorBuilder().addToMatchLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName).build()))
-            ).compose(cf -> {
-                List<String> runningConnectorNames = cf.resultAt(0);
-                List<KafkaConnector> desiredConnectors = cf.resultAt(1);
+                    // Capture the (possibly mutated) resources so that the Gatekeeper KafkaConnect exit phase can be
+                    // passed the same resources which were reconciled here.
+                    reconciledConnect.set(gatekeptConnect);
+                    reconciledConnectors.set(desiredConnectors);
 
-                Set<String> deleteConnectorNames = new HashSet<>(runningConnectorNames);
-                deleteConnectorNames.removeAll(desiredConnectors.stream().map(c -> c.getMetadata().getName()).collect(Collectors.toSet()));
+                    String gatekeptConnectName = gatekeptConnect.getMetadata().getName();
 
-                Future<Void> deletionFuture = deleteConnectors(reconciliation, host, apiClient, deleteConnectorNames);
-                Future<Void> createOrUpdateFuture = createOrUpdateConnectors(reconciliation, host, apiClient, desiredConnectors);
+                    if (scaledToZero)   {
+                        return Future.join(
+                            desiredConnectors.stream().map(connector -> Annotations.isReconciliationPausedWithAnnotation(connector)
+                                    ? maybeUpdateConnectorStatus(reconciliation, gatekeptConnect, connector, null, null)
+                                    : maybeUpdateConnectorStatus(reconciliation, gatekeptConnect, connector, null, zeroReplicas(namespace, gatekeptConnectName)))
+                                .collect(Collectors.toList())
+                        ).mapEmpty();
+                    } else {
+                        String host = KafkaConnectResources.qualifiedServiceName(gatekeptConnectName, namespace);
+                        KafkaConnectApi apiClient = connectClientProvider.apply(vertx);
 
-                return Future.join(deletionFuture, createOrUpdateFuture).map((Void) null);
-            }).recover(error -> {
-                if (Util.maybeUnwrapCompletionException(error) instanceof ConnectTimeoutException) {
-                    Promise<Void> connectorStatuses = Promise.promise();
-                    LOGGER.warnCr(reconciliation, "Failed to connect to the REST API => trying to update the connector status");
+                        return Future.fromCompletionStage(apiClient.list(reconciliation, host, port))
+                            .compose(runningConnectorNames -> {
+                                Set<String> deleteConnectorNames = new HashSet<>(runningConnectorNames);
+                                deleteConnectorNames.removeAll(desiredConnectors.stream().map(c -> c.getMetadata().getName()).collect(Collectors.toSet()));
 
-                    VertxUtil.toFuture(connectorOperator.listAsync(namespace, new LabelSelectorBuilder().addToMatchLabels(Labels.STRIMZI_CLUSTER_LABEL, connectName).build()))
-                            .compose(connectors -> Future.join(
-                                    connectors.stream().map(connector -> maybeUpdateConnectorStatus(reconciliation, connector, null, error))
-                                            .collect(Collectors.toList())
-                            ))
-                            .onComplete(ignore -> connectorStatuses.fail(error));
+                                Future<Void> deletionFuture = deleteConnectors(reconciliation, host, apiClient, deleteConnectorNames);
+                                Future<Void> createOrUpdateFuture = createOrUpdateConnectors(reconciliation, gatekeptConnect, host, apiClient, desiredConnectors);
 
-                    return connectorStatuses.future();
-                } else {
-                    return Future.failedFuture(error);
-                }
-            });
-        }
+                                return Future.join(deletionFuture, createOrUpdateFuture).map((Void) null);
+                            }).recover(error -> {
+                                if (Util.maybeUnwrapCompletionException(error) instanceof ConnectTimeoutException) {
+                                    Promise<Void> connectorStatuses = Promise.promise();
+                                    LOGGER.warnCr(reconciliation, "Failed to connect to the REST API => trying to update the connector status");
+
+                                    Future.join(desiredConnectors.stream().map(connector -> maybeUpdateConnectorStatus(reconciliation, gatekeptConnect, connector, null, error))
+                                                    .collect(Collectors.toList()))
+                                            .onComplete(ignore -> connectorStatuses.fail(error));
+
+                                    return connectorStatuses.future();
+                                } else {
+                                    return Future.failedFuture(error);
+                                }
+                            });
+                    }
+                });
     }
 
     private Future<Void> deleteConnectors(Reconciliation reconciliation, String host, KafkaConnectApi apiClient, Set<String> connectorsForDeletion) {
@@ -368,15 +419,23 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
                 .mapEmpty();
     }
 
-    private Future<Void> createOrUpdateConnectors(Reconciliation reconciliation, String host, KafkaConnectApi apiClient, List<KafkaConnector> desiredConnectors) {
+    private Future<Void> createOrUpdateConnectors(Reconciliation reconciliation, KafkaConnect connect, String host, KafkaConnectApi apiClient, List<KafkaConnector> desiredConnectors) {
         LOGGER.debugCr(reconciliation, "{} cluster: required connectors: {}", kind(), desiredConnectors);
         return Future.join(desiredConnectors.stream()
-                    .map(connector -> reconcileConnectorAndHandleResult(reconciliation, host, apiClient, true, connector.getMetadata().getName(), connector))
+                    .map(connector -> reconcileConnectorAndHandleResult(reconciliation, connect, host, apiClient, true, connector.getMetadata().getName(), connector))
                     .collect(Collectors.toList()))
                 .mapEmpty();
     }
 
     /*test*/ Future<Void> reconcileConnectorAndHandleResult(Reconciliation reconciliation, String host, KafkaConnectApi apiClient,
+                                             boolean useResources, String connectorName, KafkaConnector connector) {
+        // This overload is used by tests. In the running operator the connector reconciliation always goes through the
+        // overload which also carries the KafkaConnect resource so that it can be passed to the Gatekeeper KafkaConnector
+        // exit phase. Tests do not register any Gatekeeper plugins, so a null KafkaConnect never reaches a plugin.
+        return reconcileConnectorAndHandleResult(reconciliation, null, host, apiClient, useResources, connectorName, connector);
+    }
+
+    private Future<Void> reconcileConnectorAndHandleResult(Reconciliation reconciliation, KafkaConnect connect, String host, KafkaConnectApi apiClient,
                                              boolean useResources, String connectorName, KafkaConnector connector) {
         Promise<Void> reconciliationResult = Promise.promise();
 
@@ -384,7 +443,7 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
         Timer.Sample connectorsReconciliationsTimerSample = Timer.start(metrics().metricsProvider().meterRegistry());
 
         if (connector != null && Annotations.isReconciliationPausedWithAnnotation(connector)) {
-            return maybeUpdateConnectorStatus(reconciliation, connector, null, null).compose(
+            return maybeUpdateConnectorStatus(reconciliation, connect, connector, null, null).compose(
                 i -> {
                     connectorsReconciliationsTimerSample.stop(metrics().connectorsReconciliationsTimer(reconciliation.namespace()));
                     metrics().connectorsSuccessfulReconciliationsCounter(reconciliation.namespace()).increment();
@@ -410,7 +469,7 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
                         // We suppress the error to not fail Connect reconciliation just because of a failing connector
                         reconciliationResult.complete();
                     } else {
-                        maybeUpdateConnectorStatus(reconciliation, connector, result.result(), result.cause())
+                        maybeUpdateConnectorStatus(reconciliation, connect, connector, result.result(), result.cause())
                                 .onComplete(statusResult -> {
                                     connectorsReconciliationsTimerSample.stop(metrics().connectorsReconciliationsTimer(reconciliation.namespace()));
 
@@ -503,7 +562,7 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
                                         LOGGER.infoCr(reconciliation, "{} {} in namespace {} was {}, but Connect cluster {} has 0 replicas", connectorKind, connectorName, namespace, action, connectName);
 
                                         return withLock(reconciliation, LOCK_TIMEOUT_MS,
-                                                () -> maybeUpdateConnectorStatus(reconciliation, resource, null, zeroReplicas(namespace, connectName))
+                                                () -> maybeUpdateConnectorStatus(reconciliation, connect, resource, null, zeroReplicas(namespace, connectName))
                                                         .compose(reconcileResult -> {
                                                             LOGGER.infoCr(reconciliation, "reconciled");
                                                             return Future.succeededFuture();
@@ -535,7 +594,7 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
         }
     }
 
-    private Future<Void> maybeUpdateConnectorStatus(Reconciliation reconciliation, KafkaConnector connector, ConnectorStatusAndConditions connectorStatus, Throwable error) {
+    private Future<Void> maybeUpdateConnectorStatus(Reconciliation reconciliation, KafkaConnect connect, KafkaConnector connector, ConnectorStatusAndConditions connectorStatus, Throwable error) {
         KafkaConnectorStatus status = new KafkaConnectorStatus();
         if (error != null) {
             LOGGER.warnCr(reconciliation, "Error reconciling connector {}", connector.getMetadata().getName(), error);
@@ -577,8 +636,16 @@ public class KafkaConnectAssemblyOperator extends AbstractConnectOperator<Kubern
         }
         status.addConditions(conditions);
 
-        return maybeUpdateStatusCommon(connectorOperator, connector, reconciliation, status,
-            (connector1, status1) -> new KafkaConnectorBuilder(connector1).withStatus(status1).build());
+        // The Gatekeeper KafkaConnector exit phase runs for every connector and can mutate its computed status before it
+        // is persisted. If the exit plugins fail, the failure is logged and the status computed before the exit phase is
+        // used so that it can still be persisted.
+        return GatekeeperKafkaConnectHooks.connectorExit(connect, connector, status)
+                .recover(error1 -> {
+                    LOGGER.errorCr(reconciliation, "Gatekeeper KafkaConnector exit plugins for {} failed", connector.getMetadata().getName(), error1);
+                    return Future.succeededFuture(status);
+                })
+                .compose(gatekeptStatus -> maybeUpdateStatusCommon(connectorOperator, connector, reconciliation, gatekeptStatus,
+                    (connector1, status1) -> new KafkaConnectorBuilder(connector1).withStatus(status1).build()));
     }
 
     // Methods for working with connector restarts

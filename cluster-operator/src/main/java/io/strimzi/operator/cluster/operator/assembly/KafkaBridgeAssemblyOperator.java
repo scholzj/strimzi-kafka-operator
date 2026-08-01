@@ -18,6 +18,7 @@ import io.strimzi.api.kafka.model.common.authentication.KafkaClientAuthenticatio
 import io.strimzi.certs.CertIssuer;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.gatekeeper.ClusterOperatorGatekeeperPluginInvoker;
 import io.strimzi.operator.cluster.model.KafkaBridgeCluster;
 import io.strimzi.operator.cluster.model.SharedEnvironmentProvider;
 import io.strimzi.operator.cluster.operator.VertxUtil;
@@ -30,6 +31,9 @@ import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationException;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaBridgeDeletionContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaBridgeEntryContextImpl;
+import io.strimzi.operator.common.gatekeeper.impl.GatekeeperKafkaBridgeExitContextImpl;
 import io.strimzi.operator.common.model.PasswordGenerator;
 import io.strimzi.operator.common.model.StatusUtils;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
@@ -80,6 +84,20 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
 
     @Override
     protected Future<KafkaBridgeStatus> createOrUpdate(Reconciliation reconciliation, KafkaBridge assemblyResource) {
+        // The Gatekeeper plugins are invoked at the boundaries of the reconciliation. The entry phase runs before the
+        // reconciliation and can mutate the KafkaBridge or reject the reconciliation; its mutations are used only within
+        // this reconciliation and are never persisted. The exit phase runs afterwards and can mutate the computed status
+        // before it is persisted. Deletions are handled separately in the delete(...) method.
+        return GatekeeperReconciliation.createOrUpdate(
+                reconciliation,
+                assemblyResource,
+                KafkaBridgeStatus::new,
+                gatekept -> ClusterOperatorGatekeeperPluginInvoker.kafkaBridgeEntry(new GatekeeperKafkaBridgeEntryContextImpl(), gatekept),
+                gatekept -> reconcileKafkaBridge(reconciliation, gatekept),
+                (original, status) -> ClusterOperatorGatekeeperPluginInvoker.kafkaBridgeExit(new GatekeeperKafkaBridgeExitContextImpl(), original, status));
+    }
+
+    private Future<KafkaBridgeStatus> reconcileKafkaBridge(Reconciliation reconciliation, KafkaBridge assemblyResource) {
         KafkaBridgeStatus kafkaBridgeStatus = new KafkaBridgeStatus();
 
         String namespace = reconciliation.namespace();
@@ -185,7 +203,10 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
      */
     @Override
     protected Future<Boolean> delete(Reconciliation reconciliation) {
-        return super.delete(reconciliation)
+        // There is no resource to mutate on a deletion, so the Gatekeeper plugins' deletion hooks are invoked instead of
+        // the entry and exit phases. They run before the deletion and can react to it or reject it.
+        return VertxUtil.toFuture(ClusterOperatorGatekeeperPluginInvoker.kafkaBridgeDeletion(new GatekeeperKafkaBridgeDeletionContextImpl(), reconciliation.namespace(), reconciliation.name()))
+                    .compose(i -> super.delete(reconciliation))
                     .compose(i -> ReconcilerUtils.withIgnoreRbacError(reconciliation, VertxUtil.toFuture(clusterRoleBindingOperations.reconcile(reconciliation, KafkaBridgeResources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null)), null))
                     .map(Boolean.FALSE); // Return FALSE since other resources are still deleted by garbage collection
     }

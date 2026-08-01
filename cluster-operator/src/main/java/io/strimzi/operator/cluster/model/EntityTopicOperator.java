@@ -92,6 +92,8 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
     private boolean cruiseControlEnabled;
     private boolean rackAwarenessEnabled;
     private String featureGatesEnvVarValue;
+    private List<String> gatekeeperCustomPlugins;
+    private List<String> gatekeeperDefaultPlugins;
 
     private String watchedNamespace;
     /* test */ Long reconciliationIntervalMs;
@@ -160,6 +162,8 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
             result.cruiseControlEnabled = kafkaAssembly.getSpec().getCruiseControl() != null;
             result.rackAwarenessEnabled = result.cruiseControlEnabled && kafkaAssembly.getSpec().getKafka().getRack() != null;
             result.featureGatesEnvVarValue = config.featureGates().toEnvironmentVariable();
+            result.gatekeeperCustomPlugins = config.getGatekeeperCustomPlugins();
+            result.gatekeeperDefaultPlugins = config.getGatekeeperDefaultPlugins();
 
             return result;
         } else {
@@ -207,6 +211,9 @@ public class EntityTopicOperator extends AbstractModel implements SupportsLoggin
         if (featureGatesEnvVarValue != null && !featureGatesEnvVarValue.isEmpty()) {
             varList.add(ContainerUtils.createEnvVar(ClusterOperatorConfig.FEATURE_GATES.key(), featureGatesEnvVarValue));
         }
+
+        // Pass the Gatekeeper plugins configured on the Cluster Operator through to the Topic Operator
+        EntityOperator.maybeAddGatekeeperPluginEnvVars(varList, gatekeeperCustomPlugins, gatekeeperDefaultPlugins);
 
         // Add environment variables required for Cruise Control integration
         if (cruiseControlEnabled) {

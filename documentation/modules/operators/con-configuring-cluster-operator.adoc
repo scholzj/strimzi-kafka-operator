@@ -93,6 +93,23 @@ env:
     value: "^key1.*"
 ----
 
+`STRIMZI_GATEKEEPER_CUSTOM_PLUGINS`:: Optional, default is empty.
+A comma-separated, ordered list of the canonical class names of the custom Gatekeeper plugins to enable.
+Custom plugins are user-provided or third-party plugins and are disabled by default.
+The plugins configured here are used by the Cluster Operator and are also passed through to the User Operator and Topic Operator, each of which enables the plugins that apply to the resources it manages.
++
+[source,yaml,options="nowrap"]
+----
+env:
+  - name: STRIMZI_GATEKEEPER_CUSTOM_PLUGINS
+    value: "com.example.MyPlugin,com.example.AnotherPlugin"
+----
+
+`STRIMZI_GATEKEEPER_DEFAULT_PLUGINS`:: Optional, default is empty.
+A comma-separated, ordered list of the canonical class names of the default Gatekeeper plugins to enable.
+Setting this environment variable replaces the hardcoded list of default plugins.
+As with the custom plugins, the default plugins are used by the Cluster Operator and are passed through to the User Operator and Topic Operator.
+
 `STRIMZI_CUSTOM_<COMPONENT_NAME>_LABELS`:: Optional.
 One or more custom labels to apply to all the pods created by the custom resource of the component.
 The Cluster Operator labels the pods when the custom resource is created or is next reconciled.
