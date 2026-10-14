@@ -100,6 +100,10 @@
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-model-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
             <artifactId>openshift-model</artifactId>
         </dependency>
         <dependency>
