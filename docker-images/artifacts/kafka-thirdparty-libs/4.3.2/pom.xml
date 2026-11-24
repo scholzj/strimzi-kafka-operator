@@ -29,6 +29,7 @@
         <opentelemetry.instrumentation.version>1.32.0-alpha</opentelemetry.instrumentation.version>
         <grpc-netty-shaded.version>1.79.0</grpc-netty-shaded.version>
         <log4j.version>2.25.5</log4j.version>
+        <strimzi-metaauthorizer.version>0.1.0-SNAPSHOT</strimzi-metaauthorizer.version>
     </properties>
 
     <dependencies>
@@ -380,6 +381,12 @@
             <groupId>io.prometheus</groupId>
             <artifactId>prometheus-metrics-exporter-httpserver</artifactId>
             <version>${prometheus.version}</version>
+        </dependency>
+        <!-- Strimzi Metaauthorizer -->
+        <dependency>
+            <groupId>io.strimzi</groupId>
+            <artifactId>metaauthorizer</artifactId>
+            <version>${strimzi-metaauthorizer.version}</version>
         </dependency>
         <!-- Kafka Quotas Plugin -->
         <dependency>

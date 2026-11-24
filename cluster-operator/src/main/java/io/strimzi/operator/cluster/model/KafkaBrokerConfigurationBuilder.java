@@ -62,6 +62,8 @@ import java.util.stream.Collectors;
 public class KafkaBrokerConfigurationBuilder {
     private final static String CONTROL_PLANE_LISTENER_NAME = "CONTROLPLANE-" + KafkaCluster.CONTROLPLANE_PORT;
     private final static String REPLICATION_LISTENER_NAME = "REPLICATION-" + KafkaCluster.REPLICATION_PORT;
+    private final static String METAAUTHORIZER_CLASS_NAME = "io.strimzi.kafka.metaauthorizer.MetaAuthorizer";
+    private final static String METAAUTHORIZER_PREFIX = "strimzi.metaauthorizer.";
     // the secrets file template: <namespace>/<secret_name>:<secret_key>
     private static final String PLACEHOLDER_SECRET_TEMPLATE_KUBE_CONFIG_PROVIDER = "${strimzisecrets:%s/%s:%s}";
 
@@ -629,45 +631,36 @@ public class KafkaBrokerConfigurationBuilder {
     }
 
     /**
-     * Configures authorization for the Kafka cluster.
+     * Configures authorization for the Kafka cluster. The Strimzi Metaauthorizer is configured as the Kafka authorizer.
+     * It authorizes the internal components (Kafka nodes, Cluster Operator, Topic and User Operators, Kafka Exporter,
+     * and Cruise Control) on the internal control plane and replication listeners using hardcoded rules, and delegates
+     * all other authorization decisions to the authorizer configured by the user in the Kafka CR.
      *
-     * @param clusterName   The name of the cluster (used to configure the replication super-users)
-     * @param authorization The authorization configuration from the Kafka CR
+     * @param clusterName           The name of the cluster (used to configure the internal users)
+     * @param authorization         The authorization configuration from the Kafka CR
+     * @param cruiseControlTopics   The names of the topics used by Cruise Control (null when Cruise Control is not
+     *                              deployed or when the Metaauthorizer defaults should be used)
      *
      * @return  Returns the builder instance
      */
-    public KafkaBrokerConfigurationBuilder withAuthorization(String clusterName, KafkaAuthorization authorization)  {
+    public KafkaBrokerConfigurationBuilder withAuthorization(String clusterName, KafkaAuthorization authorization, List<String> cruiseControlTopics)  {
         if (authorization != null) {
-            List<String> superUsers = new ArrayList<>();
+            printSectionHeader("Authorization");
+            writer.println("authorizer.class.name=" + METAAUTHORIZER_CLASS_NAME);
+            writer.println(METAAUTHORIZER_PREFIX + "authorizer.class.name=" + delegateAuthorizerClass(authorization));
+            writer.println(METAAUTHORIZER_PREFIX + "listeners=" + CONTROL_PLANE_LISTENER_NAME + "," + REPLICATION_LISTENER_NAME);
+            configureMetaauthorizerUsers(clusterName);
 
-            if (securityContext.authentication() instanceof MtlsAuthenticationConfiguration) {
-                // Superusers for mTLS authentication => they represent the internal components
-                superUsers.add(String.format("User:CN=%s,O=io.strimzi", KafkaResources.kafkaComponentName(clusterName)));
-                superUsers.add(String.format("User:CN=%s,O=io.strimzi", "cluster-operator"));
-
-                if (deployedComponents.topicOperator()) {
-                    superUsers.add(String.format("User:CN=%s-%s,O=io.strimzi", clusterName, "entity-topic-operator"));
-                }
-
-                if (deployedComponents.userOperator()) {
-                    superUsers.add(String.format("User:CN=%s-%s,O=io.strimzi", clusterName, "entity-user-operator"));
-                }
-
-                if (deployedComponents.kafkaExporter()) {
-                    superUsers.add(String.format("User:CN=%s,O=io.strimzi", KafkaExporterResources.componentName(clusterName)));
-                }
-
-                if (deployedComponents.cruiseControl()) {
-                    superUsers.add(String.format("User:CN=%s,O=io.strimzi", CruiseControlResources.componentName(clusterName)));
-                }
-            } else if (securityContext.authentication() instanceof ServiceAccountAuthenticationConfiguration) {
-                // Superusers for SA authentication => they represent the internal components
-                serviceAccountPrincipals(reconciliation.namespace(), clusterName, deployedComponents).forEach(principal -> superUsers.add("User:" + principal));
+            if (deployedComponents.cruiseControl() && cruiseControlTopics != null && !cruiseControlTopics.isEmpty()) {
+                writer.println(METAAUTHORIZER_PREFIX + "cruisecontrol.topics=" + String.join(",", cruiseControlTopics));
             }
 
-            printSectionHeader("Authorization");
-            configureAuthorization(superUsers, authorization);
-            writer.println("super.users=" + String.join(";", superUsers));
+            // Only the user-configured super-users. The internal components are handled by the Metaauthorizer.
+            List<String> superUsers = userConfiguredSuperUsers(authorization);
+            if (!superUsers.isEmpty()) {
+                writer.println("super.users=" + String.join(";", superUsers));
+            }
+
             writer.println();
         }
 
@@ -675,46 +668,96 @@ public class KafkaBrokerConfigurationBuilder {
     }
 
     /**
-     * Configures authorization for the Kafka brokers. This method is used only internally.
+     * Configures the principals of the internal components in the Metaauthorizer. Only the components which are
+     * deployed are configured. When neither mTLS nor Service Account authentication is used on the internal
+     * listeners, no internal users are configured and all authorization decisions are delegated.
      *
-     * @param superUsers        Super-users list who have all the rights on the cluster
+     * @param clusterName   The name of the cluster
+     */
+    private void configureMetaauthorizerUsers(String clusterName) {
+        String kafka;
+        String clusterOperator;
+        String topicOperator;
+        String userOperator;
+        String kafkaExporter;
+        String cruiseControl;
+
+        if (securityContext.authentication() instanceof MtlsAuthenticationConfiguration) {
+            kafka = String.format("User:CN=%s,O=io.strimzi", KafkaResources.kafkaComponentName(clusterName));
+            clusterOperator = "User:CN=cluster-operator,O=io.strimzi";
+            topicOperator = String.format("User:CN=%s-%s,O=io.strimzi", clusterName, "entity-topic-operator");
+            userOperator = String.format("User:CN=%s-%s,O=io.strimzi", clusterName, "entity-user-operator");
+            kafkaExporter = String.format("User:CN=%s,O=io.strimzi", KafkaExporterResources.componentName(clusterName));
+            cruiseControl = String.format("User:CN=%s,O=io.strimzi", CruiseControlResources.componentName(clusterName));
+        } else if (securityContext.authentication() instanceof ServiceAccountAuthenticationConfiguration) {
+            String namespace = reconciliation.namespace();
+            kafka = "User:" + serviceAccountPrincipal(namespace, KafkaResources.kafkaComponentName(clusterName));
+            clusterOperator = "User:" + serviceAccountPrincipal(namespace, KafkaResources.clusterOperatorServiceAccount(clusterName));
+            // The Topic and User Operators share the Entity Operator Service Account => The Metaauthorizer uses the
+            // union of their rules
+            topicOperator = "User:" + serviceAccountPrincipal(namespace, KafkaResources.entityOperatorDeploymentName(clusterName));
+            userOperator = topicOperator;
+            kafkaExporter = "User:" + serviceAccountPrincipal(namespace, KafkaExporterResources.serviceAccountName(clusterName));
+            cruiseControl = "User:" + serviceAccountPrincipal(namespace, CruiseControlResources.serviceAccountName(clusterName));
+        } else {
+            return;
+        }
+
+        writer.println(METAAUTHORIZER_PREFIX + "kafka.user=" + kafka);
+        writer.println(METAAUTHORIZER_PREFIX + "clusteroperator.user=" + clusterOperator);
+
+        if (deployedComponents.topicOperator()) {
+            writer.println(METAAUTHORIZER_PREFIX + "topicoperator.user=" + topicOperator);
+        }
+
+        if (deployedComponents.userOperator()) {
+            writer.println(METAAUTHORIZER_PREFIX + "useroperator.user=" + userOperator);
+        }
+
+        if (deployedComponents.kafkaExporter()) {
+            writer.println(METAAUTHORIZER_PREFIX + "kafkaexporter.user=" + kafkaExporter);
+        }
+
+        if (deployedComponents.cruiseControl()) {
+            writer.println(METAAUTHORIZER_PREFIX + "cruisecontrol.user=" + cruiseControl);
+        }
+    }
+
+    /**
+     * Returns the class name of the user-configured authorizer to which the Metaauthorizer delegates
+     *
      * @param authorization     The authorization configuration from the Kafka CR
+     *
+     * @return  The class name of the authorizer
      */
-    private void configureAuthorization(List<String> superUsers, KafkaAuthorization authorization) {
+    private static String delegateAuthorizerClass(KafkaAuthorization authorization) {
+        if (authorization instanceof KafkaAuthorizationCustom customAuthz) {
+            return customAuthz.getAuthorizerClass();
+        } else {
+            return KafkaAuthorizationSimple.KRAFT_AUTHORIZER_CLASS_NAME;
+        }
+    }
+
+    /**
+     * Returns the super-users configured by the user in the Kafka CR
+     *
+     * @param authorization     The authorization configuration from the Kafka CR
+     *
+     * @return  List with the user-configured super-users
+     */
+    private static List<String> userConfiguredSuperUsers(KafkaAuthorization authorization) {
+        List<String> superUsers = null;
+
         if (authorization instanceof KafkaAuthorizationSimple simpleAuthz) {
-            configureSimpleAuthorization(simpleAuthz, superUsers);
+            superUsers = simpleAuthz.getSuperUsers();
         } else if (authorization instanceof KafkaAuthorizationCustom customAuthz) {
-            configureCustomAuthorization(customAuthz, superUsers);
+            superUsers = customAuthz.getSuperUsers();
         }
-    }
 
-    /**
-     * Configures Simple authorization
-     *
-     * @param authorization     Simple authorization configuration
-     * @param superUsers        Super-users list who have all the rights on the cluster
-     */
-    private void configureSimpleAuthorization(KafkaAuthorizationSimple authorization, List<String> superUsers) {
-        writer.println("authorizer.class.name=" + KafkaAuthorizationSimple.KRAFT_AUTHORIZER_CLASS_NAME);
-
-        // User configured super-users
-        if (authorization.getSuperUsers() != null && !authorization.getSuperUsers().isEmpty()) {
-            superUsers.addAll(authorization.getSuperUsers().stream().map(e -> String.format("User:%s", e)).toList());
-        }
-    }
-
-    /**
-     * Configures custom authorization
-     *
-     * @param authorization     Custom authorization configuration
-     * @param superUsers        Super-users list who have all the rights on the cluster
-     */
-    private void configureCustomAuthorization(KafkaAuthorizationCustom authorization, List<String> superUsers) {
-        writer.println("authorizer.class.name=" + authorization.getAuthorizerClass());
-
-        // User configured super-users
-        if (authorization.getSuperUsers() != null && !authorization.getSuperUsers().isEmpty()) {
-            superUsers.addAll(authorization.getSuperUsers().stream().map(e -> String.format("User:%s", e)).toList());
+        if (superUsers == null) {
+            return List.of();
+        } else {
+            return superUsers.stream().map(e -> String.format("User:%s", e)).toList();
         }
     }
 

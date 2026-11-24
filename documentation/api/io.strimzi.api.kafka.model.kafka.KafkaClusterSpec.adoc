@@ -67,6 +67,7 @@ Properties with the following prefixes cannot be set:
 * `security.`
 * `servers,node.id`
 * `ssl.`
+* `strimzi.metaauthorizer.`
 * `super.user`
 
 NOTE: Strimzi supports only KRaft-based Kafka deployments. As a result, ZooKeeper-related configuration options are not supported.

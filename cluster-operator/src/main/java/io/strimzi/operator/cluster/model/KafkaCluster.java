@@ -97,6 +97,7 @@ import io.strimzi.operator.common.ca.Ca;
 import io.strimzi.operator.common.model.InvalidResourceException;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.StatusUtils;
+import io.strimzi.operator.common.model.cruisecontrol.CruiseControlConfigurationParameters;
 import io.strimzi.plugin.security.profiles.PodSecurityProviderContext;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -214,6 +215,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     private String clusterId;
     private JmxModel jmx;
     private CruiseControlMetricsReporter ccMetricsReporter;
+    private List<String> cruiseControlTopics;
     private MetricsModel metrics;
     private LoggingModel logging;
     private QuotasPlugin quotas;
@@ -356,6 +358,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
         result.configuration = configuration;
 
         result.ccMetricsReporter = CruiseControlMetricsReporter.fromCrd(kafka, configuration, numberOfBrokers);
+        result.cruiseControlTopics = cruiseControlTopics(kafka, result.ccMetricsReporter);
 
         // Configure listeners
         if (kafkaClusterSpec.getListeners() == null || kafkaClusterSpec.getListeners().isEmpty()) {
@@ -1857,6 +1860,30 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
     }
 
     /**
+     * Collects the names of the topics used by Cruise Control. These are used to configure the authorization rules of
+     * the Cruise Control user in the Strimzi Metaauthorizer.
+     *
+     * @param kafka                 The Kafka custom resource
+     * @param ccMetricsReporter     The Cruise Control Metrics Reporter configuration (null if Cruise Control is not
+     *                              enabled)
+     *
+     * @return  List with the Cruise Control topic names or null if Cruise Control is not enabled
+     */
+    private static List<String> cruiseControlTopics(Kafka kafka, CruiseControlMetricsReporter ccMetricsReporter) {
+        if (ccMetricsReporter == null || kafka.getSpec().getCruiseControl() == null) {
+            return null;
+        }
+
+        Map<String, Object> ccConfig = kafka.getSpec().getCruiseControl().getConfig() != null ? kafka.getSpec().getCruiseControl().getConfig() : Map.of();
+
+        return List.of(
+                ccMetricsReporter.topicName(),
+                String.valueOf(ccConfig.getOrDefault(CruiseControlConfigurationParameters.PARTITION_METRIC_TOPIC_NAME.getValue(), CruiseControlConfigurationParameters.DEFAULT_PARTITION_METRIC_TOPIC_NAME)),
+                String.valueOf(ccConfig.getOrDefault(CruiseControlConfigurationParameters.BROKER_METRIC_TOPIC_NAME.getValue(), CruiseControlConfigurationParameters.DEFAULT_BROKER_METRIC_TOPIC_NAME))
+        );
+    }
+
+    /**
      * Internal method used to generate a Kafka configuration for given broker node.
      *
      * @param node                  Node reference with Node ID and pod name
@@ -1880,7 +1907,7 @@ public class KafkaCluster extends AbstractModel implements SupportsMetrics, Supp
                         listenerId -> advertisedHostnames.get(node.nodeId()).get(listenerId),
                         listenerId -> advertisedPorts.get(node.nodeId()).get(listenerId)
                 )
-                .withAuthorization(cluster, authorization)
+                .withAuthorization(cluster, authorization, cruiseControlTopics)
                 .withCruiseControl(cluster, ccMetricsReporter, node.broker())
                 .withTieredStorage(cluster, tieredStorage)
                 .withQuotas(cluster, quotas)
