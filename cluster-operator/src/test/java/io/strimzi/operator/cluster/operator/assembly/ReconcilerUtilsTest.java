@@ -153,6 +153,7 @@ public class ReconcilerUtilsTest {
                 .thenReturn(CompletableFuture.completedFuture(clusterCaSecret));
         KafkaClusterSecurityContext securityContext = mock(KafkaClusterSecurityContext.class);
         when(securityContext.encryption()).thenReturn(new TlsEncryptionConfiguration());
+        when(securityContext.usesEncryption()).thenReturn(true);
         when(securityContext.authentication()).thenReturn(new NoneAuthenticationConfiguration());
 
         Identity identity = ReconcilerUtils.coIdentity(Reconciliation.DUMMY_RECONCILIATION, mockSecretOps, securityContext).toCompletableFuture().join();
@@ -189,6 +190,7 @@ public class ReconcilerUtilsTest {
                 .thenReturn(CompletableFuture.completedFuture(clusterCaSecret));
         KafkaClusterSecurityContext securityContext = mock(KafkaClusterSecurityContext.class);
         when(securityContext.encryption()).thenReturn(new TlsEncryptionConfiguration());
+        when(securityContext.usesEncryption()).thenReturn(true);
         when(securityContext.authentication()).thenReturn(AuthenticationConfiguration.fromCrd(NAMESPACE, CLUSTER_NAME, new ClusterSecurityAuthenticationBuilder().withType(ClusterSecurityAuthenticationType.SERVICE_ACCOUNT).build(), null));
 
         Identity identity = ReconcilerUtils.coIdentity(Reconciliation.DUMMY_RECONCILIATION, mockSecretOps, securityContext).toCompletableFuture().join();
